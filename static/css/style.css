@@ -471,6 +471,9 @@ table.t{width:100%;border-collapse:collapse}
 .mach-name{font-size:18px;font-weight:800;display:flex;align-items:center;gap:8px}
 .mach-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;align-items:start;align-content:start}
 .mach-grid .card{margin-top:0}
+/* 基本資訊卡（含 .mach-info）與右側 OS 卡等高：垂直撐到列底，開關機按鈕貼底，消除下方大片留白 */
+.mach-grid .card:has(> .mach-info){display:flex;flex-direction:column;align-self:stretch}
+.mach-grid .card:has(> .mach-info) .mach-power-actions{margin-top:auto;margin-bottom:0}
 .mach-pre{background:var(--bg-panel-2);border:1px solid var(--border-soft);border-radius:10px;padding:12px 14px;font-size:12px;line-height:1.65;white-space:pre-wrap;word-break:break-word;max-height:380px;overflow:auto;color:var(--text-dim)}
 .diag-report .mach-pre{max-height:640px;font-size:13px;line-height:1.7;color:var(--text-normal)}
 .diag-raw{margin-top:10px}
@@ -479,11 +482,13 @@ table.t{width:100%;border-collapse:collapse}
 .mach-info td:first-child{color:var(--text-faint);width:90px}
 .mach-power-actions{display:flex;align-items:center;gap:8px;margin-top:14px;flex-wrap:wrap}
 .sensor-kpis{display:flex;gap:10px}
-.sensor-kpi{flex:1;background:var(--bg-panel-2);border-radius:10px;padding:10px;text-align:center}
-.sensor-kpi b{display:block;font-size:22px;font-weight:800}
-.sensor-kpi span{font-size:10px;color:var(--text-faint);letter-spacing:.4px}
+.sensor-kpi{flex:1;background:var(--bg-panel-2);border-radius:10px;padding:8px 10px;text-align:center}
+.sensor-kpi b{display:block;font-size:15px;font-weight:800}
+.sensor-kpi span{font-size:9px;color:var(--text-faint);letter-spacing:.4px}
 .sensor-kpi.bad b{color:var(--red)}
 .sensor-kpi.warn b{color:var(--amber)}
+/* Sensor AI 診斷列（重用 .tel-ai 樣式，僅調整間距） */
+.sensor-ai{margin:12px 0 0}
 @media (max-width:900px){.mach-grid{grid-template-columns:1fr}}
 /* 系統管理：L10/L11 過濾分頁 */
 .lvl-tabs{display:flex;gap:6px;margin-left:10px}

@@ -1037,6 +1037,50 @@ def machine_sensors(name: str, refresh: int = 0):
     return {"machine": name, "sensors": None, "loading": True, "cached": False}
 
 
+@app.get("/api/machine/{name}/sensors/analyze")
+def machine_sensors_analyze(name: str):
+    """針對單機 BMC 感測器摘要（sdr）叫 Ollama 做『簡短』AI 診斷。
+    讀取已抓取到的感測器快取，把 critical/warning/ok 數量與異常條目給 LLM，回一段話。"""
+    if name not in machines:
+        raise HTTPException(404, f"機台不存在: {name}")
+    with _sensors_lock:
+        cached = _sensors_cache.get(name)
+    if not cached or cached.get("error"):
+        return {"ok": False, "error": "感測器尚未抓取完成，稍後再試"}
+    if not cached.get("critical") and not cached.get("warning"):
+        return {"ok": True, "analysis": "✅ 所有感測器皆正常（無 Critical / Warning）。", "summary": _sensor_summary(cached)}
+
+    summary = _sensor_summary(cached)
+    crit_lines = "；".join(cached.get("critical_entries") or [])[-600:]
+    warn_lines = "；".join(cached.get("warning_entries") or [])[-600:]
+    sys_prompt = (
+        "你是伺服器 BMC/IPMI 感測器的資深維運工程師。使用者會給你單台的感測器摘要。\n"
+        "請用繁體中文，回覆**非常簡短**的一段話（2~3 句內，勿超過 3 句），語氣平實：\n"
+        "1) 先一句：整體感測器狀態『正常』還是『有異常警訊』。\n"
+        "2) 若有異常，簡短點出最需注意的感測器（可提名字與數值）與可能方向（散熱/電源/溫度等）；若正常則不需列。\n"
+        "3) 不要列點、不要給指令、不要重複列出所有數值。"
+    )
+    user_prompt = f"以下為該機台 BMC 感測器摘要：\n{summary}\n異常關鍵行：{crit_lines}{('；'+warn_lines) if warn_lines else ''}\n請給簡短診斷："
+    payload = {
+        "model": OLLAMA_MODEL, "prompt": sys_prompt + "\n\n" + user_prompt + "\nAssistant:",
+        "stream": False, "think": False,
+        "options": {"temperature": 0.3, "num_predict": 320},
+    }
+    try:
+        import requests
+        r = requests.post(OLLAMA_URL + "/api/generate", json=payload, timeout=120)
+        txt = (r.json().get("response") or "").strip()
+        if not txt:
+            return {"ok": False, "error": "Ollama 未產生內容"}
+    except Exception as e:
+        return {"ok": False, "error": f"AI 診斷失敗: {e}"}
+    return {"ok": True, "summary": summary, "analysis": txt}
+
+
+def _sensor_summary(s):
+    return (f"共 {s.get('total',0)} 筆感測器：Critical {s.get('critical',0)}、"
+            f"Warning {s.get('warning',0)}、OK {s.get('ok',0)}、其他 {s.get('ns',0)}。")
+
 # ---- 專案分類 ----
 @app.post("/api/projects")
 def add_project(body: AddProject):

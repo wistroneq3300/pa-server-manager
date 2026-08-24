@@ -1208,7 +1208,9 @@ async function machineLoadSensors(name, refresh = false) {
     const st = d && d.sensors;
     // 只更新感測器卡片本體，不動整個頁面（sensor-body 只存在於 bmc_alive 的詳情頁）
     const body = $("sensor-body");
-    if (body) body.innerHTML = machineSensorsHtml(d, { bmc_alive: true });
+    if (body) body.innerHTML = machineSensorsHtml(d, { bmc_alive: true }, name);
+    // 感測器就緒後自動觸發一次 Sensor AI 診斷
+    if (d && !d.error && !d.loading && d.sensors && (d.sensors.total || d.sensors.ok)) sensorAnalyze(name);
     if (d.error) return;                         // 出錯就停（不再輪詢）
     if (d.loading) {
       // refreshing（回舊值）或尚無資料 → 排下一輪；無資料時更快
@@ -1217,7 +1219,7 @@ async function machineLoadSensors(name, refresh = false) {
   };
   poll();
 }
-function machineSensorsHtml(d, base) {
+function machineSensorsHtml(d, base, name) {
   if (!base.bmc_alive) return `<div class="empty">BMC 目前不可連</div>`;
   if (d && d.error) return `<div class="empty">${esc(d.error)}</div>`;
   if (!d || d.loading) {
@@ -1243,9 +1245,35 @@ function machineSensorsHtml(d, base) {
     <ul class="alerts" style="margin-top:10px">
       ${critRow || warnRow || `<li class="no-alert">✔ 無異常感測器</li>`}
     </ul>
+    <div class="tel-ai sensor-ai" id="sensor-ai">🤖 正在分析感測器狀況…</div>
     ${d.refreshing ? `<span class="hint">（快取已過期，背景重新抓取中…）</span>` : ""}
     ${sdrBox}`;
 }
+// Sensor AI 診斷（比照 Telemetry AI）：感測器就緒後自動分析一次，結果快取，重繪可還原。
+const sensorAiDone = new Set();
+const sensorAiResult = {};
+async function sensorAnalyze(name) {
+  const box = $("#sensor-ai");
+  if (!name || !box) return;
+  if (sensorAiDone.has(name)) {
+    if (sensorAiResult[name] != null) box.innerHTML = sensorAiResult[name];
+    return;
+  }
+  box.innerHTML = "🤖 正在分析感測器狀況…";
+  let d;
+  try {
+    d = await api(`/api/machine/${encodeURIComponent(name)}/sensors/analyze`);
+  } catch (e) {
+    box.innerHTML = "⚙️  Sensor AI 無法連線"; return;
+  }
+  if (d && d.ok !== undefined && !d.ok) { box.innerHTML = `⚙️  ${esc(d.error || "感測器未就緒")}`; return; }
+  if (!d || d.error) { box.innerHTML = "⚙️  Sensor AI 尚無資料"; return; }
+  sensorAiDone.add(name);
+  sensorAiResult[name] = `🤖 ${esc(d.analysis || d.summary || "")}`;
+  const cur = $("#sensor-ai");
+  if (cur) cur.innerHTML = sensorAiResult[name];
+}
+
 const machineDetailCache = {};
 async function machineLoadDetail(name, refresh = false) {
   try {
@@ -1437,7 +1465,7 @@ function pageMachine() {
   // 感測器：獨立 /sensors 端點，非同步載入（不阻塞主畫面）
   const sd = machineSensorsCache[name];
   if (base.bmc_alive && !sd) machineLoadSensors(name);
-  const sensorHtml = machineSensorsHtml(sd, base);
+  const sensorHtml = machineSensorsHtml(sd, base, name);
   // BMC 背景抓取進行中 → 數秒後自動重打 detail（不打 refresh，讀快取）更新
   if (d.bmc_loading) {
     setTimeout(() => {
