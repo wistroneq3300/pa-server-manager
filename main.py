@@ -1068,7 +1068,7 @@ def machine_sensors_analyze(name: str):
     }
     try:
         import requests
-        r = requests.post(OLLAMA_URL + "/api/generate", json=payload, timeout=120)
+        r = requests.post(OLLAMA_URL + "/api/generate", json=payload, timeout=45)
         txt = (r.json().get("response") or "").strip()
         if not txt:
             return {"ok": False, "error": "Ollama 未產生內容"}

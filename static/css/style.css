@@ -471,9 +471,9 @@ table.t{width:100%;border-collapse:collapse}
 .mach-name{font-size:18px;font-weight:800;display:flex;align-items:center;gap:8px}
 .mach-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;align-items:start;align-content:start}
 .mach-grid .card{margin-top:0}
-/* 基本資訊卡（含 .mach-info）與右側 OS 卡等高：垂直撐到列底，開關機按鈕貼底，消除下方大片留白 */
+/* 基本資訊卡：與右側 OS 卡等高（stretch）以消除列下方大片留白；開關機按鈕緊貼表格下方，不在電源與按鈕之間留空 */
 .mach-grid .card:has(> .mach-info){display:flex;flex-direction:column;align-self:stretch}
-.mach-grid .card:has(> .mach-info) .mach-power-actions{margin-top:auto;margin-bottom:0}
+.mach-grid .card:has(> .mach-info) .mach-power-actions{margin-top:14px;margin-bottom:0}
 .mach-pre{background:var(--bg-panel-2);border:1px solid var(--border-soft);border-radius:10px;padding:12px 14px;font-size:12px;line-height:1.65;white-space:pre-wrap;word-break:break-word;max-height:380px;overflow:auto;color:var(--text-dim)}
 .diag-report .mach-pre{max-height:640px;font-size:13px;line-height:1.7;color:var(--text-normal)}
 .diag-raw{margin-top:10px}
@@ -527,8 +527,8 @@ table.t{width:100%;border-collapse:collapse}
 .tel-arrow{font-size:11px;color:var(--text-faint)}
 .tel-label{font-size:12px;font-weight:700;letter-spacing:.5px;color:var(--text-faint)}
 .tel-block-body{padding:8px 12px;display:flex;flex-direction:column;flex:1 1 auto}
-/* 每張圖：標題(單行省略，固定在頂部) + 圖表(flex 填滿剩餘) 各自獨立；flex 讓各 block 攤滿同列高度，消除底部留空 */
-.tel-block .chart-box{display:flex;flex-direction:column;flex:1 1 180px;min-height:0;margin-bottom:10px}
+/* 每張圖：標題(單行省略，固定在頂部) + 圖表填滿剩餘；固定高度讓各圖一致不被同列撐大 */
+.tel-block .chart-box{display:flex;flex-direction:column;height:170px;margin-bottom:10px}
 .tel-block .chart-box:last-child{margin-bottom:0}
 .chart-title{flex:0 0 18px;height:18px;line-height:18px;
   font-size:11px;font-weight:700;color:var(--text-dim);letter-spacing:.3px;
