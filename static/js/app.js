@@ -1186,8 +1186,8 @@ async function machineRefresh() {
   if (!name) return;
   delete machineDetailCache[name];     // 強制重抓詳情 + OS/HW（refresh=1）
   await machineLoadDetail(name, true);
-  // 感測器不刪快取：仍保留舊值顯示（refreshing），後端 refresh=1 強制背景重抓，避免重新整理後整欄空白
-  if (_activeMachine === name) await machineLoadSensors(name, true);
+  // 感測器不強制重抓：TTL 內直接用快取，避免按重新整理後陷入長時間『背景抓取中』
+  if (_activeMachine === name) await machineLoadSensors(name, false);
   if (_activeMachine === name) setView("machine");
 }
 const machineSensorsCache = {};
@@ -1253,7 +1253,7 @@ function machineSensorsHtml(d, base, name) {
     <ul class="alerts" style="margin-top:10px">
       ${critRow || warnRow || nsRow || `<li class="no-alert">✔ 無異常感測器（無 Critical / Warning / No Reading）</li>`}
     </ul>
-    <div class="tel-ai sensor-ai" id="sensor-ai">🤖 正在分析感測器狀況…</div>
+    <div class="tel-ai sensor-ai" id="sensor-ai">${sensorAiResult[name] != null ? sensorAiResult[name] : "🤖 正在分析感測器狀況…"}</div>
     ${d.refreshing ? `<span class="hint">（快取已過期，背景重新抓取中…）</span>` : ""}
     ${sdrBox}`;
 }
@@ -1261,25 +1261,21 @@ function machineSensorsHtml(d, base, name) {
 const sensorAiDone = new Set();
 const sensorAiResult = {};
 async function sensorAnalyze(name) {
-  const box = $("#sensor-ai");
-  if (!name || !box) return;
-  if (sensorAiDone.has(name)) {
-    if (sensorAiResult[name] != null) box.innerHTML = sensorAiResult[name];
-    return;
-  }
-  box.innerHTML = "🤖 正在分析感測器狀況…";
+  if (!name) return;
+  const show = (html) => { const el = $("#sensor-ai"); if (el) el.innerHTML = html; };
+  if (sensorAiDone.has(name)) { if (sensorAiResult[name] != null) show(sensorAiResult[name]); return; }
+  show("🤖 正在分析感測器狀況…");
   let d;
   try {
     d = await api(`/api/machine/${encodeURIComponent(name)}/sensors/analyze`);
   } catch (e) {
-    box.innerHTML = "⚙️  Sensor AI 無法連線"; return;
+    sensorAiResult[name] = "⚙️   Sensor AI 無法連線"; show(sensorAiResult[name]); return;
   }
-  if (d && d.ok !== undefined && !d.ok) { box.innerHTML = `⚙️  ${esc(d.error || "感測器未就緒")}`; return; }
-  if (!d || d.error) { box.innerHTML = "⚙️  Sensor AI 尚無資料"; return; }
+  if (!d || d.error) { sensorAiResult[name] = "⚙️   Sensor AI 尚無資料"; show(sensorAiResult[name]); return; }
+  if (d.ok !== undefined && !d.ok) { sensorAiResult[name] = `⚙️   ${esc(d.error || "感測器未就緒")}`; show(sensorAiResult[name]); return; }
   sensorAiDone.add(name);
   sensorAiResult[name] = `🤖 ${esc(d.analysis || d.summary || "")}`;
-  const cur = $("#sensor-ai");
-  if (cur) cur.innerHTML = sensorAiResult[name];
+  show(sensorAiResult[name]);
 }
 
 const machineDetailCache = {};
