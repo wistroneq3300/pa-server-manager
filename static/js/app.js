@@ -456,18 +456,19 @@ function pageRack() {
     ${anyRack && members.length ? rackLayoutHtml(members, pinged) : (anyRack ? emptyRackCard() : "")}
     `;
 }
-// 機櫃頁面兩欄排版：左欄 = 切換式元件檢視(平面圖/卡片/清單)，右欄 = 拓樸連線圖（固定置右）
+// 機櫃頁面排版：只有「平面圖」檢視在右欄顯示拓樸連線圖；卡片/清單為全寬、不顯示拓樸。
 function rackLayoutHtml(members, pinged) {
-  let left;
-  if (devicesView === "list") left = devicesHtml(members, pinged);
-  else if (devicesView === "cards") left = devicesHtml(members, pinged);
-  else left = `<div class="rack-main-pad"><div class="rack-main-head">
-      <span class="rack-hero-sub">機櫃平面圖（＋放置）</span>${rackSubviewTabs()}</div>${rackmapHtml(members, pinged)}
+  if (devicesView === "plane") {
+    const left = `<div class="rack-main-pad"><div class="rack-main-head">
+        <span class="rack-hero-sub">機櫃平面圖（＋放置）</span>${rackSubviewTabs()}</div>${rackmapHtml(members, pinged)}
+      </div>`;
+    return `<div class="rack-layout plane">
+      <div class="rack-left">${left}</div>
+      <div class="rack-right">${rackTopoHtml(members)}</div>
     </div>`;
-  return `<div class="rack-layout">
-    <div class="rack-left">${left}</div>
-    <div class="rack-right">${rackTopoHtml(members)}</div>
-  </div>`;
+  }
+  // 卡片 / 清單：全寬顯示，無拓樸
+  return `<div class="rack-layout alone">${devicesHtml(members, pinged)}</div>`;
 }
 function emptyRackCard() {
   return `<div class="card" style="margin-top:18px"><div class="empty">目前沒有 L11（Rack）整櫃機台。<br>請在「新增系統」把層級選成 <b>L11 · Rack Level</b>，或「➕ 加入機櫃」把既有機台放進來。</div></div>`;
@@ -648,9 +649,9 @@ function rackTopoHtml(members) {
   const leaves = members.filter(m => topoGroupOf(m) === "leaf" && involvedNm.has(m.name)).slice().sort(byU);
   const hubs = members.filter(m => topoGroupOf(m) === "hub" && involvedNm.has(m.name));
 
-  const W = 620, H = Math.max(320, leaves.length * 46 + 40);
-  const LEFTX = 150, RIGHTX = W - 30;
-  const hubY = hubs.length ? Math.max(40, H / 2 - (hubs.length - 1) * 55 / 2) : 40;
+  const W = 780, H = Math.max(340, leaves.length * 44 + 50);
+  const LEFTX = 150, RIGHTX = W - 26;
+  const hubY = hubs.length ? Math.max(50, H / 2 - (hubs.length - 1) * 56 / 2) : 50;
 
   // ---- 節點（hub 左欄 / leaf 右欄）----
   let defs = "";

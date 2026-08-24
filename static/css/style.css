@@ -705,8 +705,9 @@ table.t{width:100%;border-collapse:collapse}
 .bfw-table{margin-top:8px}
 .bfw-tag{white-space:nowrap;color:var(--text-dim)}
 
-/* ===== 機櫃元件兩欄排版：左＝平面圖/卡片/清單 切換，右＝拓樸 ===== */
-.rack-layout{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:16px;margin-top:12px;align-items:start}
+/* ===== 機櫃元件排版：平面圖(左)＋拓樸(右)；卡片/清單全寬 ===== */
+.rack-layout{display:grid;grid-template-columns:1fr;gap:16px;margin-top:12px;align-items:start}
+.rack-layout.plane{grid-template-columns:minmax(0,1fr) minmax(0,1.25fr)}
 .rack-left{min-width:0}
 .rack-right{min-width:0;position:sticky;top:12px}
 .rack-main-pad{padding:4px 2px}
@@ -714,14 +715,14 @@ table.t{width:100%;border-collapse:collapse}
 .rack-subtabs{display:flex;gap:6px}
 .rack-subtabs .btn{white-space:nowrap}
 .rack-subtabs .btn.active{background:var(--w-green);border-color:var(--w-green);color:#fff}
-@media(max-width:1100px){.rack-layout{grid-template-columns:1fr}.rack-right{position:static}}
+@media(max-width:1250px){.rack-layout.plane{grid-template-columns:1fr}.rack-right{position:static}}
 
 /* ===== 機櫃拓樸 / 連線圖 ===== */
 .topo-card{background:var(--bg-panel);border:1px solid var(--border);border-radius:14px;padding:14px 16px;box-shadow:var(--shadow)}
 .topo-card-title{font-size:15px;font-weight:800;margin-bottom:10px}
 .topo-empty{font-size:12.5px;color:var(--text-faint);line-height:1.7;padding:8px 2px}
-.topo-svg-wrap{overflow:auto;max-height:70vh;border:1px solid var(--border);border-radius:10px;background:var(--bg-panel-2)}
-.topo-svg{display:block;min-width:600px}
+.topo-svg-wrap{overflow:auto;max-height:72vh;border:1px solid var(--border);border-radius:10px;background:var(--bg-panel-2)}
+.topo-svg{display:block;width:100%;height:auto;min-width:720px}
 .topo-node-box{stroke:var(--border);stroke-width:1}
 .topo-node-box.mgx-server{fill:#10261a;stroke:#22c55e}
 .topo-node-box.mgx-switch{fill:#1d1633;stroke:#7c5cff}
@@ -729,10 +730,10 @@ table.t{width:100%;border-collapse:collapse}
 .topo-node-box.mgx-cdu{fill:#0a211d;stroke:#14b8a6}
 .topo-node-box.mgx-storage{fill:#0b1d28;stroke:#0ea5e9}
 .topo-node-box.mgx-network{fill:#2a1608;stroke:#f97316}
-.topo-node-ico{font-size:13px}
-.topo-node-txt{fill:var(--text);font-size:10px;font-weight:700;transform:translateY(2px)}
+.topo-node-ico{font-size:15px}
+.topo-node-txt{fill:var(--text);font-size:11px;font-weight:700;transform:translateY(2px)}
 .topo-edge{pointer-events:none}
-.topo-edge-lbl{font-size:8px;font-weight:600;letter-spacing:.2px;background:var(--bg-panel-2)}
+.topo-edge-lbl{font-size:9px;font-weight:600;letter-spacing:.2px;background:var(--bg-panel-2)}
 .topo-svg-wrap .topo-legend i{display:inline-block;width:10px;height:3px;border-radius:2px;margin-right:4px}
 .topo-box{margin-top:10px}
 .topo-nodes{display:flex;flex-wrap:wrap;gap:10px}
