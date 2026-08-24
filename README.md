@@ -1,37 +1,54 @@
-# Wistron PA Server Manager（後端 + 前端正式版雛形）
+# Wistron PA Server Manager
 
-統一管理 GPU Server 的實際可運行版本（FastAPI 後端 + 前端）。
-支援「新增系統」：輸入 OS/BMC 連線資訊 → 後端 SSH 抓 hostname 當系統名稱。
+A web-based management console for **AI GPU servers**, unifying **L10 (System Level / single-node)** and **L11 (Rack Level / whole-rack)** machine monitoring and control in a single overview.
 
-## 快速啟動
+Built with **FastAPI** (Python) + **vanilla JS** frontend. Machines are discovered and managed over **SSH** / **IPMI (BMC)**, with historical telemetry persisted to **SQLite** — no agents required on the managed hosts.
+
+## Features
+- **Unified overview dashboard** — managed systems, online/offline status, projects, GPU server health at a glance.
+- **L10 System Level** — add & manage individual servers via OS SSH + optional BMC:
+  - SSH OS access (IP / user / password / port); hostname auto-discovered on add.
+  - BMC IP (auto-probed via the OS `ipmitool`) + BMC credentials.
+  - OS info, hardware inventory (CPU/DIMM/SSD/GPU/NIC), sensors, BMC power on/off from the UI.
+  - **Telemetry viewer** — historical metrics with charts and trend analysis.
+- **L11 Rack Level** — rack view with U-slot layout (bottom-up) for servers, switches, power shelves, PDUs, CDUs, storage; occupancy checks.
+- **Projects** — group machines by project (e.g. NCP/H100/Miramar), per-project status.
+- **BMC power badge** — live chassis power on/off with color coding.
+- **Terminal** — in-browser OS/BMC terminal (xterm.js).
+- **AI Copilot** — natural-language assistant wired to local Ollama (qwen3.8:27b).
+
+## Quick start
 ```bash
-cd /root/user/manager/pa_manager
-bash run.sh        # 啟動後瀏覽器開 http://localhost:8788/
+cd pa_manager
+bash run.sh
 ```
+Supports a **trial instance** (default port `8788`) and a **production instance** (port `6969`) sharing one codebase with **isolated data** via `PA_DATA_DIR`.
 
-## 功能
-- 白底為主 + 右上 🌓 切換 dark/light
-- 品牌：Wistron 深藍側欄 + 深藍/綠色（貼圖風格）
-- **系統管理**：＋新增系統 → 表單輸入
-  - OS IP / OS 帳號 / OS 密碼 / OS SSH port
-  - BMC IP（選填）/ BMC 帳號 / BMC 密碼（選填）
-  → 儲存時後端 `sshpass ssh ... hostname`，抓到 hostname 當系統名稱
-- 列出系統、查狀態、刪除系統
+## API overview
+| Method | Path | Description |
+|---|---|---|
+| POST | /api/machines | Add machine (SSH-validate, auto hostname) |
+| POST | /api/machines/probe-bmc | Probe BMC IP via ipmitool |
+| GET | /api/machines | List machines (passwords masked) |
+| DELETE | /api/machines/{name} | Remove machine |
+| GET | /api/machine/{name} | Machine detail |
+| GET | /api/machine/{name}/detail | OS info + hardware inventory |
+| GET | /api/machine/{name}/sensors | Sensor readings |
+| GET/POST | /api/machine/{name}/power | Read / control BMC power |
+| GET | /api/machine/{name}/telemetry | Telemetry history (SQLite) |
+| GET | /api/machine/{name}/telemetry/analyze | Telemetry trend analysis |
+| GET/POST | /api/machine/{name}/diagnose | Run diagnostics / AI diagnosis |
+| GET | /api/rack/ping | Rack-level ping sweep |
+| POST/GET/DELETE | /api/rack/passive, /api/links | Rack elements & links |
+| GET/POST/DELETE | /api/projects | Project management |
+| POST | /api/copilot | AI Copilot |
 
-## API
-- `POST /api/machines` ：新增（含 SSH 抓 hostname）
-- `GET  /api/machines` ：列出（回傳時密碼遮罩）
-- `DELETE /api/machines/{name}` ：刪除
+## Data & security notes
+- Inventory in `data.json`; telemetry in SQLite `telemetry.db`; isolated per instance by `PA_DATA_DIR`.
+- Credentials stored alongside machine data — encrypt at rest / use a secrets manager before wide rollout.
+- Authentication / RBAC not yet implemented — add before exposing to broader audience.
+- Production data auto-backed up daily (keep 14) via `backup_prod.sh` + cron.
 
-## 目前限制 / 待辦
-- **資料存記憶體**：重啟即清空。正式需接 DB（SQLite/Postgres）。
-- **密碼明文暫存於記憶體**：正式上線前必須加密存放或接秘密管理。
-- **SSH 只抓 hostname**；BMC 欄位已備好，尚未接開/關機等操作。
-- 尚未有登入認證 / 權限控管（部門多人使用前需補）。
-- 尚未接真實 nvidia-smi / 監控。
-
-## 本機測試
-`bash setup_test_ssh.sh`：在本機 127.0.0.1:2200 起測試 SSH server
-（帳號 pa_test / pa_test_pass），可用它在新增系統填：
-OS IP=127.0.0.1, OS 帳號=pa_test, OS 密碼=pa_test_pass, OS port=2200
-驗證整個「新增→SSH→抓 hostname」流程。
+## Git & releases
+- Update production: `sudo systemctl restart pa-manager` (loads shared codebase).
+- Roll back: `git log --oneline` → `git checkout <hash>` → restart. See `GIT_USAGE.md`.
