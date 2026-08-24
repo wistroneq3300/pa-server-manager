@@ -279,7 +279,7 @@ def ipmi_sensor_summary(m):
     crit_entries, warn_entries, entries = [], [], []
     for l in lines:
         st = status_token(l)
-        if st in ("cr", "critical", "nr"):
+        if st in ("cr", "critical"):
             crit += 1
             crit_entries.append(l)
         elif st in ("nc", "warn", "warning"):
@@ -287,7 +287,7 @@ def ipmi_sensor_summary(m):
             warn_entries.append(l)
         elif st in ("ok",):
             ok_n += 1
-        elif st in ("ns", "no", "reading"):
+        elif st in ("ns", "nr", "na", "no", "reading", "not_readable"):
             ns += 1
         entries.append(l)
     if not lines:
@@ -981,7 +981,7 @@ def machine_detail(name: str, refresh: int = 0):
 _sensors_cache = {}          # name -> data
 _sensors_time = {}           # name -> timestamp
 _sensors_pending = {}        # name -> 是否有抓取執行中（避免併發重複抓）
-_SENSORS_TTL = 180           # 秒內直接回傳快取（Cisco CIMC sdr 抓取可達 30s+，TTL 太短會讓前端永遠處於『過期重抓』而反覆整頁重繪）
+_SENSORS_TTL = 600           # 秒內直接回傳快取（感測器 sdr list 抓取慢且狀態變動不快，TTL 太短會讓前端頻繁出現『背景重抓中』）
 _sensors_lock = threading.Lock()
 
 def _fetch_sensors_async(name: str):
@@ -1048,7 +1048,11 @@ def machine_sensors_analyze(name: str):
     if not cached or cached.get("error"):
         return {"ok": False, "error": "感測器尚未抓取完成，稍後再試"}
     if not cached.get("critical") and not cached.get("warning"):
-        return {"ok": True, "analysis": "✅ 所有感測器皆正常（無 Critical / Warning）。", "summary": _sensor_summary(cached)}
+        if cached.get("ns"):
+            return {"ok": True,
+                    "analysis": f"✅ 主要感測器皆正常（無 Critical / Warning），但 {cached['ns']} 筆感測器 No Reading（ns）未回傳數值，建議留意是否有感測器/線路異常。",
+                    "summary": _sensor_summary(cached)}
+        return {"ok": True, "analysis": "✅ 所有感測器皆正常（無 Critical / Warning / No Reading）。", "summary": _sensor_summary(cached)}
 
     summary = _sensor_summary(cached)
     crit_lines = "；".join(cached.get("critical_entries") or [])[-600:]

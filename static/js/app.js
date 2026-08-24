@@ -1186,7 +1186,7 @@ async function machineRefresh() {
   if (!name) return;
   delete machineDetailCache[name];     // 強制重抓詳情 + OS/HW（refresh=1）
   await machineLoadDetail(name, true);
-  delete machineSensorsCache[name];    // 強制重抓感測器（refresh=1）
+  // 感測器不刪快取：仍保留舊值顯示（refreshing），後端 refresh=1 強制背景重抓，避免重新整理後整欄空白
   if (_activeMachine === name) await machineLoadSensors(name, true);
   if (_activeMachine === name) setView("machine");
 }
@@ -1208,7 +1208,13 @@ async function machineLoadSensors(name, refresh = false) {
     const st = d && d.sensors;
     // 只更新感測器卡片本體，不動整個頁面（sensor-body 只存在於 bmc_alive 的詳情頁）
     const body = $("sensor-body");
-    if (body) body.innerHTML = machineSensorsHtml(d, { bmc_alive: true }, name);
+    if (body) {
+      const oldScroll = body.querySelector(".sdr-scroll");
+      const keepTop = oldScroll ? oldScroll.scrollTop : 0;
+      body.innerHTML = machineSensorsHtml(d, { bmc_alive: true }, name);
+      const newScroll = body.querySelector(".sdr-scroll");
+      if (newScroll && keepTop) newScroll.scrollTop = keepTop; // 保留捲動位置，避免重繪跳回頂部
+    }
     // 感測器有資料（含背景刷新中）即自動觸發一次 Sensor AI 診斷
     if (d && !d.error && d.sensors && (d.sensors.total || d.sensors.ok)) sensorAnalyze(name);
     if (d.error) return;                         // 出錯就停（不再輪詢）
@@ -1229,6 +1235,7 @@ function machineSensorsHtml(d, base, name) {
   }
   const critRow = (s.critical_entries || []).map(l => `<li>🔴 ${esc(l)}</li>`).join("");
   const warnRow = (s.warning_entries || []).map(l => `<li>🟠 ${esc(l)}</li>`).join("");
+  const nsRow = (s.ns && s.ns > 0) ? `<li class="no-alert" style="color:var(--text-dim)">⚠️ ${s.ns} 筆感測器 No Reading（ns，未讀取到數值）</li>` : "";
   // 完整 SDR：放固定高度框內可往下拉，避免網頁過長
   const allRows = (s.entries || []).map(l => `<tr><td class="mono">${esc(l)}</td></tr>`).join("");
   const sdrBox = s.entries && s.entries.length
@@ -1241,10 +1248,10 @@ function machineSensorsHtml(d, base, name) {
     <div class="sensor-kpis">
       <div class="sensor-kpi ${s.critical>0?'bad':''}"><b>${s.critical||0}</b><span>Critical</span></div>
       <div class="sensor-kpi ${s.warning>0?'warn':''}"><b>${s.warning||0}</b><span>Warning</span></div>
-      <div class="sensor-kpi"><b>${s.ok||0}</b><span>OK</span></div>
+      <div class="sensor-kpi"><b>${s.ok||0}</b><span>${s.ns>0 ? `OK (+${s.ns||0} ns)` : "OK"}</span></div>
     </div>
     <ul class="alerts" style="margin-top:10px">
-      ${critRow || warnRow || `<li class="no-alert">✔ 無異常感測器</li>`}
+      ${critRow || warnRow || nsRow || `<li class="no-alert">✔ 無異常感測器（無 Critical / Warning / No Reading）</li>`}
     </ul>
     <div class="tel-ai sensor-ai" id="sensor-ai">🤖 正在分析感測器狀況…</div>
     ${d.refreshing ? `<span class="hint">（快取已過期，背景重新抓取中…）</span>` : ""}
