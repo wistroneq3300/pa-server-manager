@@ -1,0 +1,10 @@
+# 執行期資料（不進版本控制）
+telemetry.db
+data.json
+server.log
+server.pid
+backup/
+
+# Python 暫存
+__pycache__/
+*.pyc
