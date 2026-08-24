@@ -2,10 +2,10 @@
 /* Wistron PA Server Manager - frontend */
 const NAV_ITEMS = [
   { id: "dashboard", icon: "🏠", label: "首頁 / Dashboard", group: "總覽" },
-  { id: "projects",  icon: "🖘", label: "System manager", group: "管理" },
+  { id: "projects",  icon: "🖘", label: "System Manager", group: "管理" },
   { id: "rack",      icon: "🗄", label: "Rack Manager", group: "管理" },
 ];
-const TITLES = { dashboard: "首頁 / Dashboard", projects: "System manager", rack: "Rack Manager", machine: "單機詳情" };
+const TITLES = { dashboard: "首頁 / Dashboard", projects: "System Manager", rack: "Rack Manager", machine: "單機詳情" };
 const RENDERERS = { dashboard: pageDashboard, projects: pageProjects, rack: pageRack, machine: pageMachine };
 const state = { view: "dashboard" };
 const $ = (id) => document.getElementById(id);
@@ -190,6 +190,7 @@ function viewProject(pname) {
 }
 /* ============ Rack Manager (L11 整櫃監控/控制) ============ */
 const rackView = { mode: "list", project: "", pinged: null };
+let racksProjectDesc = "";
 function rackPowerState(name) {
   return rackSim[name] || (rackSim[name] = { on: true, led: "green" });
 }
@@ -215,19 +216,56 @@ async function rackPing(project) {
   if (btn) { btn.textContent = "📡 Ping Rack"; btn.disabled = false; }
   setView("rack");
 }
-async function rackPowerAll(project, on) {
+// 整櫃開/關機：彈出「廣播式多選」讓使用者勾選要同時控制哪些機台
+function rackPowerAllDialog(on) {
+  const project = rackView.project;
   const racks = machines.filter(m => m.level === "rack" && m.project === project);
   if (!racks.length) return alert("此專案沒有整櫃機台");
-  const okMsg = `正在${on ? "開機" : "關機"}${racks.length} 台整櫃機台…`;
+  const rows = racks.map(m => {
+    const info = mgxInfo(m);
+    const badge = m.os_ip || m.bmc_ip ? `<span class="mono" style="color:var(--text-dim)">${esc(m.os_ip || m.bmc_ip)}</span>` : `${info.icon} ${esc(info.label)}`;
+    return `<label class="bc-check" style="display:block;padding:7px 10px;border:1px solid var(--border);border-radius:8px;margin-bottom:6px;cursor:pointer">
+      <input type="checkbox" class="rcp-chk" value="${esc(m.name)}" checked>
+      <b>${esc(m.name)}</b> ${badge}
+    </label>`;
+  }).join("");
+  const mode = on ? "開機" : "關機";
+  showDialog(`⏻ ${mode}整櫃 — 選擇要同時 ${mode} 的機台`, `
+    <label style="display:block;font-size:12px;color:var(--text-faint);margin-bottom:10px">
+      勾選要一起「${mode}」的機台，會同時送出控制指令（不勾的機台會保持現狀）。
+    </label>
+    <div class="table-scroll" style="max-height:46vh;overflow:auto;margin-bottom:12px">${rows}</div>
+    <div style="display:flex;gap:8px">
+      <button class="btn small" onclick="racpSetAll(true)">☑ 全選</button>
+      <button class="btn small" onclick="racpSetAll(false)">☐ 全不選</button>
+      <span class="spacer"></span><span class="hint" id="rcp-sel-count">已選 ${racks.length} 台</span>
+    </div>`,
+    [
+      { txt: "取消", cls: "", fn: () => closeDialog() },
+      { txt: `確認 ${mode}`, cls: on ? "primary" : "danger", fn: () => {
+        const sel = [...document.querySelectorAll(".rcp-chk:checked")].map(x => x.value);
+        closeDialog();
+        if (!sel.length) { alert("請至少勾選一台機台。"); return; }
+        rackPowerAllNames(sel, on);
+      } },
+    ]);
+}
+function racpSetAll(v) {
+  document.querySelectorAll(".rcp-chk").forEach(c => c.checked = v);
+  const n = document.querySelectorAll(".rcp-chk:checked").length;
+  const el = $("rcp-sel-count"); if (el) el.textContent = `已選 ${n} 台`;
+}
+async function rackPowerAllNames(names, on) {
+  const okMsg = `正在${on ? "開機" : "關機"}${names.length} 台…`;
   const done = [];
-  for (const m of racks) {
+  for (const name of names) {
     try {
-      const r = await api(`/api/machine/${encodeURIComponent(m.name)}/power`, {
+      const r = await api(`/api/machine/${encodeURIComponent(name)}/power`, {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ on })
       });
-      done.push(`${m.name}: 錯誤 ${e.message}`);
+      done.push(`${name}: ${r.ok ? (on ? "已開機 🟢" : "已關機 ⚪") : "失敗：" + (r.info || "")}`);
     } catch (e) {
-      done.push(`${m.name}: 錯誤 ${e.message}`);
+      done.push(`${name}: 錯誤 ${e.message}`);
     }
   }
   setView("rack");
@@ -235,6 +273,21 @@ async function rackPowerAll(project, on) {
 }
 async function singlePower(name, on) {
   if (!confirm(`確定要「${on ? "開機" : "關機"}」${name} 嗎？`)) return;
+  await rackDoPower(name, on ? "poweron" : "poweroff");
+}
+async function auxCycle(name) {
+  if (!confirm(`確定要對「${name}」執行 AUX / AC cycle（${name} 完整斷電重上電）嗎？`)) return;
+  try {
+    const r = await api(`/api/machine/${encodeURIComponent(name)}/aux`, { method: "POST" });
+    setView("rack");
+    setTimeout(() => alert(`${name} ${r.ok ? "AUX/AC cycle 已送出 ⚡" : "操作失敗：" + (r.info||"")}`), 200);
+  } catch (e) {
+    alert("操作失敗：" + e.message);
+  }
+}
+async function rackDoPower(name, action) {
+  if (action === "aux") return auxCycle(name);
+  const on = action === "poweron";
   try {
     const r = await api(`/api/machine/${encodeURIComponent(name)}/power`, {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ on })
@@ -245,6 +298,54 @@ async function singlePower(name, on) {
   } catch (e) {
     alert("操作失敗：" + e.message);
   }
+}
+// 元件控制對話框：開機／關機／AUX cycle ＋ 自訂開關機指令設定
+function machControlDialog(name) {
+  const m = machines.find(x => x.name === name);
+  if (!m) return;
+  const info = mgxInfo(m);
+  const hasPower = m.os_ip || m.bmc_ip;
+  const varList = ["$BMC_IP", "$BMC_AC", "$BMC_PW", "$BMC_PORT", "$OS_IP"]
+    .map(v => `<code class="mono" style="padding:1px 5px;background:var(--bg-panel-2);border:1px solid var(--border);border-radius:4px">${v}</code>`).join(" ");
+  const defOn = `ipmitool -I lanplus -H $BMC_IP -U $BMC_AC -P $BMC_PW -C 17 chassis power on`;
+  const defOff = `ipmitool -I lanplus -H $BMC_IP -U $BMC_AC -P $BMC_PW -C 17 chassis power off`;
+  const defAux = `ipmitool -I lanplus -H $BMC_IP -U $BMC_AC -P $BMC_PW -C 17 chassis power cycle`;
+  showDialog(`⚙ 元件控制 — ${info.icon} ${esc(name)}`, `
+    <div class="rm-modal-body">
+      <p style="margin-bottom:12px;font-size:12px;color:var(--text-faint)">
+        選擇要對「<b>${esc(name)}</b>」進行的控制（${hasPower ? "此元件有連線資訊可控制" : "⚠️ 此元件沒有 BMC / OS 資訊" }）。
+      </p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px">
+        <button class="btn" ${hasPower?"":"disabled"} onclick="singlePower('${esc(name)}',true)">⏻ 開機</button>
+        <button class="btn btn-danger" ${hasPower?"":"disabled"} onclick="singlePower('${esc(name)}',false)">⏻ 關機</button>
+        <button class="btn" ${hasPower?"":"disabled"} onclick="auxCycle('${esc(name)}')">⚡ AUX / AC cycle</button>
+      </div>
+      <p style="font-size:11px;color:var(--text-faint)">點上方按鈕即直接執行（會先彈確認）。</p>
+
+      <hr style="border:none;border-top:1px solid var(--border);margin:14px 0">
+      <div style="font-size:13px;font-weight:700;margin-bottom:6px">自訂開關機 / AUX 指令</div>
+      <p style="font-size:11.5px;color:var(--text-faint);margin-bottom:8px">
+        不填＝用預設 ipmitool。填了就用你的指令（可含變數，執行時自動代入）<br>
+        可用變數：${varList}<br>
+        <span class="hint">例：某些 BMC 不吃 -C 17，把「-C 17」刪掉即可；Switch/CDU/PDU 可填 reboot/reset 指令。</span>
+      </p>
+      <label style="display:block;font-size:12px;color:var(--text-faint);margin-bottom:4px">開機指令（power on）</label>
+      <input class="input" id="ctl-on" style="width:100%;padding:8px;margin-bottom:10px;font-family:monospace" placeholder="${esc(defOn)}" value="${esc(m.power_on_cmd||"")}">
+      <label style="display:block;font-size:12px;color:var(--text-faint);margin-bottom:4px">關機指令（power off）</label>
+      <input class="input" id="ctl-off" style="width:100%;padding:8px;margin-bottom:10px;font-family:monospace" placeholder="${esc(defOff)}" value="${esc(m.power_off_cmd||"")}">
+      <label style="display:block;font-size:12px;color:var(--text-faint);margin-bottom:4px">AUX / AC cycle 指令</label>
+      <input class="input" id="ctl-aux" style="width:100%;padding:8px;font-family:monospace" placeholder="${esc(defAux)}" value="${esc(m.aux_cmd||"")}">
+    </div>`,
+    [
+      { txt: "關閉", cls: "", fn: () => closeDialog() },
+      { txt: "儲存指令", cls: "primary", fn: () => {
+        rackAssign(name, {
+          power_on_cmd: $("ctl-on").value.trim(),
+          power_off_cmd: $("ctl-off").value.trim(),
+          aux_cmd: $("ctl-aux").value.trim(),
+        }).then(() => { closeDialog(); setView("rack"); }).catch(e => alert("儲存失敗：" + e.message));
+      } },
+    ]);
 }
 // 整櫃 list 自選清單 ping 結果
 function rackPingNode(m) {
@@ -288,23 +389,45 @@ async function rackAssign(machine, patch) {
 function rackMoveDialog(name) {
   const m = machines.find(x => x.name === name);
   if (!m) return;
+  // quick jump：直接輸入目標 U（取代慢慢按）
+  quickJumpTo = "";
   const proj = m.project;
   const members = machines.filter(x => x.level === "rack" && x.project === proj);
-  const usedUs = new Set(members
-    .filter(x => x.name !== name && typeof x.rack_u === "number" && x.rack_u > 0)
-    .map(x => x.rack_u));
+  // 找出所有被「其他元件」占用的 U 範圍（含多 U 延伸），以及目前機台自身占用的範圍
+  const curSize = clampU(m.rack_size || 1);
+  const curU = (typeof m.rack_u === "number" && m.rack_u > 0) ? m.rack_u : 42;
+  const occupied = new Set();
+  members.forEach(x => {
+    if (x.name === name) return;
+    const xu = (typeof x.rack_u === "number" && x.rack_u > 0) ? x.rack_u : 42;
+    const xs = clampU(x.rack_size || 1);
+    for (let k = xu; k >= Math.max(xu - xs + 1, 1); k--) occupied.add(k);
+  });
   let opts = "";
   for (let u = 42; u >= 1; u--) {
-    opts += `<option value="${u}" ${(m.rack_u || 0) === u ? "selected" : ""} ${usedUs.has(u) ? "disabled" : ""}>U${u}${usedUs.has(u) ? "（已占用）" : ""}</option>`;
+    const take = (curU <= u && u <= curU + curSize - 1);
+    const blocked = occupied.has(u);
+    opts += `<option value="${u}" ${u === curU ? "selected" : ""} ${blocked ? "disabled" : ""} title="${blocked ? "被其他元件占用" : `U${u}`}">U${u}${blocked ? "（占用）" : ""}</option>`;
   }
   const typeBtns = Object.entries(MGX_TYPES)
     .map(([k, v]) => `<button class="btn small ${mgxTypeOf(m) === k ? "active" : ""}" onclick="rackMoveSetType('${esc(m.name)}','${k}')">${v.icon} ${esc(v.label)}</button>`)
     .join("");
+  const sizeOpts = [1,2,3,4,6,8,12,16,24,32,42]
+    .map(s => `<option value="${s}" ${s === curSize ? "selected" : ""}>${s}U</option>`).join("");
   showDialog("⇅ 移動 / 設定位置", `
     <div class="rm-modal-body">
-      <p style="margin-bottom:12px">機台：<b>${esc(m.name)}</b>（目前 U${m.rack_u || "—"}）</p>
+      <p style="margin-bottom:12px">機台：<b>${esc(m.name)}</b>（目前 ${curSize}U，起始 U${curU}）</p>
+      <label style="display:block;font-size:12px;color:var(--text-faint);margin-bottom:6px">快速跳到 U</label>
+      <div style="display:flex;gap:8px;margin-bottom:12px">
+        <input class="input" id="rm-move-jump" type="number" min="1" max="42" placeholder="輸入 1–42" style="flex:1;padding:8px" onkeydown="if(event.key==='Enter')rackMoveJump()">
+        <button class="btn" onclick="rackMoveJump()">跳</button>
+      </div>
       <label style="display:block;font-size:12px;color:var(--text-faint);margin-bottom:6px">選擇目標 U 槽（已占用顯示灰）</label>
       <select class="input" id="rm-move-u" style="width:100%;padding:8px">${opts}</select>
+      <div style="margin-top:12px">
+        <label style="display:block;font-size:12px;color:var(--text-faint);margin-bottom:6px">占用高度（U 數，支援 >1U 大元件）</label>
+        <select class="input" id="rm-move-size" style="width:100%;padding:8px">${sizeOpts}</select>
+      </div>
       <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap">${typeBtns}</div>
       <p style="font-size:11px;color:var(--text-faint);margin-top:10px">元件類型：<b id="rm-newtype">${esc(MGX_TYPES[mgxTypeOf(m)].label)}</b></p>
     </div>`,
@@ -312,11 +435,26 @@ function rackMoveDialog(name) {
       { txt: "取消", cls: "", fn: () => closeDialog() },
       { txt: "儲存位置", cls: "primary", fn: () => {
         const u = +$("rm-move-u").value;
-        const patch = { rack_u: u };
+        const sz = +$("rm-move-size").value || 1;
+        const patch = { rack_u: u, rack_size: sz };
         if (rackMoveTargetType) patch.mgx_type = rackMoveTargetType;
         rackAssign(m.name, patch).then(() => { closeDialog(); setView("rack"); });
       } },
     ]);
+}
+function clampU(s) { return (typeof s === "number" && s > 0 && s <= 42) ? Math.floor(s) : 1; }
+let quickJumpTo = "";
+function rackMoveJump() {
+  const el = $("rm-move-jump");
+  if (!el) return;
+  const v = parseInt(el.value, 10);
+  if (!v || v < 1 || v > 42) return alert("請輸入 1–42");
+  const sel = $("rm-move-u");
+  if (!sel) return;
+  const opt = [...sel.options].find(o => +o.value === v && !o.disabled);
+  if (!opt) { alert(`U${v} 已被其他元件占用`); return; }
+  sel.value = String(v);
+  el.value = "";
 }
 function rackMoveSetType(name, type) {
   const lbl = $("rm-newtype"); if (lbl) lbl.textContent = MGX_TYPES[type].label;
@@ -338,21 +476,37 @@ async function rackAddPassive() {
       <select class="input" id="rp-u" style="width:100%;padding:8px;margin-bottom:12px">
         ${Array.from({length:42},(_,i)=>42-i).map(u => `<option value="${u}">U${u}</option>`).join("")}
       </select>
-      <label style="display:block;font-size:12px;color:var(--text-faint);margin-bottom:6px">管理 IP（選填，可 ping 用）</label>
+      <label style="display:block;font-size:12px;color:var(--text-faint);margin-bottom:6px">占用高度（U 數）</label>
+      <select class="input" id="rp-size" style="width:100%;padding:8px;margin-bottom:12px">
+        ${[1,2,3,4,6,8,12,16,24,32,42].map(s => `<option value="${s}" ${s===1?"selected":""}>${s}U</option>`).join("")}
+      </select>
+      <label style="display:block;font-size:12px;color:var(--text-faint);margin-bottom:6px">管理 IP <span class="hint">（選填，可 ping 用）</span></label>
       <input class="input" id="rp-ip" style="width:100%;padding:8px" placeholder="留空則無 IP">
+      <p class="hint-msg" style="margin-top:8px" id="rp-ping-msg">有填管理 IP 時，會先 ping 確認主機在線才允許建立（IP 不通不會新增）。</p>
     </div>`,
     [
       { txt: "取消", cls: "", fn: () => closeDialog() },
       { txt: "建立並加入", cls: "primary", fn: () => {
         const name = $("rp-name").value.trim();
         if (!name) return alert("請填元件名稱");
-        api("/api/rack/passive", { method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name, mgx_type: $("rp-type").value, rack_u: +$("rp-u").value, manage_ip: $("rp-ip").value.trim(), project: proj }) })
-          .then(() => loadMachines())
-          .then(() => { closeDialog(); setView("rack"); })
-          .catch(e => alert("建立失敗：" + e.message));
+        rackCheckPingAdd($("rp-ip").value.trim(), () => {
+          api("/api/rack/passive", { method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name, mgx_type: $("rp-type").value, rack_u: +$("rp-u").value, rack_size: +$("rp-size").value || 1, manage_ip: $("rp-ip").value.trim(), project: proj }) })
+            .then(() => loadMachines())
+            .then(() => { closeDialog(); setView("rack"); })
+            .catch(e => alert("建立失敗：" + e.message));
+        });
       } },
     ]);
+}
+// 新增元件時：若填了管理 IP，先 ping，不通就擋下不新增
+function rackCheckPingAdd(ip, okCb) {
+  if (!ip) { okCb(); return; }            // 無 IP 不擋
+  const btnT = document.querySelector("#rm-dialog-foot .btn-primary, #rm-dialog-foot .primary");
+  if (btnT) { btnT.disabled = true; btnT.textContent = "⏳ 確認中…"; }
+  fetch(`/api/ping-ip?ip=${encodeURIComponent(ip)}`).then(r=>r.json())
+    .then(d => { const alive = !!d.alive; if (btnT){btnT.disabled=false;btnT.textContent="建立並加入";} if (!alive) { alert("⚠️ 無法 ping 到此管理 IP（" + ip + "），請確認主機在線後再新增。"); return; } okCb(); })
+    .catch(e => { if (btnT){btnT.disabled=false;btnT.textContent="建立並加入";} alert("Ping 檢查失敗：" + e.message); });
 }
 function rackAddDialog() {
   const proj = rackView.project;
@@ -418,6 +572,8 @@ function pageRack() {
   const proj = rackView.project;
   const members = racksAll.filter(m => m.project === proj);
   const pinged = rackView.pinged || [];
+  const pobj = projects.find(p => p.name === proj);
+  racksProjectDesc = pobj ? (pobj.desc || "") : "";
   const anyRack = racksAll.length > 0;
   if (!rackView._linksLoaded) {
     rackView._linksLoaded = true;
@@ -437,16 +593,19 @@ function pageRack() {
 
   return `
     <div class="rack-hero">
-      <div class="rack-hero-title">🗄 Rack Manager <span class="hint">（整合頁：機櫃平面圖 + 卡片 + 清單）</span></div>
-      <div class="rack-hero-sub">${esc(proj || "（未選專案）")} 專案 · ${members.length} 台 | MGX 元件：Server / Switch / Power Shelf / CDU</div>
+      <div class="rack-hero-left">
+        <div class="rack-hero-title">🗄 Rack Manager</div>
+        <div class="rack-hero-sub">${esc(proj || "（未選專案）")} 專案 · ${members.length} 台</div>
+        ${racksProjectDesc ? `<div class="rack-hero-desc">${esc(racksProjectDesc)}</div>` : ""}
+      </div>
       ${toolbar}
       ${anyRack ? `
       <button class="btn primary" id="rack-ping-btn" onclick="rackPing('${esc(rackView.project)}')">📡 Ping Rack</button>
       <button class="btn" onclick="rackAddDialog()">➕ 加入機櫃</button>
       <button class="btn" onclick="rackAddPassive()">➕ 新增元件</button>
-      <button class="btn" onclick="linkAddDialog()">➕ 新增連線</button>
-      <button class="btn" onclick="rackPowerAll('${esc(rackView.project)}',true)">⏻ 開機整櫃</button>
-      <button class="btn btn-danger" onclick="rackPowerAll('${esc(rackView.project)}',false)">⏻ 關機整櫃</button>
+      <button class="btn" onclick="linkAddDialog()">🗺 新增拓樸</button>
+      <button class="btn" onclick="rackPowerAllDialog()">⏻ 開機整櫃</button>
+      <button class="btn btn-danger" onclick="rackPowerAllDialog(false)">⏻ 關機整櫃</button>
       <button class="btn primary" onclick="rackBroadcastDialog('${esc(rackView.project)}')">📡 廣播終端</button>` : ""}
     </div>
     <div class="rack-status-legend">
@@ -474,45 +633,57 @@ function emptyRackCard() {
   return `<div class="card" style="margin-top:18px"><div class="empty">目前沒有 L11（Rack）整櫃機台。<br>請在「新增系統」把層級選成 <b>L11 · Rack Level</b>，或「➕ 加入機櫃」把既有機台放進來。</div></div>`;
 }
 function rackmapHtml(members, pinged) {
+  // 依「起始 U（rack_u=上方第一個 U）」放置；rack_size 代表占用幾個 U
   const rackU = {};
   members.forEach(m => {
     const u = (typeof m.rack_u === "number" && m.rack_u > 0) ? m.rack_u : 42;
     rackU[u] = m;
   });
   let rows = "";
-  for (let u = 42; u >= 1; u--) {
+  let u = 42;
+  while (u >= 1) {
     const m = rackU[u];
     if (!m) {
       rows += `<div class="rm-row rm-empty"><span class="rm-u mono">U${u}</span><div class="rm-empty-space" onclick="rackEmptyClick(${u})" title="點擊放置機台">＋</div></div>`;
+      u--;
       continue;
     }
+    const size = (typeof m.rack_size === "number" && m.rack_size > 0 && m.rack_size <= 42) ? m.rack_size : 1;
     const n = pinged.find(x => x.name === m.name);
     const up = n ? n.os_alive : null;
     const info = mgxInfo(m);
     const cls = up === true ? "green" : up === false ? "red" : "none";
     const isPassive = !!m.passive;
     const click = isPassive ? `rackMoveDialog('${esc(m.name)}')` : `openMachine('${esc(m.name)}')`;
-    const powerBtns = isPassive ? "" : `
-          <button class="btn small" title="開機" onclick="singlePower('${esc(m.name)}',true)">⏻</button>
-          <button class="btn small btn-danger" title="關機" onclick="singlePower('${esc(m.name)}',false)">⏻</button>`;
+    const ctrlBtn = `<button class="btn small" title="開機/關機/AUX cycle 與設定指令" onclick="machControlDialog('${esc(m.name)}')">⚙</button>`;
     const nm = `${info.icon} ${esc(m.name)}${isPassive ? ' <span class="badge badge-rack" style="font-size:9px;padding:1px 6px">無BMC</span>' : ''}`;
+    const uRange = size > 1 ? `U${u}–${u - size + 1}` : `U${u}`;
     rows += `
-    <div class="rm-row" data-u="${u}">
-      <span class="rm-u mono">U${u}</span>
-      <div class="rm-cell ${cls} ${info.cls}" onclick="${click}">
-        <span class="rm-lamp">${up === true ? "🟢" : up === false ? "🔴" : "⨪"}</span>
-        <span class="rm-name">${nm}</span>
-        <span class="rm-ip mono">${esc(m.os_ip || m.bmc_ip || "")}</span>
-        <span class="rm-actions" onclick="event.stopPropagation()">
-          ${powerBtns}
-          <button class="btn small" title="換位/類型" onclick="rackMoveDialog('${esc(m.name)}')">⇅</button>
-        </span>
+    <div class="rm-row ${size > 1 ? "rm-multi" : ""}" data-u="${u}" style="--size:${size}">
+      <span class="rm-u mono">${uRange}</span>
+      <div class="rm-cell ${cls} ${info.cls}" onclick="${click}" style="${size > 1 ? `min-height:calc(var(--rack-row-h) * ${size})` : ""}">
+        <div class="rm-cell-inner">
+          <span class="rm-lamp">${up === true ? "🟢" : up === false ? "🔴" : "⨪"}</span>
+          <span class="rm-name">${nm}</span>
+          <span class="rm-ip mono">${esc(m.bmc_ip || m.os_ip || "")}</span>
+          <span class="rm-u-tag mono" >${uRange}</span>
+          <span class="rm-actions" onclick="event.stopPropagation()">
+            ${ctrlBtn}
+            <button class="btn small" title="換位/類型" onclick="rackMoveDialog('${esc(m.name)}')">⇅</button>
+            <button class="btn small" title="詳情" onclick="openMachine('${esc(m.name)}')">ℹ</button>
+          </span>
+        </div>
       </div>
     </div>`;
+    // 多 U 元件：底下占用列只顯示 U 標籤與延伸背景
+    for (let k = u - 1; k >= Math.max(u - size + 1, 1); k--) {
+      rows += `<div class="rm-row rm-span"><span class="rm-u mono">U${k}</span><div class="rm-span-fill"></div></div>`;
+    }
+    u -= size;
   }
   return `
   <div class="rm-rack">
-    <div class="rm-head"><span></span><span>${esc(rackView.project)} — 42U 機櫃（＋放置）</span></div>
+    <div class="rm-head"><span></span><span>${esc(rackView.project)} — 42U 標準機櫃</span></div>
     ${rows}
   </div>`;
 }
@@ -524,13 +695,20 @@ function rackEmptyClick(u) {
   if (!candidates.length) { alert("沒有未放置的機台。請先「➕ 加入機櫃」新增，或把機台移入此專案。"); return; }
   const opts = candidates.map(m => `<option value="${esc(m.name)}">${esc(m.name)} (${esc(m.os_ip)})</option>`).join("");
   showDialog(`放置到 U${u}`, `
-    <label style="display:block;font-size:12px;color:var(--text-faint);margin-bottom:6px">選擇要放到 U${u} 的機台</label>
-    <select class="input" id="rm-empty-m" style="width:100%;padding:8px">${opts}</select>`,
+    <div class="rm-modal-body">
+      <label style="display:block;font-size:12px;color:var(--text-faint);margin-bottom:6px">選擇要放到 U${u} 的機台</label>
+      <select class="input" id="rm-empty-m" style="width:100%;padding:8px;margin-bottom:12px">${opts}</select>
+      <label style="display:block;font-size:12px;color:var(--text-faint);margin-bottom:6px">占用高度（U 數）</label>
+      <select class="input" id="rm-empty-size" style="width:100%;padding:8px">
+        ${[1,2,3,4,6,8,12].map(s => `<option value="${s}" ${s===1?"selected":""}>${s}U</option>`).join("")}
+      </select>
+    </div>`,
     [
       { txt: "取消", cls: "", fn: () => closeDialog() },
       { txt: "放置", cls: "primary", fn: () => {
         const nm = $("rm-empty-m").value;
-        rackAssign(nm, { project: proj, level: "rack", rack_u: u }).then(() => { closeDialog(); setView("rack"); }).catch(e => alert("失敗：" + e.message));
+        const sz = +$("rm-empty-size").value || 1;
+        rackAssign(nm, { project: proj, level: "rack", rack_u: u, rack_size: sz }).then(() => { closeDialog(); setView("rack"); }).catch(e => alert("失敗：" + e.message));
       } },
     ]);
 }
@@ -541,7 +719,6 @@ function devicesSetView(v) { devicesView = v; setView("rack"); }
 function rackSubviewTabs() {
   const defs = [
     ["plane", "🗄 平面圖"],
-    ["cards", "▦ 卡片"],
     ["list", "▰ 清單"],
   ];
   return `<div class="rack-subtabs" role="tablist">` + defs.map(([k, lbl]) =>
@@ -550,59 +727,43 @@ function rackSubviewTabs() {
 }
 
 function devicesHtml(members, pinged) {
-  const cardsView = devicesView === "cards";
-  // 清單/卡片都依 U 由大到小（U42→U1）排列
+  // (卡片檢視已移除，保留 list 為目前唯一「清單」呈現)
+  // 依 U 由大到小（U42→U1）排列
   const byU = (a, b) => ((b.rack_u || 0) - (a.rack_u || 0));
   members = members.slice().sort(byU);
-  let body;
-  if (cardsView) {
-    body = `<div class="rack-grid">` + members.map(m => {
+  const lamp = v => v === true ? `<span class="ping-lamp on">🟢</span>` : v === false ? `<span class="ping-lamp off">🔴</span>` : `<span class="ping-lamp none">⨪</span>`;
+  const body = `<div class="card"><div class="table-scroll"><table class="t rack-ping-table">
+    <thead><tr><th>U</th><th>Node</th><th>類型</th><th>OS IP</th><th>BMC IP</th><th>狀態</th><th>操作</th></tr></thead>
+    <tbody>` + members.map(m => {
       const n = pinged.find(x => x.name === m.name);
-      const up = n ? n.os_alive : null;
+      const isServerLike = (mgxTypeOf(m) !== "switch" && mgxTypeOf(m) !== "pdu" && mgxTypeOf(m) !== "powershelf" && mgxTypeOf(m) !== "cdu");
+      // 其他零件（switch/pdu/powershelf/cdu）只顯示 OS 狀態；server/storage/network 顯示 OS+BMC
+      const osUp = n ? n.os_alive : null;
+      const bmcUp = n ? n.bmc_alive : null;
       const info = mgxInfo(m);
-      const isPassive = !!m.passive;
-      const powerBtns = isPassive ? "" : `
-          <button class="btn small" onclick="singlePower('${esc(m.name)}',true)">⏻ 開機</button>
-          <button class="btn small btn-danger" onclick="singlePower('${esc(m.name)}',false)">⏻ 關機</button>`;
-      return `
-      <div class="rack-card ${info.cls}-card" ${isPassive ? `onclick="rackMoveDialog('${esc(m.name)}')" style="cursor:pointer"` : ""}>
-        <div class="rack-card-top">
-          <span class="rack-name">${info.icon} ${esc(m.name)}${isPassive ? ' <span class="badge badge-rack" style="font-size:9px;padding:1px 6px">無BMC</span>' : ''}</span>
-          <span class="rstatus ${up === true ? "green" : up === false ? "red" : "amber"}">${up === true ? "🟢 上線" : up === false ? "🔴 離線" : "⨪ 未知"}</span>
-        </div>
-        <div class="rack-mgx"><span class="mgx-dot ${info.cls}"></span> ${esc(info.label)} · U${m.rack_u || "—"}</div>
-        <div class="rack-proj">專案 ${esc(m.project || "—")} · OS ${esc(m.os_ip || "—")}<br>BMC ${esc(m.bmc_ip || "無")}</div>
-        <div class="rack-actions" ${isPassive ? `onclick="event.stopPropagation()"` : ""}>
-          ${powerBtns}
-          <button class="btn small" onclick="rackMoveDialog('${esc(m.name)}')">⇅ 換位</button>
-          <button class="btn small" onclick="openMachine('${esc(m.name)}')">ℹ 詳情</button>
-        </div>
-      </div>`;
-    }).join("") + `</div>`;
-  } else {
-    body = `<div class="card"><div class="table-scroll"><table class="t rack-ping-table">
-      <thead><tr><th>U</th><th>Node</th><th>類型</th><th>OS IP</th><th>BMC IP</th><th>狀態</th><th>操作</th></tr></thead>
-      <tbody>` + members.map(m => {
-        const n = pinged.find(x => x.name === m.name);
-        const up = n ? n.os_alive : null;
-        const info = mgxInfo(m);
-        const lamp = v => v === true ? `<span class="ping-lamp on">🟢</span>` : v === false ? `<span class="ping-lamp off">🔴</span>` : `<span class="ping-lamp none">⨪</span>`;
-        return `<tr>
-          <td class="mono">U${m.rack_u || "—"}</td>
-          <td class="mono">${esc(m.name)}</td>
-          <td>${info.icon} ${esc(info.label)}</td>
-          <td class="mono">${esc(m.os_ip)}</td>
-          <td class="mono">${esc(m.bmc_ip || "—")}</td>
-          <td>${lamp(up)}</td>
-          <td style="white-space:nowrap">
-            <button class="btn small" onclick="singlePower('${esc(m.name)}',true)">⏻ 開</button>
-            <button class="btn small btn-danger" onclick="singlePower('${esc(m.name)}',false)">⏻ 關</button>
-            <button class="btn small" onclick="rackMoveDialog('${esc(m.name)}')">⇅</button>
-            <button class="btn small" onclick="openMachine('${esc(m.name)}')">ℹ</button>
-          </td>
-        </tr>`;
-      }).join("") + `</tbody></table></div></div>`;
-  }
+      const osCell = m.os_ip
+        ? `${lamp(osUp)} <span class="ping-ip mono">${esc(m.os_ip)}</span>`
+        : `<span style="color:var(--text-faint)">—</span>`;
+      const bmcCell = !isServerLike
+        ? `<span class="hint" style="color:var(--text-faint)">—</span>`
+        : (m.bmc_ip ? `${lamp(bmcUp)} <span class="ping-ip mono">${esc(m.bmc_ip)}</span>` : `<span style="color:var(--text-faint)">—</span>`);
+      const upLbl = isServerLike
+        ? (osUp === true || bmcUp === true ? `<span class="ping-lamp on">🟢</span>` : osUp === false || bmcUp === false ? `<span class="ping-lamp off">🔴</span>` : `<span class="ping-lamp none">⨪</span>`)
+        : lamp(osUp);
+      return `<tr>
+        <td class="mono">U${m.rack_u || "—"}${(m.rack_size||1)>1?`<span class="hint"> (+${(m.rack_size||1)-1})</span>`:""}</td>
+        <td class="mono"><a href="#" class="mach-link" onclick="event.preventDefault();openMachine('${esc(m.name)}')"><b>${esc(m.name)}</b></a></td>
+        <td>${info.icon} ${esc(info.label)}</td>
+        <td class="mono">${osCell}</td>
+        <td class="mono">${bmcCell}</td>
+        <td>${upLbl}</td>
+        <td style="white-space:nowrap">
+          <button class="btn small" title="開機/關機/AUX cycle 與設定指令" onclick="machControlDialog('${esc(m.name)}')">⚙</button>
+          <button class="btn small" onclick="rackMoveDialog('${esc(m.name)}')">⇅</button>
+          <button class="btn small" onclick="openMachine('${esc(m.name)}')">ℹ</button>
+        </td>
+      </tr>`;
+    }).join("") + `</tbody></table></div></div>`;
   return `<div class="rack-main-pad">
     <div class="rack-main-head"><span class="rack-hero-sub">機櫃元件（${members.length}）</span>${rackSubviewTabs()}</div>
     ${body}
@@ -639,8 +800,8 @@ function rackTopoHtml(members) {
 
   if (!rel.length) {
     return `<div class="topo-card">
-      <div class="topo-card-title">🔀 機櫃拓樸 / 連線圖 <span class="hint">（${rel.length} 條連線）</span></div>
-      <div class="topo-empty">此機櫃沒有連線資料。<br>點「➕ 新增連線」把 server↔switch/PDU/CDU 接起來，即會顯示實體連線圖。</div>
+      <div class="topo-card-title">🗺 機櫃拓樸</div>
+      <div class="topo-empty">此機櫃沒有連線資料。<br>點「新增拓樸」把 server↔switch/PDU/CDU 接起來，即會顯示實體連線圖。</div>
     </div>`;
   }
 
@@ -731,7 +892,7 @@ function rackTopoHtml(members) {
     `<span class="topo-legend lk-${k}"><i style="background:${LINK_COLOR[k]}"></i>${esc(v)}</span>`).join("");
 
   return `<div class="topo-card">
-    <div class="topo-card-title">🔀 機櫃拓樸 / 連線圖 <span class="hint">（${rel.length} 條連線 · 拖曳可看全圖）</span></div>
+    <div class="topo-card-title">🗺 機櫃拓樸</div>
     <div class="topo-svg-wrap">
       <svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" class="topo-svg">${defs}${edgeSvg}${nodesSvg}</svg>
     </div>
@@ -745,9 +906,9 @@ function linkAddDialog() {
   const members = machines.filter(x => x.project === proj && x.level === "rack");
   const opts = members.map(m => `<option value="${esc(m.name)}">${esc(m.name)} (${esc(mgxInfo(m).label)})</option>`).join("");
   if (!members.length) { alert("此專案沒有機櫃元件可連線"); return; }
-  showDialog("➕ 新增連線", `
+  showDialog("🗺 新增拓樸", `
     <div class="rm-modal-body">
-      <p style="margin-bottom:12px;font-size:12px;color:var(--text-faint)">把兩個機櫃元件連起來（node ↔ switch / PDU / CDU）。可填兩端「埠號/網卡」（例如 eth0 / 1/1），讓連接圖標出是哪條 NIC 接到哪個口；留空也行。</p>
+      <p style="margin-bottom:12px;font-size:12px;color:var(--text-faint)">把兩個機櫃元件連起來（node ↔ switch / PDU / CDU）。可填兩端「埠號/網卡」（例如 eth0 / 1/1），讓拓展樸畫出是哪條 NIC 接到哪個口；留空也行。</p>
       <div style="display:flex;gap:12px">
         <div style="flex:1">
           <label style="display:block;font-size:12px;color:var(--text-faint);margin-bottom:6px">元件 A</label>
@@ -767,7 +928,7 @@ function linkAddDialog() {
     </div>`,
     [
       { txt: "取消", cls: "", fn: () => closeDialog() },
-      { txt: "新增連線", cls: "primary", fn: () => {
+      { txt: "新增拓樸", cls: "primary", fn: () => {
         const a = $("lk-a").value, b = $("lk-b").value, t = $("lk-type").value;
         const ap = $("lk-a-port") ? $("lk-a-port").value.trim() : "";
         const bp = $("lk-b-port") ? $("lk-b-port").value.trim() : "";
@@ -863,7 +1024,7 @@ function pageProjects() {
   const nRack = machines.filter(m => m.level === "rack").length;
   return `
     <div class="section-h flex-wrap">
-      <span class="t" style="font-size:18px">System manager</span>
+      <span class="t" style="font-size:18px">System Manager</span>
       <span class="hint">專案分組 · 拖曳卡片調整順序</span>
       <div class="lvl-tabs">
         <button class="btn small lvl-tab ${projectLevelFilter.val==="all"?"active":""}" data-lvl="all" onclick="setProjectLevelFilter('all')">全部 ${machines.length}</button>
@@ -873,7 +1034,7 @@ function pageProjects() {
       <span class="spacer"></span>
       <button class="btn small" onclick="collapseAllProjects(true)" title="把各專案的機台清單全部收合（適合大量機台）">▲ 全部收合</button>
       <button class="btn small" onclick="collapseAllProjects(false)">▼ 全部展開</button>
-      <button class="btn" onclick="openProjectModal()">📁 管理專案</button>
+      <button class="btn" onclick="openProjectModal()">📁 修改</button>
       <button class="btn" onclick="refreshStatus()" id="refresh-btn">⟳ 重新掃描</button>
       <button class="btn primary" onclick="openAdd()">＋ 新增系統</button>
     </div>
@@ -1823,6 +1984,7 @@ async function saveMachine() {
     level: $("f-level").value == "rack" ? "rack" : "system",
   };
   if (!body.os_ip || !body.os_user || !body.os_pass) { showErr("請填 OS IP、SSH 帳號跟密碼"); return; }
+  if (body.bmc_ip && (!body.bmc_user || !body.bmc_pass)) { showErr("有填 BMC IP 時，BMC 帳號和密碼為必填（供開關機/遠端管理用）。若暫時無 BMC 可先留空 BMC IP。"); return; }
   if (!body.project) { showErr("請選擇專案（沒有案子的請先開專案分類）"); return; }
   const btn = $("save-btn");
   btn.disabled = true; btn.textContent = "連線中…"; showErr("");

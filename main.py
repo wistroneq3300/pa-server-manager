@@ -108,6 +108,7 @@ class AddRackPassive(BaseModel):
     rack_u: int = 1
     rack_side: str = "front"
     manage_ip: str = ""
+    rack_size: int = 1
 
 
 class AddMachine(BaseModel):
@@ -205,6 +206,57 @@ def _ipmi_cmd(m, sub_args):
     return ["ipmitool", "-I", "lanplus",
             "-H", m["bmc_ip"], "-U", m["bmc_user"], "-P", m["bmc_pass"],
             "-C", _IPMI_CIPHER] + sub_args
+
+
+# ---- 自訂開關機 / AUX(AC cycle) 指令（變數代入）----
+# 每台元件可存 power_on_cmd / power_off_cmd / aux_cmd；
+# 用變數 $BMC_IP $BMC_USER $BMC_PW $BMC_PORT $OS_IP 等代入。留空則用預設 ipmitool。
+_VAR_KEYS = {
+    "${BMC_IP}": lambda m: m.get("bmc_ip", ""),
+    "$BMC_IP": lambda m: m.get("bmc_ip", ""),
+    "${BMC_USER}": lambda m: m.get("bmc_user", ""),
+    "$BMC_USER": lambda m: m.get("bmc_user", ""),
+    "${BMC_AC}": lambda m: m.get("bmc_user", ""),
+    "$BMC_AC": lambda m: m.get("bmc_user", ""),
+    "${BMC_PW}": lambda m: m.get("bmc_pass", ""),
+    "$BMC_PW": lambda m: m.get("bmc_pass", ""),
+    "${BMC_PASS}": lambda m: m.get("bmc_pass", ""),
+    "$BMC_PASS": lambda m: m.get("bmc_pass", ""),
+    "${BMC_PORT}": lambda m: str(m.get("bmc_port", 623)),
+    "$BMC_PORT": lambda m: str(m.get("bmc_port", 623)),
+    "${OS_IP}": lambda m: m.get("os_ip", ""),
+    "$OS_IP": lambda m: m.get("os_ip", ""),
+}
+def subst_vars(tpl, m):
+    out = tpl
+    for k, fn in _VAR_KEYS.items():
+        out = out.replace(k, fn(m) or "")
+    return out
+
+def run_control_cmd(m, action):
+    """執行開/關/aux 自訂指令。action in {'poweron','poweroff','aux'}。
+    優先：自訂指令（有填就用）→ 預設 ipmitool。回 (ok, info)。"""
+    if action == "poweron":
+        cmd_tpl = m.get("power_on_cmd") or ""
+    elif action == "poweroff":
+        cmd_tpl = m.get("power_off_cmd") or ""
+    else:
+        cmd_tpl = m.get("aux_cmd") or ""
+    if cmd_tpl:
+        cmd = subst_vars(cmd_tpl, m)
+        try:
+            # 支援用 shell 執行，方便用戶寫 ipmitool / redfishcurl / ssh 等
+            r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=30)
+            out = (r.stdout or "").strip() or (r.stderr or "").strip()
+            return r.returncode == 0, out or "已送出指令"
+        except subprocess.TimeoutExpired:
+            return False, "指令執行逾時"
+        except Exception as e:
+            return False, str(e)
+    # 沒有自訂指令 → 預設 ipmitool（僅 power on/off）
+    if action == "aux":
+        return ipmi_power(m, "cycle")
+    return ipmi_power(m, "on" if action == "poweron" else "off")
 
 
 def _ipmi_cipher_suites():
@@ -443,6 +495,7 @@ def add_rack_passive(body: AddRackPassive):
         "mgx_type": body.mgx_type,
         "rack_u": body.rack_u if 0 < body.rack_u <= 47 else 1,
         "rack_side": body.rack_side if body.rack_side in ("front", "rear") else "front",
+        "rack_size": body.rack_size if 0 < body.rack_size <= 42 else 1,
         "passive": True,
         "order": max([x.get("order", 0) for x in machines.values()] or [-1]) + 1,
         "created": datetime.datetime.now().isoformat(timespec="seconds"),
@@ -483,6 +536,14 @@ def edit_machine(name: str, body: dict):
     if "rack_side" in body:
         side = str(body["rack_side"])
         m["rack_side"] = side if side in ("front", "rear") else "front"
+    if "rack_size" in body:
+        try:
+            m["rack_size"] = max(1, min(42, int(body["rack_size"])))
+        except Exception:
+            pass
+    for f in ("power_on_cmd", "power_off_cmd", "aux_cmd"):
+        if f in body:
+            m[f] = str(body[f] or "").strip()
     _save_data()
     return {"ok": True, "machine": m}
 
@@ -634,6 +695,15 @@ def _bmc_safe(m):
     return c
 
 
+@app.get("/api/ping-ip")
+def ping_ip(ip: str = ""):
+    """直接 ping 一個原始 IP，回傳是否在線（用於「新增元件前檢查」）。"""
+    ip = (ip or "").strip()
+    if not ip:
+        return {"ok": False, "alive": False}
+    return {"ok": True, "ip": ip, "alive": ping_check(ip, 2)}
+
+
 @app.get("/api/rack/ping")
 def rack_ping(project: str = "", name: str = ""):
     """Ping 一個整櫃（或專案內所有 rack）：OS + BMC 各一燈。
@@ -704,14 +774,27 @@ def delete_link(body: dict):
 
 @app.post("/api/machine/{name}/power")
 def machine_power(name: str, body: dict):
-    """用 ipmitool 對該機台 BMC 開/關機。body: {on: bool}"""
+    """對機台開/關機。body: {on: bool}。優先使用該機台的自訂 power 指令。"""
     if name not in machines:
         raise HTTPException(404, f"機台不存在: {name}")
     m = machines[name]
-    action = "on" if body.get("on") else "off"
-    ok, info = ipmi_power(m, action)
+    action = "poweron" if body.get("on") else "poweroff"
+    ok, info = run_control_cmd(m, action)
+    # 狀態查詢：自訂指令不存在 power status → 略過
+    if m.get("power_on_cmd") or m.get("power_off_cmd"):
+        return {"ok": ok, "action": "on" if body.get("on") else "off", "info": info, "power_status": ""}
     _, status = ipmi_power(m, "status")
-    return {"ok": ok, "action": action, "info": info, "power_status": (status or "").strip()}
+    return {"ok": ok, "action": "on" if body.get("on") else "off", "info": info, "power_status": (status or "").strip()}
+
+
+@app.post("/api/machine/{name}/aux")
+def machine_aux_cycle(name: str, body: dict = None):
+    """對機台執行 AUX / AC cycle（ac cycle）。優先使用自訂 aux_cmd。"""
+    if name not in machines:
+        raise HTTPException(404, f"機台不存在: {name}")
+    m = machines[name]
+    ok, info = run_control_cmd(m, "aux")
+    return {"ok": ok, "action": "aux", "info": info}
 
 
 @app.get("/api/machine/{name}/power")
