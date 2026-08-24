@@ -452,11 +452,22 @@ function pageRack() {
     <div class="rack-status-legend">
       ${Object.values(MGX_TYPES).filter((v, i, a) => a.findIndex(x => x.cls === v.cls) === i).map(v => `<span class="mgx-legend"><span class="mgx-dot ${v.cls}"></span>${esc(v.label)}</span>`).join("")}
       &nbsp;·&nbsp; 狀態：<span class="ping-lamp on">🟢</span> Up &nbsp;<span class="ping-lamp off">🔴</span> Down &nbsp;<span class="ping-lamp none">⨪</span> 未 Ping
-      <span class="hint" style="float:right">⇅ 可換 U 槽 / 元件類型；點＋放置空槽；點格子看詳情</span>
     </div>
-    ${anyRack ? rackmapHtml(members, pinged) : emptyRackCard()}
-    ${anyRack && members.length ? devicesHtml(members, pinged) : ""}
-    ${anyRack && members.length ? rackTopoHtml(members) : ""}`;
+    ${anyRack && members.length ? rackLayoutHtml(members, pinged) : (anyRack ? emptyRackCard() : "")}
+    `;
+}
+// 機櫃頁面兩欄排版：左欄 = 切換式元件檢視(平面圖/卡片/清單)，右欄 = 拓樸連線圖（固定置右）
+function rackLayoutHtml(members, pinged) {
+  let left;
+  if (devicesView === "list") left = devicesHtml(members, pinged);
+  else if (devicesView === "cards") left = devicesHtml(members, pinged);
+  else left = `<div class="rack-main-pad"><div class="rack-main-head">
+      <span class="rack-hero-sub">機櫃平面圖（＋放置）</span>${rackSubviewTabs()}</div>${rackmapHtml(members, pinged)}
+    </div>`;
+  return `<div class="rack-layout">
+    <div class="rack-left">${left}</div>
+    <div class="rack-right">${rackTopoHtml(members)}</div>
+  </div>`;
 }
 function emptyRackCard() {
   return `<div class="card" style="margin-top:18px"><div class="empty">目前沒有 L11（Rack）整櫃機台。<br>請在「新增系統」把層級選成 <b>L11 · Rack Level</b>，或「➕ 加入機櫃」把既有機台放進來。</div></div>`;
@@ -522,18 +533,26 @@ function rackEmptyClick(u) {
       } },
     ]);
 }
-let devicesView = "cards";
+let devicesView = "plane";   // "plane" | "cards" | "list"
 function devicesSetView(v) { devicesView = v; setView("rack"); }
+
+// 機櫃檢視分頁（取代往下捲：切換卡片/清單/平面圖）
+function rackSubviewTabs() {
+  const defs = [
+    ["plane", "🗄 平面圖"],
+    ["cards", "▦ 卡片"],
+    ["list", "▰ 清單"],
+  ];
+  return `<div class="rack-subtabs" role="tablist">` + defs.map(([k, lbl]) =>
+    `<button class="btn small ${devicesView === k ? "active" : ""}" onclick="devicesSetView('${k}')">${lbl}</button>`
+  ).join("") + `</div>`;
+}
+
 function devicesHtml(members, pinged) {
   const cardsView = devicesView === "cards";
   // 清單/卡片都依 U 由大到小（U42→U1）排列
   const byU = (a, b) => ((b.rack_u || 0) - (a.rack_u || 0));
   members = members.slice().sort(byU);
-  const switchBtns = `
-    <div class="dview-tabs">
-      <button class="btn small ${cardsView ? "active" : ""}" onclick="devicesSetView('cards')">▦ 卡片</button>
-      <button class="btn small ${!cardsView ? "active" : ""}" onclick="devicesSetView('list')">▰ 清單</button>
-    </div>`;
   let body;
   if (cardsView) {
     body = `<div class="rack-grid">` + members.map(m => {
@@ -583,16 +602,14 @@ function devicesHtml(members, pinged) {
         </tr>`;
       }).join("") + `</tbody></table></div></div>`;
   }
-  return `
-    <div class="dview-toolbar" style="display:flex;align-items:center;gap:10px;margin-top:18px">
-      <span class="rack-hero-sub">機櫃元件（${members.length}）</span>
-      ${switchBtns}
-    </div>
-    ${body}`;
+  return `<div class="rack-main-pad">
+    <div class="rack-main-head"><span class="rack-hero-sub">機櫃元件（${members.length}）</span>${rackSubviewTabs()}</div>
+    ${body}
+  </div>`;
 }
 
 /* ---------- 機櫃拓樸 / 連線圖 ---------- */
-let linksCache = [];          // [{a,b,type}]
+let linksCache = [];          // [{a,b,type,a_port,b_port}]
 async function loadLinks() {
   try { const d = await api("/api/links"); linksCache = d.links || []; }
   catch (e) { linksCache = []; }
@@ -600,44 +617,126 @@ async function loadLinks() {
 }
 const LINK_TYPE = { eth: "Ethernet", ib: "InfiniBand", power: "電源", coolant: "液冷" };
 function linkCss(t) { return "lk-" + (t || "eth"); }
+// 連線類型 → SVG 顏色
+const LINK_COLOR = { eth: "#2563eb", ib: "#a855f7", power: "#e0a800", coolant: "#14b8a6" };
+
+// 由 mgx_type 決定 SVG 節點屬於哪一群（左欄 hub / 右欄 leaf）
+function topoGroupOf(m) {
+  const t = mgxTypeOf(m);
+  return (t === "server" || t === "storage" || t === "network") ? "leaf" : "hub";
+}
+
+// 依成員與連線資料產生 SVG 連接圖。
+// 版面：左＝交換/電源/冷卻（hub），右＝伺服/儲存（leaf）；每台可有多條連線到不同 switch。
+// 每條邊依 a_port/b_port 在對應節點上標出 NIC 埠；顏色區分 eth/ib/power/coolant。
 function rackTopoHtml(members) {
-  // 依目前專案篩選：兩端都在本專案（或至少一端在本專案）的連線
   const names = new Set(members.map(m => m.name));
-  const rel = linksCache.filter(lk => names.has(lk.a) || names.has(lk.b));
+  // 只取「兩端都在本專案」的連線，避免跨專案雜訊
+  const rel = linksCache.filter(lk => names.has(lk.a) && names.has(lk.b));
   const involvedNm = new Set();
-  rel.forEach(lk => { if (names.has(lk.a)) involvedNm.add(lk.a); if (names.has(lk.b)) involvedNm.add(lk.b); });
-  const nodeHtml = [];
-  members.forEach(m => {
-    const deg = rel.filter(lk => lk.a === m.name || lk.b === m.name).length;
-    if (deg === 0 && involvedNm.size) return;   // 有連線時只畫有被連線的節點
-    const info = mgxInfo(m);
-    nodeHtml.push(`<div class="topo-node ${info.cls}" title="${esc(m.name)}">
-      <span class="topo-ico">${info.icon}</span><span class="topo-name">${esc(m.name)}</span>
-      <span class="topo-deg">${deg} 連線</span></div>`);
-  });
+  rel.forEach(lk => { involvedNm.add(lk.a); involvedNm.add(lk.b); });
+
   if (!rel.length) {
-    return `<div class="card" style="margin-top:14px">
-      <div class="card-title">🔀 機櫃拓樸 / 連線圖</div>
-      <div class="empty">此專案目前沒有連線資料。點「➕ 新增連線」把 node↔switch/PDU/CDU 接起來。<br>
-      建議先切換到「▰ 清單」或使用「▦ 卡片」確認要連線的元件名稱。</div>
+    return `<div class="topo-card">
+      <div class="topo-card-title">🔀 機櫃拓樸 / 連線圖 <span class="hint">（${rel.length} 條連線）</span></div>
+      <div class="topo-empty">此機櫃沒有連線資料。<br>點「➕ 新增連線」把 server↔switch/PDU/CDU 接起來，即會顯示實體連線圖。</div>
     </div>`;
   }
-  const linkList = rel.map(lk => {
-    const t = LINK_TYPE[lk.type] || lk.type;
-    return `<div class="topo-link ${linkCss(lk.type)}">
-      <span>${esc(lk.a)}</span><span class="topo-link-line">—${esc(t)}—</span><span>${esc(lk.b)}</span>
-      <button class="btn small" onclick="deleteLink('${esc(lk.a)}','${esc(lk.b)}')">✕</button>
-    </div>`;
-  }).join("");
-  return `<div class="card" style="margin-top:14px">
-    <div class="card-title">🔀 機櫃拓樸 / 連線圖 <span class="hint">（${rel.length} 條連線）</span></div>
-    <div class="topo-box">
-      <div class="topo-nodes">${nodeHtml.join("")}</div>
-      <div class="topo-legends">
-        ${Object.entries(LINK_TYPE).map(([k,v]) => `<span class="topo-legend ${linkCss(k)}">—${esc(v)}—</span>`).join("")}
-      </div>
+
+  // 分類節點：有連線的 leaf（放右欄）與 hub（放左欄）；依 U 排列 leaf
+  const byU = (a, b) => ((b.rack_u || 0) - (a.rack_u || 0));
+  const leaves = members.filter(m => topoGroupOf(m) === "leaf" && involvedNm.has(m.name)).slice().sort(byU);
+  const hubs = members.filter(m => topoGroupOf(m) === "hub" && involvedNm.has(m.name));
+
+  const W = 620, H = Math.max(320, leaves.length * 46 + 40);
+  const LEFTX = 150, RIGHTX = W - 30;
+  const hubY = hubs.length ? Math.max(40, H / 2 - (hubs.length - 1) * 55 / 2) : 40;
+
+  // ---- 節點（hub 左欄 / leaf 右欄）----
+  let defs = "";
+  let nodesSvg = "";
+  hubs.forEach((m, i) => {
+    const info = mgxInfo(m);
+    const y = hubY + i * 55;
+    defs += `<g id="port-hub-${esc(m.name)}" class="port-dot"></g>`;
+    nodesSvg += `<g class="topo-svg-node hub">
+      <rect x="${LEFTX-110}" y="${y-16}" width="108" height="32" rx="7" class="topo-node-box ${info.cls}"/>
+      <text x="${LEFTX-110+8}" y="${y+4}" class="topo-node-ico">${info.icon}</text>
+      <text x="${LEFTX-110+24}" y="${y+4}" class="topo-node-txt">${esc(m.name)}</text>
+    </g>`;
+  });
+  leaves.forEach((m, i) => {
+    const info = mgxInfo(m);
+    const y = 30 + i * 46;
+    nodesSvg += `<g class="topo-svg-node leaf">
+      <rect x="${RIGHTX-150}" y="${y-15}" width="146" height="30" rx="7" class="topo-node-box ${info.cls}"/>
+      <text x="${RIGHTX-150+8}" y="${y+4}" class="topo-node-ico">${info.icon}</text>
+      <text x="${RIGHTX-150+24}" y="${y+4}" class="topo-node-txt">${esc(m.name)}</text>
+    </g>`;
+  });
+
+  // ---- 連線（SVG 曲線）----
+  // 收集每個 leaf 到每個 hub 的連線，依序分佈在 y 上偏移避免重疊
+  const leafYof = {}; leaves.forEach((m, i) => leafYof[m.name] = 30 + i * 46);
+  const hubYof = {}; hubs.forEach((m, i) => hubYof[m.name] = hubY + i * 55);
+
+  // 為同一 leaf↔hub 對的多條連線做垂直偏移
+  const lanes = {};   // key: "leaf|hub" -> idx
+  const laneCount = {};// key: "leaf|hub" -> n
+  rel.forEach(lk => {
+    // 判斷 leaf/hub 各是哪邊
+    const lkPair = [lk.a, lk.b];
+    const leafSide = lkPair.find(n => leaves.find(l => l.name === n));
+    const hubSide = lkPair.find(n => hubs.find(h => h.name === n));
+    if (!leafSide || !hubSide) return;   // 跳過 leaf-leaf / hub-hub（罕見）
+    const key = leafSide + "|" + hubSide;
+    laneCount[key] = (laneCount[key] || 0) + 1;
+  });
+  let edgeSvg = "";
+  const usedCurve = {};
+  rel.forEach(lk => {
+    const lkPair = [lk.a, lk.b];
+    const leafSide = lkPair.find(n => leaves.find(l => l.name === n));
+    const hubSide = lkPair.find(n => hubs.find(h => h.name === n));
+    if (!leafSide || !hubSide) return;
+    const key = leafSide + "|" + hubSide;
+    const cnt = laneCount[key];
+    usedCurve[key] = (usedCurve[key] || 0);
+    const laneIdx = usedCurve[key]++;
+    const col = LINK_COLOR[lk.type] || "#8b8b8b";
+    const lY = leafYof[leafSide], hY = hubYof[hubSide];
+    // 多條同 leaf↔hub：縱向偏移 ±(laneIdx)*7
+    const offset = (cnt > 1 ? (laneIdx - (cnt - 1) / 2) * 10 : 0);
+    const y1 = lY + offset, y2 = hY;   // 從 leaf 到 hub
+    // 控制點（水平 S 曲線）
+    const mx = (RIGHTX - 150 + LEFTX) / 2;
+    // a/b 哪邊是 leaf：葉端在右、hub端在左
+    const fromX = RIGHTX, fromY = y1;
+    const toX = LEFTX, toY = y2;
+    const mid = (fromX + toX) / 2;
+    const d = `M ${fromX} ${fromY} C ${mid} ${fromY}, ${mid} ${toY}, ${toX} ${toY}`;
+    // 標籤：埠號
+    const isAleaf = leafSide === lk.a;
+    const leafPort = isAleaf ? (lk.a_port || "?") : (lk.b_port || "?");
+    const hubPort = isAleaf ? (lk.b_port || "") : (lk.a_port || "");
+    const lbl = `${esc(lk.type)} ${leafPort}${hubPort ? "→" + esc(hubPort) : ""}`;
+    edgeSvg += `
+      <path d="${d}" class="topo-edge" stroke="${col}" fill="none" stroke-width="2" stroke-dasharray="0" />
+      <text x="${mid}" y="${(fromY + toY) / 2 - 3}" text-anchor="middle" class="topo-edge-lbl" fill="${col}">${lbl}</text>`;
+  });
+
+  // 圖例
+  const legendSvg = Object.entries(LINK_TYPE).map(([k, v]) =>
+    `<span class="topo-legend lk-${k}"><i style="background:${LINK_COLOR[k]}"></i>${esc(v)}</span>`).join("");
+
+  return `<div class="topo-card">
+    <div class="topo-card-title">🔀 機櫃拓樸 / 連線圖 <span class="hint">（${rel.length} 條連線 · 拖曳可看全圖）</span></div>
+    <div class="topo-svg-wrap">
+      <svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" class="topo-svg">${defs}${edgeSvg}${nodesSvg}</svg>
     </div>
-    <div class="topo-links">${linkList}</div>
+    <div class="topo-legends">${legendSvg}
+      <span class="hint" style="margin-left:auto">左＝交換/電源/冷卻 · 右＝伺服/儲存</span>
+    </div>
   </div>`;
 }
 function linkAddDialog() {
@@ -647,11 +746,19 @@ function linkAddDialog() {
   if (!members.length) { alert("此專案沒有機櫃元件可連線"); return; }
   showDialog("➕ 新增連線", `
     <div class="rm-modal-body">
-      <p style="margin-bottom:12px;font-size:12px;color:var(--text-faint)">把兩個機櫃元件連起來（node ↔ switch / PDU / CDU）。</p>
-      <label style="display:block;font-size:12px;color:var(--text-faint);margin-bottom:6px">元件 A</label>
-      <select class="input" id="lk-a" style="width:100%;padding:8px;margin-bottom:12px">${opts}</select>
-      <label style="display:block;font-size:12px;color:var(--text-faint);margin-bottom:6px">元件 B</label>
-      <select class="input" id="lk-b" style="width:100%;padding:8px;margin-bottom:12px">${opts}</select>
+      <p style="margin-bottom:12px;font-size:12px;color:var(--text-faint)">把兩個機櫃元件連起來（node ↔ switch / PDU / CDU）。可填兩端「埠號/網卡」（例如 eth0 / 1/1），讓連接圖標出是哪條 NIC 接到哪個口；留空也行。</p>
+      <div style="display:flex;gap:12px">
+        <div style="flex:1">
+          <label style="display:block;font-size:12px;color:var(--text-faint);margin-bottom:6px">元件 A</label>
+          <select class="input" id="lk-a" style="width:100%;padding:8px;margin-bottom:6px">${opts}</select>
+          <input class="input" id="lk-a-port" style="width:100%;padding:8px" placeholder="A 埠 / 網卡（如 eth0、1/1）">
+        </div>
+        <div style="flex:1">
+          <label style="display:block;font-size:12px;color:var(--text-faint);margin-bottom:6px">元件 B</label>
+          <select class="input" id="lk-b" style="width:100%;padding:8px;margin-bottom:6px">${opts}</select>
+          <input class="input" id="lk-b-port" style="width:100%;padding:8px" placeholder="B 埠 / 網卡（如 1/1、eth0）">
+        </div>
+      </div>
       <label style="display:block;font-size:12px;color:var(--text-faint);margin:12px 0 6px">連線類型</label>
       <select class="input" id="lk-type" style="width:100%;padding:8px">
         ${Object.entries(LINK_TYPE).map(([k,v]) => `<option value="${k}">${esc(v)}</option>`).join("")}
@@ -661,9 +768,11 @@ function linkAddDialog() {
       { txt: "取消", cls: "", fn: () => closeDialog() },
       { txt: "新增連線", cls: "primary", fn: () => {
         const a = $("lk-a").value, b = $("lk-b").value, t = $("lk-type").value;
+        const ap = $("lk-a-port") ? $("lk-a-port").value.trim() : "";
+        const bp = $("lk-b-port") ? $("lk-b-port").value.trim() : "";
         if (a === b) return alert("A 與 B 不能相同");
         api("/api/links", { method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ a, b, type: t }) })
+          body: JSON.stringify({ a, b, type: t, a_port: ap, b_port: bp }) })
           .then(d => { linksCache = d.links || linksCache; closeDialog(); setView("rack"); })
           .catch(e => alert("新增失敗：" + e.message));
       } },
@@ -1895,7 +2004,7 @@ function bcSetAll(v) {
 
 function openBroadcast(names) {
   // 重置狀態
-  bcState.ws = null; bcState.order = names.slice(); bcState.terms = {}; bcState.stat = {}; bcState.active = names[0] || null;
+  bcState.ws = null; bcState.order = names.slice(); bcState.terms = {}; bcState.stat = {}; bcState.ack = {}; bcState.active = names[0] || null;
   const tabsEl = $("bc-tabs"), panesEl = $("bc-panes");
   tabsEl.innerHTML = ""; panesEl.innerHTML = "";
   $("bc-title-hint").textContent = `${names.length} 台`;
@@ -1904,7 +2013,7 @@ function openBroadcast(names) {
     const tab = document.createElement("div");
     tab.className = "bc-tab" + (nm === bcState.active ? " active" : "");
     tab.id = "bc-tab-" + nm;
-    tab.innerHTML = `<span class="lamp none" id="lamp-${nm}"></span><span class="tname">${esc(nm)}</span><span class="x" title="關閉此主機">✕</span>`;
+    tab.innerHTML = `<span class="lamp none" id="lamp-${nm}"></span><span class="tname">${esc(nm)}</span><span class="bc-ack" id="bc-ack-${nm}"></span><span class="x" title="關閉此主機">✕</span>`;
     tab.querySelector(".tname").onclick = () => bcSelect(nm);
     tab.querySelector(".x").onclick = (e) => { e.stopPropagation(); bcCloseHost(nm); };
     tabsEl.appendChild(tab);
@@ -1997,6 +2106,7 @@ function bcWsMsg(raw) {
 
 function bcAppend(nm, txt) {
   const t = bcState.terms[nm]; if (t && t.term) { try { t.term.write(txt); } catch {} }
+  bcMarkAck(nm, "ok");   // 有輸出回來 = 該台確實收到指令
 }
 
 function bcFitAll() { Object.values(bcState.terms).forEach(t => { try { t.fit.fit(); } catch {} }); bcSendResize(); }
@@ -2014,8 +2124,26 @@ function bcSendInput() {
   const cmd = inp.value; inp.value = "";
   if (!cmd || !bcState.ws || bcState.ws.readyState !== 1) return;
   const payload = cmd + "\r";
+  const targets = bcState.broadcast
+    ? bcState.order.filter(n => bcState.stat[n] === "on" || bcState.stat[n] === "wait")
+    : (bcState.active ? [bcState.active] : []);
   if (bcState.broadcast) bcState.ws.send(JSON.stringify({ type: "broadcast", data: payload }));
   else if (bcState.active) bcState.ws.send(JSON.stringify({ type: "sendOne", name: bcState.active, data: payload }));
+  // 📡 B：標記「已送出，等收確認」：廣播→所有已連線主機都亮「…」；單台→只亮該台
+  targets.forEach(nm => bcMarkAck(nm, "send"));
+  bcStatus(`${esc(cmd)} → ${bcState.broadcast ? `廣播 ${targets.length} 台（等待確認）` : esc(bcState.active) + "（等待確認）"}`);
+}
+
+// 每台 tab 的「收到指令 ✓」燈號（send=送出待回 / ok=收到輸出）
+function bcMarkAck(nm, state) {
+  bcState.ack = bcState.ack || {};
+  bcState.ack[nm] = state;
+  const a = $("bc-ack-" + nm);
+  if (a) {
+    a.textContent = state === "ok" ? "✓" : state === "send" ? "…" : "";
+    a.classList.toggle("ok", state === "ok");
+    a.classList.toggle("send", state === "send");
+  }
 }
 
 function closeBroadcast() {

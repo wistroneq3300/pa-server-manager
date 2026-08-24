@@ -670,19 +670,21 @@ def list_links():
 
 @app.post("/api/links")
 def add_link(body: dict):
-    """新增連線 {a, b, type}。type: eth/ib/power/coolant。"""
+    """新增連線 {a, a_port, b, b_port, type}。type: eth/ib/power/coolant。"""
     a = str(body.get("a", "")).strip()
     b = str(body.get("b", "")).strip()
     t = str(body.get("type", "eth")).strip()
+    a_port = str(body.get("a_port", "") or "").strip()
+    b_port = str(body.get("b_port", "") or "").strip()
     if not a or not b or a == b:
         raise HTTPException(400, "連線需要兩個不同端點")
-    if t not in ("eth", "ib", "power", "coolant"):
-        t = "eth"
-    # 去重（無向）
-    for lk in links:
-        if {lk.get("a"), lk.get("b")} == {a, b}:
-            return {"ok": True, "note": "已存在", "links": links}
-    links.append({"a": a, "b": b, "type": t})
+    # 去重（無向）：同兩端且同類型視為同一條（允許 a_port/b_port 不同→多條同類型連線）
+    if not a_port and not b_port:
+        for lk in links:
+            if {lk.get("a"), lk.get("b")} == {a, b} and lk.get("type") == t:
+                return {"ok": True, "note": "已存在", "links": links}
+    links.append({"a": a, "b": b, "type": t,
+                  "a_port": a_port or None, "b_port": b_port or None})
     _save_data()
     return {"ok": True, "links": links}
 
