@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Wistron PA Server Manager</title>
-<link rel="stylesheet" href="/static/css/style.css?v=20260824aq">
+<link rel="stylesheet" href="/static/css/style.css?v=20260824ar">
 <link rel="stylesheet" href="/static/vendor/xterm/xterm.css">
 </head>
 <body>
@@ -188,9 +188,38 @@
   </div>
 </div>
 
+<!-- 廣播終端 Modal（同時控制多台 rack 系統，可選主機） -->
+<div class="modal-backdrop" id="bc-modal" style="display:none">
+  <div class="modal bc-modal bc-drag" id="bc-modal-box">
+    <div class="term-drag-handle bc-head" id="bc-head">
+      <div class="modal-title" id="bc-title"><span class="grip">▦</span> 📡 廣播終端 <span class="hint" id="bc-title-hint"></span></div>
+      <span class="spacer"></span>
+      <button class="icon-btn bc-max" id="bc-max-btn" onclick="toggleBcMaximize()" title="放大 / 還原">⛶</button>
+      <button class="icon-btn" onclick="closeBroadcast()" title="關閉">✕</button>
+    </div>
+    <div class="bc-topbar">
+      <div class="bc-tabs" id="bc-tabs"></div>
+      <div class="bc-ctrl">
+        <button class="btn small active" id="bc-bcast-on" onclick="bcSetBroadcast(true)" title="廣播模式">📡 廣播全部</button>
+        <button class="btn small" id="bc-bcast-off" onclick="bcSetBroadcast(false)" title="只操作目前選取主機">◈ 目前主機</button>
+      </div>
+    </div>
+    <div class="bc-body">
+      <div class="bc-panes" id="bc-panes"></div>
+    </div>
+    <div class="bc-statusbar" id="bc-status">
+      <div class="bc-bcastbar">
+        <span class="bc-bc-label">📡 指令列</span>
+        <input id="bc-input" type="text" placeholder="輸入指令，Enter 送出（自動加到目前主機或全部主機）" autocomplete="off" spellcheck="false">
+      </div>
+      <span class="hint" id="bc-status-txt" style="white-space:nowrap"></span>
+    </div>
+  </div>
+</div>
+
 <script src="/static/vendor/xterm/xterm.js"></script>
 <script src="/static/vendor/xterm/addon-fit.js"></script>
 <script src="/static/vendor/chartjs/chart.umd.min.js"></script>
-<script src="/static/js/app.js?v=20260824aq"></script>
+<script src="/static/js/app.js?v=20260824ar"></script>
 </body>
 </html>

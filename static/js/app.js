@@ -446,7 +446,8 @@ function pageRack() {
       <button class="btn" onclick="rackAddPassive()">➕ 新增元件</button>
       <button class="btn" onclick="linkAddDialog()">➕ 新增連線</button>
       <button class="btn" onclick="rackPowerAll('${esc(rackView.project)}',true)">⏻ 開機整櫃</button>
-      <button class="btn btn-danger" onclick="rackPowerAll('${esc(rackView.project)}',false)">⏻ 關機整櫃</button>` : ""}
+      <button class="btn btn-danger" onclick="rackPowerAll('${esc(rackView.project)}',false)">⏻ 關機整櫃</button>
+      <button class="btn primary" onclick="rackBroadcastDialog('${esc(rackView.project)}')">📡 廣播終端</button>` : ""}
     </div>
     <div class="rack-status-legend">
       ${Object.values(MGX_TYPES).filter((v, i, a) => a.findIndex(x => x.cls === v.cls) === i).map(v => `<span class="mgx-legend"><span class="mgx-dot ${v.cls}"></span>${esc(v.label)}</span>`).join("")}
@@ -1844,7 +1845,202 @@ function resetTermGeometry() {
   box.classList.remove("maximized");
   box.style.left = ""; box.style.top = ""; box.style.transform = "";
 }
+
+/* ===== 廣播終端（同時控制多台 rack 系統 OS shell；Clusterssh 風格 fan-out） ===== */
+const bcState = { ws: null, order: [], terms: {}, stat: {}, active: null, broadcast: true };
+
+function rackBroadcastDialog(project) {
+  // 只列出該機櫃專案中「有 OS 連線資訊」的系統
+  const cands = machines.filter(m => m.project === project && m.level === "rack" && m.os_ip);
+  if (!cands.length) {
+    const anyCands = machines.filter(m => m.level === "rack" && m.os_ip);
+    if (anyCands.length) {
+      showDialog("廣播終端", `<div class="empty">目前機櫃專案「${esc(project)}」沒有可連線的系統。\n有 OS 連線資訊的機櫃機台：${esc(anyCands.map(m=>m.name).join("、"))}</div>`);
+    } else {
+      showDialog("廣播終端", `<div class="empty">目前沒有任何帶 OS 連線資訊的機櫃機台可用。</div>`);
+    }
+    return;
+  }
+  const rows = cands.map(m =>
+    `<label class="bc-check" style="display:block;padding:7px 10px;border:1px solid var(--border);border-radius:8px;margin-bottom:6px;cursor:pointer">
+       <input type="checkbox" class="bc-chk" value="${esc(m.name)}" checked>
+       <b>${esc(m.name)}</b> <span class="mono" style="color:var(--text-dim)">${esc(m.os_ip)}</span>
+     </label>`).join("");
+  showDialog("📡 廣播終端 — 選擇要同時控制的主機", `
+    <label style="display:block;font-size:12px;color:var(--text-faint);margin-bottom:10px">
+      勾選要同步下指令的系統（同一次指令，會同時送到所有勾選的主機 OS shell）。
+    </label>
+    <div class="table-scroll" style="max-height:46vh;overflow:auto;margin-bottom:12px">${rows}</div>
+    <div style="display:flex;gap:8px">
+      <button class="btn small" onclick="bcSetAll(true)">☑ 全選</button>
+      <button class="btn small" onclick="bcSetAll(false)">☐ 全不選</button>
+      <span class="spacer"></span><span class="hint" id="bc-sel-count">已選 ${cands.length} 台</span>
+    </div>`,
+    [
+      { txt: "取消", cls: "", fn: () => closeDialog() },
+      { txt: "開啟廣播", cls: "primary", fn: () => {
+        const sel = [...document.querySelectorAll(".bc-chk:checked")].map(x => x.value);
+        closeDialog();
+        if (!sel.length) { alert("請至少勾選一台主機。"); return; }
+        openBroadcast(sel);
+      } },
+    ]);
+}
+
+function bcSetAll(v) {
+  document.querySelectorAll(".bc-chk").forEach(c => c.checked = v);
+  const n = document.querySelectorAll(".bc-chk:checked").length;
+  const el = $("bc-sel-count"); if (el) el.textContent = `已選 ${n} 台`;
+}
+
+function openBroadcast(names) {
+  // 重置狀態
+  bcState.ws = null; bcState.order = names.slice(); bcState.terms = {}; bcState.stat = {}; bcState.active = names[0] || null;
+  const tabsEl = $("bc-tabs"), panesEl = $("bc-panes");
+  tabsEl.innerHTML = ""; panesEl.innerHTML = "";
+  $("bc-title-hint").textContent = `${names.length} 台`;
+  names.forEach(nm => {
+    // tab
+    const tab = document.createElement("div");
+    tab.className = "bc-tab" + (nm === bcState.active ? " active" : "");
+    tab.id = "bc-tab-" + nm;
+    tab.innerHTML = `<span class="lamp none" id="lamp-${nm}"></span><span class="tname">${esc(nm)}</span><span class="x" title="關閉此主機">✕</span>`;
+    tab.querySelector(".tname").onclick = () => bcSelect(nm);
+    tab.querySelector(".x").onclick = (e) => { e.stopPropagation(); bcCloseHost(nm); };
+    tabsEl.appendChild(tab);
+    // pane
+    const pane = document.createElement("div");
+    pane.className = "bc-pane" + (nm === bcState.active ? " active" : "");
+    pane.id = "bc-pane-" + nm;
+    pane.innerHTML = `<div class="bc-pane-label"><span>${esc(nm)}</span><span class="mono" style="color:var(--text-dim);font-size:10px">${esc((machines.find(m=>m.name===nm)||{}).os_ip||"")}</span></div><div class="bc-box" id="bc-box-${nm}"></div>`;
+    panesEl.appendChild(pane);
+    // xterm
+    const t = new Terminal({ cursorBlink: true, fontSize: 12.5, fontFamily: '"Cascadia Mono","Consolas","Noto Sans Mono CJK TC",monospace', theme: { background: "#0b0f14", foreground: "#e6edf3", cursor: "#0a7d78" }, scrollback: 2000 });
+    const fit = new FitAddon.FitAddon();
+    t.loadAddon(fit);
+    t.open($("bc-box-" + nm));
+    try { fit.fit(); } catch {}
+    t.onData(d => {
+      if (!bcState.ws || bcState.ws.readyState !== 1) return;
+      if (bcState.broadcast) bcState.ws.send(JSON.stringify({ type: "broadcast", data: d }));
+      else bcState.ws.send(JSON.stringify({ type: "sendOne", name: nm, data: d }));
+    });
+    bcState.terms[nm] = { term: t, fit };
+    bcState.stat[nm] = "wait";
+  });
+  $("bc-input").value = "";
+  $("bc-input").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); bcSendInput(); } });
+  $("bc-modal").style.display = "flex";
+  setTimeout(() => bcFitAll(), 60);
+  // 連線
+  const proto = location.protocol === "https:" ? "wss://" : "ws://";
+  bcState.ws = new WebSocket(proto + location.host + `/ws/rack-broadcast`);
+  bcState.ws.onopen = () => { bcState.ws.send(JSON.stringify({ targets: names, kind: "os" })); bcStatus(`連接 ${names.length} 台…`); };
+  bcState.ws.onmessage = e => { bcWsMsg(e.data); };
+  bcState.ws.onclose = () => { bcStatus("已斷線"); bcSetAllLamp("err"); };
+  bcState.ws.onerror = () => { bcStatus("連線錯誤"); };
+  bcStatus(bcState.broadcast ? "廣播模式：指令列會送到全部主機" : "目前主機模式：只送到目前選取主機");
+}
+
+function bcStatus(txt) { const el = $("bc-status-txt"); if (el) el.textContent = txt; }
+
+function bcSetAllLamp(state) {
+  bcState.order.forEach(nm => { const l = $("lamp-" + nm); if (l) { l.className = "lamp " + (state || (bcState.stat[nm] || "none")); } });
+}
+function bcLamp(nm, st) { bcState.stat[nm] = st; const l = $("lamp-" + nm); if (l) l.className = "lamp " + st; }
+
+function bcSelect(nm) {
+  if (!bcState.order.includes(nm)) return;
+  bcState.active = nm;
+  bcState.order.forEach(n => {
+    const tab = $("bc-tab-" + n), pane = $("bc-pane-" + n);
+    if (tab) tab.classList.toggle("active", n === nm);
+    if (pane) pane.classList.toggle("active", n === nm);
+  });
+  const t = bcState.terms[nm]; if (t) { try { t.fit.fit(); } catch {} bcFitOne(nm); }
+  bcStatus(bcState.broadcast ? "廣播模式：指令列會送到全部主機；此窗顯示 " + nm : `目前主機：${nm}`);
+}
+
+function bcCloseHost(nm) {
+  bcState.ws.send(JSON.stringify({ type: "closeOne", name: nm })); // 後端可忽略，前端直接關
+  delete bcState.terms[nm]; delete bcState.stat[nm];
+  bcState.order = bcState.order.filter(x => x !== nm);
+  const t = $("bc-tab-" + nm), p = $("bc-pane-" + nm); if (t) t.remove(); if (p) p.remove();
+  if (bcState.active === nm) bcState.active = bcState.order[0] || null;
+  if (bcState.order.length === 0) closeBroadcast();
+  else if (bcState.active) bcSelect(bcState.active);
+}
+
+function bcSetBroadcast(v) {
+  bcState.broadcast = v;
+  $("bc-bcast-on").classList.toggle("active", v);
+  $("bc-bcast-off").classList.toggle("active", !v);
+  bcStatus(v ? "廣播模式：指令列會送到全部主機" : "目前主機模式：只送到目前「" + (bcState.active||"") + "」");
+}
+
+function bcWsMsg(raw) {
+  if (typeof raw === "string") {
+    let j; try { j = JSON.parse(raw); } catch { return; }
+    if (j.type === "ready") {
+      bcStatus(`已就緒：${j.joined.length} 台`);
+      j.joined.forEach(nm => bcLamp(nm, "on"));
+      j.failed.forEach(nm => { bcLamp(nm, "err"); bcAppend(nm, "\r\n\x1b[31m[連線失敗]\x1b[0m\r\n"); });
+    } else if (j.type === "out") {
+      bcAppend(j.name, j.data);
+    } else if (j.type === "closed") {
+      bcLamp(j.name, "err");
+    } else if (j.type === "error") {
+      bcStatus(j.msg);
+    }
+  }
+}
+
+function bcAppend(nm, txt) {
+  const t = bcState.terms[nm]; if (t && t.term) { try { t.term.write(txt); } catch {} }
+}
+
+function bcFitAll() { Object.values(bcState.terms).forEach(t => { try { t.fit.fit(); } catch {} }); bcSendResize(); }
+function bcFitOne(nm) { const t = bcState.terms[nm]; if (t) { try { t.fit.fit(); } catch {} } bcSendResize(); }
+function bcSendResize() {
+  if (!bcState.ws || bcState.ws.readyState !== 1) return;
+  const t = bcState.terms[bcState.active]; if (!t) return;
+  const d = t.fit.proposeDimensions(); if (!d) return;
+  bcState.ws.send(JSON.stringify({ type: "resize", cols: d.cols, rows: d.rows }));
+}
+
+// 指令列：Enter 送出（廣播 or 目前主機）
+function bcSendInput() {
+  const inp = $("bc-input"); if (!inp) return;
+  const cmd = inp.value; inp.value = "";
+  if (!cmd || !bcState.ws || bcState.ws.readyState !== 1) return;
+  const payload = cmd + "\r";
+  if (bcState.broadcast) bcState.ws.send(JSON.stringify({ type: "broadcast", data: payload }));
+  else if (bcState.active) bcState.ws.send(JSON.stringify({ type: "sendOne", name: bcState.active, data: payload }));
+}
+
+function closeBroadcast() {
+  try { bcState.ws && bcState.ws.close(); } catch {}
+  bcState.ws = null; bcState.order = []; bcState.terms = {}; bcState.stat = {}; bcState.active = null;
+  $("bc-modal").style.display = "none";
+}
+
+let bcMax = false;
+function toggleBcMaximize() {
+  const box = $("bc-modal-box"), btn = $("bc-max-btn");
+  if (!box) return;
+  bcMax = !bcMax;
+  box.classList.toggle("maximized", bcMax);
+  btn.textContent = bcMax ? "🗗" : "⛶";
+  setTimeout(bcFitAll, 60);
+}
+
+function resetBcGeometry() {
+  const box = $("bc-modal-box"); if (!box) return;
+  box.classList.remove("maximized"); box.style.left = ""; box.style.top = ""; box.style.transform = "";
+}
+
 class Term {
+
   constructor(containerId, url, statusId) {
     this.container = $(containerId); this.url = url; this.statusEl = $(statusId);
     this.term = null; this.ws = null; this.fitAddon = null;
@@ -1927,6 +2123,35 @@ function initTermDrag() {
     requestAnimationFrame(() => fitAll());
   }
 }
+let bcDragState = null;
+function initBcDrag() {
+  const handle = $("bc-head");
+  const box = $("bc-modal-box");
+  if (!handle || !box) return;
+  handle.addEventListener("mousedown", (e) => {
+    if (box.classList.contains("maximized")) return;
+    if (e.target.closest("button")) return;
+    const r = box.getBoundingClientRect();
+    bcDragState = { startX: e.clientX, startY: e.clientY, origX: r.left, origY: r.top };
+    box.classList.add("dragging");
+    document.addEventListener("mousemove", onBcDragMove);
+    document.addEventListener("mouseup", onBcDragEnd);
+    e.preventDefault();
+  });
+  function onBcDragMove(e) {
+    if (!bcDragState) return;
+    box.style.left = (bcDragState.origX + (e.clientX - bcDragState.startX)) + "px";
+    box.style.top = (bcDragState.origY + (e.clientY - bcDragState.startY)) + "px";
+    box.style.transform = "none";
+  }
+  function onBcDragEnd() {
+    bcDragState = null;
+    box.classList.remove("dragging");
+    document.removeEventListener("mousemove", onBcDragMove);
+    document.removeEventListener("mouseup", onBcDragEnd);
+    requestAnimationFrame(() => bcFitAll());
+  }
+}
 /* ---------- 啟動 ---------- */
 function buildNav() {
   const nav = $("nav");
@@ -1943,9 +2168,9 @@ function buildNav() {
 $("theme-toggle")?.addEventListener("click", () => applyTheme(root.dataset.theme === "dark" ? "light" : "dark"));
 window.addEventListener("keydown", (e) => { if (e.key === "Escape") { closeAdd(); closeProjectModal(); } });
 document.addEventListener("DOMContentLoaded", async () => {
-  loadTheme(); buildNav(); initTermDrag();
+  loadTheme(); buildNav(); initTermDrag(); initBcDrag();
   parseHash();                      // 讀取 URL hash，指定初始分頁
-  window.addEventListener("resize", () => fitAll());
+  window.addEventListener("resize", () => { fitAll(); bcFitAll(); });
   window.addEventListener("hashchange", () => { parseHash(); setView(state.view); });
   try {
     await Promise.all([loadMachines(), loadProjects()]);

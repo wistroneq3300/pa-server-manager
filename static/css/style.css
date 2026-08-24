@@ -346,6 +346,58 @@ table.t{width:100%;border-collapse:collapse}
 .term-drag.maximized .grip{display:none}
 .term-drag.maximized .term-max{background:var(--bg-panel-2)}
 
+/* ===== 廣播終端（同時控制多台 rack 系統） ===== */
+#bc-modal{align-items:flex-start;display:flex;padding:0;overflow:hidden}
+.bc-drag{
+  position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);
+  width:94vw;max-width:1500px;height:84vh;display:flex;flex-direction:column;
+  margin:0;cursor:default;
+}
+.bc-drag.dragging{transition:none;opacity:.95}
+.bc-topbar{
+  display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 14px;
+  border-bottom:1px solid var(--border);background:var(--bg-panel-2);
+}
+.bc-tabs{display:flex;gap:6px;flex:1;flex-wrap:wrap;min-width:0}
+.bc-tab{
+  font-size:11px;font-weight:600;padding:5px 11px;border-radius:6px;cursor:pointer;
+  border:1px solid var(--border);color:var(--text-dim);background:var(--bg-panel);
+  display:flex;align-items:center;gap:6px;max-width:190px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.bc-tab .lamp{width:7px;height:7px;border-radius:50%;flex-shrink:0}
+.bc-tab .lamp.on{background:var(--green)}
+.bc-tab .lamp.err{background:var(--red)}
+.bc-tab .lamp.none{background:var(--text-faint)}
+.bc-tab.active{border-color:var(--accent-blue);color:var(--text);background:var(--bg-panel)}
+.bc-tab .x{opacity:.6;margin-left:2px;font-size:12px}
+.bc-tab .x:hover{opacity:1;color:var(--red)}
+.bc-ctrl{display:flex;gap:6px;flex-shrink:0;align-items:center}
+.bc-ctrl .btn.small.active{background:var(--w-green);border-color:var(--w-green);color:#fff}
+.bc-body{flex:1;min-height:0;padding:10px;display:flex}
+.bc-panes{flex:1;display:flex;min-width:0;min-height:0}
+.bc-pane{display:none;flex:1;flex-direction:column;min-width:0;min-height:0}
+.bc-pane.active{display:flex}
+.bc-pane-label{
+  font-size:11px;font-weight:700;padding:5px 10px;letter-spacing:.3px;color:var(--text-faint);
+  border:1px solid var(--border);border-bottom:none;border-radius:8px 8px 0 0;background:var(--bg-panel-2);
+  display:flex;justify-content:space-between;align-items:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.bc-box{flex:1;min-height:0;border:1px solid var(--border);border-radius:0 0 8px 8px;overflow:hidden;background:#000}
+.bc-box .xterm{padding:6px;height:100%}
+.bc-statusbar{
+  display:flex;align-items:center;gap:12px;padding:8px 16px;font-size:12px;
+  background:var(--bg-panel-2);border-top:1px solid var(--border);color:var(--text-dim);
+  min-height:38px;
+}
+.bc-bcastbar{display:flex;gap:8px;align-items:center;width:100%}
+.bc-bcastbar .bc-bc-label{font-size:11px;font-weight:700;color:var(--accent-blue);white-space:nowrap}
+.bc-bcastbar input{flex:1}
+#bc-input{flex:1;background:#0b0f14;color:#e6edf3;border:1px solid var(--border);border-radius:6px;padding:8px 10px;font-family:monospace;font-size:12.5px}
+#bc-input:focus{outline:none;border-color:var(--accent-blue)}
+.bc-drag.maximized{left:0 !important;top:0 !important;transform:none !important;width:100vw !important;max-width:none;height:100vh !important;border-radius:0}
+.bc-drag.maximized .bc-max{background:var(--bg-panel-2)}
+.bc-drag.maximized .grip{display:none}
+
 /* ============================================================
    Dashboard 新總覽（SUT 健康、GPU 狀態、告警、架構、AI Copilot)
    ============================================================ */

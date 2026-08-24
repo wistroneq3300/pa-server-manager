@@ -1263,6 +1263,145 @@ async def terminal(websocket: WebSocket, name: str, kind: str):
             pass
 
 
+# ---- 整櫃廣播終端（Broadcast Terminal）----
+# 一台控制端同時把同個輸入送到多台被選取系統的 OS shell，
+# 輸出依主機名稱個別標記送回前端（Clusterssh / screen fan-out 風格）。
+def _open_broadcast_shell(machine):
+    """建立單台機器的 OS SSH shell，回傳 (client, channel)；失敗回 (None, None)。"""
+    host = machine.get("os_ip"); user = machine.get("os_user"); pw = machine.get("os_pass")
+    port = machine.get("os_port") or 22
+    if not host or not user or not pw:
+        return None, None
+    client = paramiko.SSHClient()
+    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    try:
+        client.connect(host, port=port, username=user, password=pw, timeout=8)
+        channel = client.invoke_shell(width=100, height=24)
+        channel.settimeout(0.05)
+        return client, channel
+    except Exception:
+        try:
+            client.close()
+        except Exception:
+            pass
+        return None, None
+
+
+@app.websocket("/ws/rack-broadcast")
+async def rack_broadcast(websocket: WebSocket):
+    await websocket.accept()
+    # 前端連線後第一個 JSON：{"targets":[name,...], "kind":"os"}
+    try:
+        hello = await websocket.receive_json()
+    except Exception:
+        await websocket.close()
+        return
+    names = hello.get("targets") or []
+    kind = hello.get("kind") or "os"
+    if kind != "os":
+        await websocket.send_json({"type": "error", "msg": "廣播終端目前僅支援 OS shell"})
+        await websocket.close()
+        return
+
+    loop = asyncio.get_event_loop()
+    shells = {}            # name -> (client, channel)
+    failed = []            # 連不上的主機
+    for nm in names:
+        m = machines.get(nm)
+        if not m:
+            failed.append(nm)
+            continue
+        client, ch = _open_broadcast_shell(m)
+        if client is None or ch is None:
+            failed.append(nm)
+            continue
+        shells[nm] = (client, ch)
+
+    if shells:
+        await websocket.send_json({"type": "ready", "joined": list(shells.keys()), "failed": failed})
+    else:
+        await websocket.send_json({"type": "error", "msg": "沒有主機可連線：%s" % (", ".join(failed) or "未知")})
+        await websocket.close()
+        return
+
+    # 每台機器一個輸出 pump thread：輸出依機器名稱標記成 JSON 送回前端
+    stop_flag = threading.Event()
+    active_lock = threading.Lock()
+
+    def pump_output(name, channel):
+        while not stop_flag.is_set():
+            try:
+                if channel.recv_ready():
+                    data = channel.recv(4096)
+                    if data:
+                        asyncio.run_coroutine_threadsafe(
+                            websocket.send_json({"type": "out", "name": name, "data": bytes(data).decode("utf-8", errors="replace")}),
+                            loop,
+                        )
+                elif channel.exit_status_ready() and not channel.recv_ready():
+                    break
+                else:
+                    import time
+                    time.sleep(0.02)
+            except Exception:
+                break
+        # 結束時通知該主機中斷
+        asyncio.run_coroutine_threadsafe(
+            websocket.send_json({"type": "closed", "name": name}), loop)
+
+    threads = []
+    for nm, (_, ch) in shells.items():
+        t = threading.Thread(target=pump_output, args=(nm, ch), daemon=True)
+        t.start()
+        threads.append(t)
+
+    def broadcast_bytes(data: bytes):
+        for nm, (_, ch) in shells.items():
+            try:
+                ch.send(data)
+            except Exception:
+                pass
+
+    try:
+        while True:
+            msg = await websocket.receive()
+            if "bytes" in msg and msg["bytes"]:
+                broadcast_bytes(msg["bytes"])
+            elif "text" in msg and msg["text"]:
+                try:
+                    cmd = json.loads(msg["text"])
+                    if cmd.get("type") == "broadcast" and "data" in cmd:
+                        broadcast_bytes(cmd["data"].encode("utf-8") if isinstance(cmd["data"], str) else bytes(cmd["data"]))
+                    elif cmd.get("type") == "sendOne" and cmd.get("name") and "data" in cmd:
+                        pair = shells.get(cmd["name"])
+                        if pair:
+                            pair[1].send(cmd["data"].encode("utf-8") if isinstance(cmd["data"], str) else bytes(cmd["data"]))
+                    elif cmd.get("type") == "resize" and cmd.get("cols") and cmd.get("rows"):
+                        for _, ch in shells.values():
+                            try:
+                                ch.resize_pty(width=cmd["cols"], height=cmd["rows"])
+                            except Exception:
+                                pass
+                except Exception:
+                    # 非 JSON：視為廣播純文字
+                    try:
+                        broadcast_bytes(msg["text"].encode())
+                    except Exception:
+                        pass
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        pass
+    finally:
+        stop_flag.set()
+        for nm, (client, ch) in shells.items():
+            try:
+                ch.close()
+                client.close()
+            except Exception:
+                pass
+
+
 # ---- AI Copilot（串本機 Ollama）----
 OLLAMA_URL = "http://127.0.0.1:11434"
 OLLAMA_MODEL = "qwen3.8:27b"
