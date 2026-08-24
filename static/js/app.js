@@ -649,37 +649,37 @@ function rackTopoHtml(members) {
   const leaves = members.filter(m => topoGroupOf(m) === "leaf" && involvedNm.has(m.name)).slice().sort(byU);
   const hubs = members.filter(m => topoGroupOf(m) === "hub" && involvedNm.has(m.name));
 
-  const W = 780, H = Math.max(340, leaves.length * 44 + 50);
+  const W = 900, H = Math.max(400, leaves.length * 62 + 60);
   const LEFTX = 150, RIGHTX = W - 26;
-  const hubY = hubs.length ? Math.max(50, H / 2 - (hubs.length - 1) * 56 / 2) : 50;
+  const hubY = hubs.length ? Math.max(60, H / 2 - (hubs.length - 1) * 70 / 2) : 60;
 
   // ---- 節點（hub 左欄 / leaf 右欄）----
   let defs = "";
   let nodesSvg = "";
   hubs.forEach((m, i) => {
     const info = mgxInfo(m);
-    const y = hubY + i * 55;
+    const y = hubY + i * 70;
     defs += `<g id="port-hub-${esc(m.name)}" class="port-dot"></g>`;
     nodesSvg += `<g class="topo-svg-node hub">
-      <rect x="${LEFTX-110}" y="${y-16}" width="108" height="32" rx="7" class="topo-node-box ${info.cls}"/>
-      <text x="${LEFTX-110+8}" y="${y+4}" class="topo-node-ico">${info.icon}</text>
-      <text x="${LEFTX-110+24}" y="${y+4}" class="topo-node-txt">${esc(m.name)}</text>
+      <rect x="${LEFTX-110}" y="${y-20}" width="108" height="40" rx="8" class="topo-node-box ${info.cls}"/>
+      <text x="${LEFTX-110+8}" y="${y+5}" class="topo-node-ico">${info.icon}</text>
+      <text x="${LEFTX-110+24}" y="${y+5}" class="topo-node-txt">${esc(m.name)}</text>
     </g>`;
   });
   leaves.forEach((m, i) => {
     const info = mgxInfo(m);
-    const y = 30 + i * 46;
+    const y = 40 + i * 62;
     nodesSvg += `<g class="topo-svg-node leaf">
-      <rect x="${RIGHTX-150}" y="${y-15}" width="146" height="30" rx="7" class="topo-node-box ${info.cls}"/>
-      <text x="${RIGHTX-150+8}" y="${y+4}" class="topo-node-ico">${info.icon}</text>
-      <text x="${RIGHTX-150+24}" y="${y+4}" class="topo-node-txt">${esc(m.name)}</text>
+      <rect x="${RIGHTX-150}" y="${y-19}" width="146" height="38" rx="8" class="topo-node-box ${info.cls}"/>
+      <text x="${RIGHTX-150+8}" y="${y+5}" class="topo-node-ico">${info.icon}</text>
+      <text x="${RIGHTX-150+24}" y="${y+5}" class="topo-node-txt">${esc(m.name)}</text>
     </g>`;
   });
 
   // ---- 連線（SVG 曲線）----
   // 收集每個 leaf 到每個 hub 的連線，依序分佈在 y 上偏移避免重疊
-  const leafYof = {}; leaves.forEach((m, i) => leafYof[m.name] = 30 + i * 46);
-  const hubYof = {}; hubs.forEach((m, i) => hubYof[m.name] = hubY + i * 55);
+  const leafYof = {}; leaves.forEach((m, i) => leafYof[m.name] = 40 + i * 62);
+  const hubYof = {}; hubs.forEach((m, i) => hubYof[m.name] = hubY + i * 70);
 
   // 為同一 leaf↔hub 對的多條連線做垂直偏移
   const lanes = {};   // key: "leaf|hub" -> idx

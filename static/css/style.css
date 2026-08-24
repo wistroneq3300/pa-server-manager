@@ -707,8 +707,8 @@ table.t{width:100%;border-collapse:collapse}
 
 /* ===== 機櫃元件排版：平面圖(左)＋拓樸(右)；卡片/清單全寬 ===== */
 .rack-layout{display:grid;grid-template-columns:1fr;gap:16px;margin-top:12px;align-items:start}
-.rack-layout.plane{grid-template-columns:minmax(0,1fr) minmax(0,1.25fr)}
-.rack-left{min-width:0}
+.rack-layout.plane{grid-template-columns:minmax(0,560px) minmax(0,1fr)}
+.rack-left{min-width:0;max-width:560px}
 .rack-right{min-width:0;position:sticky;top:12px}
 .rack-main-pad{padding:4px 2px}
 .rack-main-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px}
@@ -722,7 +722,7 @@ table.t{width:100%;border-collapse:collapse}
 .topo-card-title{font-size:15px;font-weight:800;margin-bottom:10px}
 .topo-empty{font-size:12.5px;color:var(--text-faint);line-height:1.7;padding:8px 2px}
 .topo-svg-wrap{overflow:auto;max-height:72vh;border:1px solid var(--border);border-radius:10px;background:var(--bg-panel-2)}
-.topo-svg{display:block;width:100%;height:auto;min-width:720px}
+.topo-svg{display:block;width:100%;height:auto;min-width:860px}
 .topo-node-box{stroke:var(--border);stroke-width:1}
 .topo-node-box.mgx-server{fill:#10261a;stroke:#22c55e}
 .topo-node-box.mgx-switch{fill:#1d1633;stroke:#7c5cff}
