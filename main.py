@@ -269,7 +269,7 @@ def ipmi_fw_list(m):
 def ipmi_sensor_summary(m):
     """抓 sensor 摘要，回傳 critical/warning 的筆數與清單 + 完整 SDR 供下拉框。
     優先透過 OS 本機 ipmitool（-I open），OS 不可連時用 OOB。"""
-    out, rc, err = ssh_ipmi(m, ["sdr", "list"], timeout=40)
+    out, rc, err = ssh_ipmi(m, ["sdr", "list"], timeout=25)
     lines = out.splitlines() if out else []
     # 狀態是該行最後一個欄位；只用最後 token 判定，避免 sensor 名稱含 critical
     def status_token(l):

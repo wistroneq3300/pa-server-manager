@@ -1209,8 +1209,8 @@ async function machineLoadSensors(name, refresh = false) {
     // 只更新感測器卡片本體，不動整個頁面（sensor-body 只存在於 bmc_alive 的詳情頁）
     const body = $("sensor-body");
     if (body) body.innerHTML = machineSensorsHtml(d, { bmc_alive: true }, name);
-    // 感測器就緒後自動觸發一次 Sensor AI 診斷
-    if (d && !d.error && !d.loading && d.sensors && (d.sensors.total || d.sensors.ok)) sensorAnalyze(name);
+    // 感測器有資料（含背景刷新中）即自動觸發一次 Sensor AI 診斷
+    if (d && !d.error && d.sensors && (d.sensors.total || d.sensors.ok)) sensorAnalyze(name);
     if (d.error) return;                         // 出錯就停（不再輪詢）
     if (d.loading) {
       // refreshing（回舊值）或尚無資料 → 排下一輪；無資料時更快
@@ -1222,10 +1222,11 @@ async function machineLoadSensors(name, refresh = false) {
 function machineSensorsHtml(d, base, name) {
   if (!base.bmc_alive) return `<div class="empty">BMC 目前不可連</div>`;
   if (d && d.error) return `<div class="empty">${esc(d.error)}</div>`;
-  if (!d || d.loading) {
+  const s = (d && d.sensors) || {};
+  // 完全沒有資料時才顯示「抓取中」；有舊快取（refreshing）時照常顯示資料並在背景更新
+  if (!d || (d.loading && !Object.keys(s).length)) {
     return `<div class="empty">🔍 感測器抓取中（sdr list 較慢，約 20 秒）…</div>`;
   }
-  const s = d.sensors || {};
   const critRow = (s.critical_entries || []).map(l => `<li>🔴 ${esc(l)}</li>`).join("");
   const warnRow = (s.warning_entries || []).map(l => `<li>🟠 ${esc(l)}</li>`).join("");
   // 完整 SDR：放固定高度框內可往下拉，避免網頁過長

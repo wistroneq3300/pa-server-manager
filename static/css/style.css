@@ -521,14 +521,14 @@ table.t{width:100%;border-collapse:collapse}
   border-left:3px solid var(--w-green);border-radius:10px;font-size:12px;color:var(--text);line-height:1.55}
 .tel-ai-lbl{font-weight:700;white-space:nowrap;flex-shrink:0}
 .tel-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}   /* 左右左右 2 欄 */
-.tel-block{background:var(--bg-panel-2);border:1px solid var(--border-soft);border-radius:10px;overflow:hidden}
+.tel-block{background:var(--bg-panel-2);border:1px solid var(--border-soft);border-radius:10px;overflow:hidden;display:flex;flex-direction:column}
 .tel-block-head{display:flex;align-items:center;justify-content:space-between;padding:8px 12px;cursor:pointer;user-select:none;border-bottom:1px solid var(--border-soft)}
 .tel-block-head:hover{background:rgba(37,99,235,.06)}
 .tel-arrow{font-size:11px;color:var(--text-faint)}
 .tel-label{font-size:12px;font-weight:700;letter-spacing:.5px;color:var(--text-faint)}
-.tel-block-body{padding:8px 12px}
-/* 每張圖：標題(單行省略，固定在頂部) + 圖表(flex 填滿剩餘) 各自獨立，避免標題被擠壓與圖表重疊 */
-.tel-block .chart-box{display:flex;flex-direction:column;height:180px;margin-bottom:10px}
+.tel-block-body{padding:8px 12px;display:flex;flex-direction:column;flex:1 1 auto}
+/* 每張圖：標題(單行省略，固定在頂部) + 圖表(flex 填滿剩餘) 各自獨立；flex 讓各 block 攤滿同列高度，消除底部留空 */
+.tel-block .chart-box{display:flex;flex-direction:column;flex:1 1 180px;min-height:0;margin-bottom:10px}
 .tel-block .chart-box:last-child{margin-bottom:0}
 .chart-title{flex:0 0 18px;height:18px;line-height:18px;
   font-size:11px;font-weight:700;color:var(--text-dim);letter-spacing:.3px;
