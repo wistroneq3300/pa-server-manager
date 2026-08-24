@@ -1,11 +1,11 @@
 "use strict";
 /* Wistron PA Server Manager - frontend */
 const NAV_ITEMS = [
-  { id: "dashboard", icon: "рҹҸ ", label: "йҰ–й Ғ / Dashboard", group: "зёҪиҰҪ" },
-  { id: "projects",  icon: "рҹ–ҳ", label: "System manager", group: "з®ЎзҗҶ" },
-  { id: "rack",      icon: "рҹ—„", label: "Rack Manager", group: "з®ЎзҗҶ" },
+  { id: "dashboard", icon: "🏠", label: "首頁 / Dashboard", group: "總覽" },
+  { id: "projects",  icon: "🖘", label: "System manager", group: "管理" },
+  { id: "rack",      icon: "🗄", label: "Rack Manager", group: "管理" },
 ];
-const TITLES = { dashboard: "йҰ–й Ғ / Dashboard", projects: "System manager", rack: "Rack Manager", machine: "е–®ж©ҹи©іжғ…" };
+const TITLES = { dashboard: "首頁 / Dashboard", projects: "System manager", rack: "Rack Manager", machine: "單機詳情" };
 const RENDERERS = { dashboard: pageDashboard, projects: pageProjects, rack: pageRack, machine: pageMachine };
 const state = { view: "dashboard" };
 const $ = (id) => document.getElementById(id);
@@ -24,13 +24,13 @@ function loadTheme() {
 async function api(path, options) {
   const r = await fetch(path, options);
   const data = await r.json().catch(() => ({}));
-  if (!r.ok) { const e = new Error(data.detail || "и«ӢжұӮеӨұж•—"); e.data = data; throw e; }
+  if (!r.ok) { const e = new Error(data.detail || "請求失敗"); e.data = data; throw e; }
   return data;
 }
 async function loadMachines(assignMissingU) {
   const data = await api("/api/machines");
   machines = data.machines || [];
-  // дёҖж¬ЎжҖ§пјҡзӮәе°ҡжңӘжңү rack_u зҡ„ rack ж©ҹеҸ°жҢҮжҙҫ UпјҲдҫқе°ҲжЎҲе…§ж—ўжңү orderпјҢз”ұдёҠеҫҖдёӢ 42вҶ’вҖҰпјү
+  // 一次性：為尚未有 rack_u 的 rack 機台指派 U（依專案內既有 order，由上往下 42→…）
   if (assignMissingU !== false) {
     const racks = machines.filter(m => m.level === "rack");
     const byProj = {};
@@ -41,7 +41,7 @@ async function loadMachines(assignMissingU) {
       for (const m of ms) {
         if (typeof m.rack_u !== "number" || m.rack_u < 1) {
           m.rack_u = u;
-          // еҗҢжӯҘеҜ«еӣһеҫҢз«ҜпјҲйқһзӯүеҫ…пјҢеӨұж•—д№ҹдёҚеҪұйҹҝйЎҜзӨәпјү
+          // 同步寫回後端（非等待，失敗也不影響顯示）
           rackAssign(m.name, { rack_u: u }).catch(()=>{});
           u--;
         }
@@ -54,16 +54,16 @@ async function loadProjects() {
   projects = data.projects || [];
 }
 function statusBadge(alive) {
-  if (alive === true) return `<span class="badge green"><span class="dot"></span>еңЁз·ҡ</span>`;
-  if (alive === false) return `<span class="badge red"><span class="dot"></span>йӣўз·ҡ</span>`;
-  return `<span class="badge" style="background:var(--bg-panel-2);color:var(--text-faint)">жңӘиЁӯе®ҡ</span>`;
+  if (alive === true) return `<span class="badge green"><span class="dot"></span>在線</span>`;
+  if (alive === false) return `<span class="badge red"><span class="dot"></span>離線</span>`;
+  return `<span class="badge" style="background:var(--bg-panel-2);color:var(--text-faint)">未設定</span>`;
 }
-// BMC йӣ»жәҗзӢҖж…Ӣпјҡи§Јжһҗ ipmitool еҺҹе§ӢијёеҮәпјҲеҰӮ "Chassis Power is on/off"пјүвҶ’ еҪ©иүІ badge
+// BMC 電源狀態：解析 ipmitool 原始輸出（如 "Chassis Power is on/off"）→ 彩色 badge
 function powerBadge(raw) {
   const s = String(raw || "").toLowerCase();
-  if (/\bon\b/.test(s) && !/\boff\b/.test(s)) return `<span class="badge green"><span class="dot"></span>йӣ»жәҗй–Ӣе•ҹ <span class="mono">ON</span></span>`;
-  if (/\boff\b/.test(s)) return `<span class="badge red"><span class="dot"></span>йӣ»жәҗй—ңй–ү <span class="mono">OFF</span></span>`;
-  return `<span class="badge" style="background:var(--bg-panel-2);color:var(--text-faint)">жңӘзҹҘ</span>`;
+  if (/\bon\b/.test(s) && !/\boff\b/.test(s)) return `<span class="badge green"><span class="dot"></span>電源開啟 <span class="mono">ON</span></span>`;
+  if (/\boff\b/.test(s)) return `<span class="badge red"><span class="dot"></span>電源關閉 <span class="mono">OFF</span></span>`;
+  return `<span class="badge" style="background:var(--bg-panel-2);color:var(--text-faint)">未知</span>`;
 }
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 function projectMembers(pname) {
@@ -84,36 +84,36 @@ function pageDashboard() {
       <circle class="donut-val warn" cx="60" cy="60" r="48" stroke-dasharray="${(unknown/total)*301.6} 301.6" stroke-dashoffset="${-(online/total)*301.6}"/>
       <circle class="donut-val bad" cx="60" cy="60" r="48" stroke-dasharray="${(offline/total)*301.6} 301.6" stroke-dashoffset="${-((online+unknown)/total)*301.6}"/>
       <text x="60" y="58" class="donut-n">${total}</text>
-      <text x="60" y="74" class="donut-l">еҸ—з®Ўзі»зөұ</text>
+      <text x="60" y="74" class="donut-l">受管系統</text>
     </svg>` :
-    `<div class="empty-small">е°ҡз„Ўзі»зөұ</div>`;
+    `<div class="empty-small">尚無系統</div>`;
   const projCards = projects.map(p => {
     const members = projectMembers(p.name);
     const o = members.filter(m => m.os_alive === true).length;
     const off = members.length - o;
     return `
-      <div class="dash-proj" onclick="viewProject('${esc(p.name)}')" title="й»һжҲ‘зңӢжӯӨе°ҲжЎҲ">
+      <div class="dash-proj" onclick="viewProject('${esc(p.name)}')" title="點我看此專案">
         <div class="dash-proj-head">
-          <span class="dash-proj-name">рҹ“Ғ ${esc(p.name)}</span>
-          <span class="dash-proj-count">${members.length} еҸ°</span>
+          <span class="dash-proj-name">📁 ${esc(p.name)}</span>
+          <span class="dash-proj-count">${members.length} 台</span>
         </div>
         ${p.desc ? `<div class="dash-proj-desc">${esc(p.desc)}</div>` : ""}
         <div class="dash-proj-bar"><div class="dash-proj-bar-in" style="width:${members.length? o/members.length*100:0}%"></div></div>
         <div class="dash-proj-stats">
-          <span class="mini">рҹ–Ҙ L10 ${members.filter(m=>m.level!=="rack").length}</span>
-          <span class="mini">рҹ—„ L11 ${members.filter(m=>m.level==="rack").length}</span>
-          <span class="mini green">в—Ҹ ${o} з·ҡдёҠ</span>
-          <span class="mini red">в—Ҹ ${off} йӣўз·ҡ</span>
+          <span class="mini">🖥 L10 ${members.filter(m=>m.level!=="rack").length}</span>
+          <span class="mini">🗄 L11 ${members.filter(m=>m.level==="rack").length}</span>
+          <span class="mini green">● ${o} 線上</span>
+          <span class="mini red">● ${off} 離線</span>
         </div>
       </div>`;
   }).join("");
   return `
     <div class="dash-kpis">
-      <div class="stat"><div class="k">еҸ—з®Ўзі»зөұ</div><div class="v">${total}</div></div>
+      <div class="stat"><div class="k">受管系統</div><div class="v">${total}</div></div>
       <div class="stat"><div class="k">Rack / L11</div><div class="v" style="color:var(--accent-blue)">${racks}</div></div>
       <div class="stat"><div class="k">System / L10</div><div class="v" style="color:var(--w-green)">${systems}</div></div>
-      <div class="stat"><div class="k">з·ҡдёҠ</div><div class="v" style="color:var(--green)">${online}</div></div>
-      <div class="stat"><div class="k">йӣўз·ҡ</div><div class="v" style="color:var(--red)">${offline}</div></div>
+      <div class="stat"><div class="k">線上</div><div class="v" style="color:var(--green)">${online}</div></div>
+      <div class="stat"><div class="k">離線</div><div class="v" style="color:var(--red)">${offline}</div></div>
     </div>
     <div class="dash-mid">
       <div class="glass-panel health-panel">
@@ -130,17 +130,17 @@ function pageDashboard() {
     </div>
     <div class="dash-bottom">
       <div class="glass-panel proj-panel">
-        <div class="card-title">Projects <span class="hint">${projects.length} еҖӢе°ҲжЎҲ</span></div>
+        <div class="card-title">Projects <span class="hint">${projects.length} 個專案</span></div>
         <div class="dash-proj-grid">${projCards}</div>
       </div>
       <div class="glass-panel copilot-panel">
-        <div class="card-title">AI Copilot <span class="hint" id="cop-model">Ollama В· qwen3.8</span></div>
+        <div class="card-title">AI Copilot <span class="hint" id="cop-model">Ollama · qwen3.8</span></div>
         <div class="copilot-body" id="cop-box" style="max-height:440px;overflow:auto">
-          <div class="copilot-msg ai">рҹ‘Ӣ жҲ‘жҳҜ AI CopilotпјҲдёІеҲ°дҪ жң¬ж©ҹ Ollama qwen3.8:27bпјүгҖӮзӣ®еүҚе·ІзӣЈжҺ§ <b>${total}</b> еҸ°зі»зөұгҖҒ<b>${online}</b> з·ҡдёҠгҖҒ<b>${offline}</b> йӣўз·ҡгҖӮе•ҸжҲ‘д»»дҪ•е•ҸйЎҢпҪһпјҲдҫӢеҰӮгҖҢе“ӘеҸ°жңүе•ҸйЎҢпјҹгҖҚгҖҢproj_k е°ҲжЎҲзӢҖж…ӢпјҹгҖҚпјү</div>
+          <div class="copilot-msg ai">👋 我是 AI Copilot（串到你本機 Ollama qwen3.8:27b）。目前已監控 <b>${total}</b> 台系統、<b>${online}</b> 線上、<b>${offline}</b> 離線。問我任何問題～（例如「哪台有問題？」「proj_k 專案狀態？」）</div>
         </div>
         <div class="copilot-input">
-          <input class="input" id="cop-input" placeholder="ијёе…ҘжҢҮд»ӨзөҰ CopilotвҖҰ" autocomplete="off">
-          <button class="btn primary" id="cop-send">йҖҒеҮә</button>
+          <input class="input" id="cop-input" placeholder="輸入指令給 Copilot…" autocomplete="off">
+          <button class="btn primary" id="cop-send">送出</button>
         </div>
       </div>
     </div>
@@ -160,7 +160,7 @@ async function copSend() {
   if (!text) return;
   copAppend("user", esc(text));
   if (inp) inp.value = "";
-  if (send) { send.disabled = true; send.textContent = "вҖҰ"; }
+  if (send) { send.disabled = true; send.textContent = "…"; }
   try {
     const r = await fetch("/api/copilot", {
       method: "POST",
@@ -169,11 +169,11 @@ async function copSend() {
     });
     const j = await r.json();
     if (j.ok) copAppend("ai", esc(j.reply).replace(/\n/g, "<br>"));
-    else copAppend("ai", `вЁ  ${esc(j.error || "е‘јеҸ«еӨұж•—")}`);
+    else copAppend("ai", `⨠ ${esc(j.error || "呼叫失敗")}`);
   } catch (e) {
-    copAppend("ai", `вЁ  ${esc("з„Ўжі•йҖЈз·ҡеҲ°еҫҢз«Ҝпјҡ " + e.message)}`);
+    copAppend("ai", `⨠ ${esc("無法連線到後端： " + e.message)}`);
   } finally {
-    if (send) { send.disabled = false; send.textContent = "йҖҒеҮЁ"; }
+    if (send) { send.disabled = false; send.textContent = "送凨"; }
   }
 }
 function bindCopilot() {
@@ -188,7 +188,7 @@ function viewProject(pname) {
   state.view = "projects";
   setView("projects");
 }
-/* ============ Rack Manager (L11 ж•ҙж«ғзӣЈжҺ§/жҺ§еҲ¶) ============ */
+/* ============ Rack Manager (L11 整櫃監控/控制) ============ */
 const rackView = { mode: "list", project: "", pinged: null };
 function rackPowerState(name) {
   return rackSim[name] || (rackSim[name] = { on: true, led: "green" });
@@ -204,70 +204,70 @@ function rackSetMode(mode) {
 }
 async function rackPing(project) {
   const btn = $("rack-ping-btn");
-  if (btn) { btn.textContent = "вҸі Ping дёӯвҖҰ"; btn.disabled = true; }
+  if (btn) { btn.textContent = "⏳ Ping 中…"; btn.disabled = true; }
   try {
     const data = await api(`/api/rack/ping?project=${encodeURIComponent(project)}`);
     rackView.pinged = data.nodes;
   } catch (e) {
     rackView.pinged = [];
-    alert("Ping еӨұж•—пјҡ" + e.message);
+    alert("Ping 失敗：" + e.message);
   }
-  if (btn) { btn.textContent = "рҹ“Ў Ping Rack"; btn.disabled = false; }
+  if (btn) { btn.textContent = "📡 Ping Rack"; btn.disabled = false; }
   setView("rack");
 }
 async function rackPowerAll(project, on) {
   const racks = machines.filter(m => m.level === "rack" && m.project === project);
-  if (!racks.length) return alert("жӯӨе°ҲжЎҲжІ’жңүж•ҙж«ғж©ҹеҸ°");
-  const okMsg = `жӯЈеңЁ${on ? "й–Ӣж©ҹ" : "й—ңж©ҹ"}${racks.length} еҸ°ж•ҙж«ғж©ҹеҸ°вҖҰ`;
+  if (!racks.length) return alert("此專案沒有整櫃機台");
+  const okMsg = `正在${on ? "開機" : "關機"}${racks.length} 台整櫃機台…`;
   const done = [];
   for (const m of racks) {
     try {
       const r = await api(`/api/machine/${encodeURIComponent(m.name)}/power`, {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ on })
       });
-      done.push(`${m.name}: йҢҜиӘӨ ${e.message}`);
+      done.push(`${m.name}: 錯誤 ${e.message}`);
     } catch (e) {
-      done.push(`${m.name}: йҢҜиӘӨ ${e.message}`);
+      done.push(`${m.name}: 錯誤 ${e.message}`);
     }
   }
   setView("rack");
   setTimeout(() => alert(okMsg + "\n\n" + done.join("\n")), 200);
 }
 async function singlePower(name, on) {
-  if (!confirm(`зўәе®ҡиҰҒгҖҢ${on ? "й–Ӣж©ҹ" : "й—ңж©ҹ"}гҖҚ${name} е—Һпјҹ`)) return;
+  if (!confirm(`確定要「${on ? "開機" : "關機"}」${name} 嗎？`)) return;
   try {
     const r = await api(`/api/machine/${encodeURIComponent(name)}/power`, {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ on })
     });
     setView("rack");
-    setTimeout(() => alert(`${name} ${r.ok ? (on ? "е·Ій–Ӣж©ҹ рҹҹў" : "е·Ій—ңж©ҹ вҡӘ") : "ж“ҚдҪңеӨұж•—пјҡ" + (r.info||"")}
-зӣ®еүҚзӢҖж…Ӣпјҡ${r.power_status}`), 200);
+    setTimeout(() => alert(`${name} ${r.ok ? (on ? "已開機 🟢" : "已關機 ⚪") : "操作失敗：" + (r.info||"")}
+目前狀態：${r.power_status}`), 200);
   } catch (e) {
-    alert("ж“ҚдҪңеӨұж•—пјҡ" + e.message);
+    alert("操作失敗：" + e.message);
   }
 }
-// ж•ҙж«ғ list иҮӘйҒёжё…е–® ping зөҗжһң
+// 整櫃 list 自選清單 ping 結果
 function rackPingNode(m) {
   const n = (rackView.pinged || []).find(x => x.name === m.name);
   const osUp = n ? n.os_alive : null;
   const bmcUp = n ? n.bmc_alive : null;
-  const lamp = (v) => v === true ? `<span class="ping-lamp on" title="Online">рҹҹў</span>`
-              : v === false ? `<span class="ping-lamp off" title="No reply">рҹ”ҙ</span>`
-              : `<span class="ping-lamp none" title="жңӘ Ping">вЁӘ</span>`;
-  const nm = `${esc(m.name)}${m.passive ? ' <span class="badge badge-rack" style="font-size:9px;padding:1px 6px">з„ЎBMC</span>' : ""}`;
+  const lamp = (v) => v === true ? `<span class="ping-lamp on" title="Online">🟢</span>`
+              : v === false ? `<span class="ping-lamp off" title="No reply">🔴</span>`
+              : `<span class="ping-lamp none" title="未 Ping">⨪</span>`;
+  const nm = `${esc(m.name)}${m.passive ? ' <span class="badge badge-rack" style="font-size:9px;padding:1px 6px">無BMC</span>' : ""}`;
   return `<td class="mono">${nm}</td>
-          <td>${m.os_ip ? `${lamp(osUp)} <span class="ping-ip mono">${esc(m.os_ip)}</span>` : `<span style="color:var(--text-faint)">вҖ”</span>`}</td>
-          <td>${m.bmc_ip ? `${lamp(bmcUp)} <span class="ping-ip mono">${esc(m.bmc_ip)}</span>` : `<span style="color:var(--text-faint)">вҖ”</span>`}</td>`;
+          <td>${m.os_ip ? `${lamp(osUp)} <span class="ping-ip mono">${esc(m.os_ip)}</span>` : `<span style="color:var(--text-faint)">—</span>`}</td>
+          <td>${m.bmc_ip ? `${lamp(bmcUp)} <span class="ping-ip mono">${esc(m.bmc_ip)}</span>` : `<span style="color:var(--text-faint)">—</span>`}</td>`;
 }
-/* ================= Rack Manager ж•ҙеҗҲй ҒпјҲRackmap + еҚЎзүҮ/жё…е–® + MGX е…ғд»¶пјү ================= */
+/* ================= Rack Manager 整合頁（Rackmap + 卡片/清單 + MGX 元件） ================= */
 const MGX_TYPES = {
-  server:      { icon: "рҹ–Ҙ", label: "Server дјәжңҚеҷЁ",    cls: "mgx-server" },
-  switch:      { icon: "рҹ”Җ", label: "Switch дәӨжҸӣеҷЁ",    cls: "mgx-switch" },
-  powershelf:  { icon: "вҡЎ", label: "Power Shelf йӣ»жәҗ", cls: "mgx-ps" },
-  pdu:         { icon: "рҹ”Ң", label: "PDU йӣ»жәҗеҲҶй…ҚеҷЁ",   cls: "mgx-ps" },
-  cdu:         { icon: "рҹ’§", label: "CDU еҶ·еҚ»еҲҶй…Қе–®е…ғ", cls: "mgx-cdu" },
-  storage:     { icon: "рҹ’ҫ", label: "Storage е„Іеӯҳ",     cls: "mgx-storage" },
-  network:     { icon: "рҹҢҗ", label: "Network з¶Іи·ҜеҠҹиғҪ", cls: "mgx-network" },
+  server:      { icon: "🖥", label: "Server 伺服器",    cls: "mgx-server" },
+  switch:      { icon: "🔀", label: "Switch 交換器",    cls: "mgx-switch" },
+  powershelf:  { icon: "⚡", label: "Power Shelf 電源", cls: "mgx-ps" },
+  pdu:         { icon: "🔌", label: "PDU 電源分配器",   cls: "mgx-ps" },
+  cdu:         { icon: "💧", label: "CDU 冷卻分配單元", cls: "mgx-cdu" },
+  storage:     { icon: "💾", label: "Storage 儲存",     cls: "mgx-storage" },
+  network:     { icon: "🌐", label: "Network 網路功能", cls: "mgx-network" },
 };
 function mgxTypeOf(m) {
   if (m.mgx_type && MGX_TYPES[m.mgx_type]) return m.mgx_type;
@@ -295,22 +295,22 @@ function rackMoveDialog(name) {
     .map(x => x.rack_u));
   let opts = "";
   for (let u = 42; u >= 1; u--) {
-    opts += `<option value="${u}" ${(m.rack_u || 0) === u ? "selected" : ""} ${usedUs.has(u) ? "disabled" : ""}>U${u}${usedUs.has(u) ? "пјҲе·ІеҚ з”Ёпјү" : ""}</option>`;
+    opts += `<option value="${u}" ${(m.rack_u || 0) === u ? "selected" : ""} ${usedUs.has(u) ? "disabled" : ""}>U${u}${usedUs.has(u) ? "（已占用）" : ""}</option>`;
   }
   const typeBtns = Object.entries(MGX_TYPES)
     .map(([k, v]) => `<button class="btn small ${mgxTypeOf(m) === k ? "active" : ""}" onclick="rackMoveSetType('${esc(m.name)}','${k}')">${v.icon} ${esc(v.label)}</button>`)
     .join("");
-  showDialog("вҮ… з§»еӢ• / иЁӯе®ҡдҪҚзҪ®", `
+  showDialog("⇅ 移動 / 設定位置", `
     <div class="rm-modal-body">
-      <p style="margin-bottom:12px">ж©ҹеҸ°пјҡ<b>${esc(m.name)}</b>пјҲзӣ®еүҚ U${m.rack_u || "вҖ”"}пјү</p>
-      <label style="display:block;font-size:12px;color:var(--text-faint);margin-bottom:6px">йҒёж“Үзӣ®жЁҷ U ж§ҪпјҲе·ІеҚ з”ЁйЎҜзӨәзҒ°пјү</label>
+      <p style="margin-bottom:12px">機台：<b>${esc(m.name)}</b>（目前 U${m.rack_u || "—"}）</p>
+      <label style="display:block;font-size:12px;color:var(--text-faint);margin-bottom:6px">選擇目標 U 槽（已占用顯示灰）</label>
       <select class="input" id="rm-move-u" style="width:100%;padding:8px">${opts}</select>
       <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap">${typeBtns}</div>
-      <p style="font-size:11px;color:var(--text-faint);margin-top:10px">е…ғд»¶йЎһеһӢпјҡ<b id="rm-newtype">${esc(MGX_TYPES[mgxTypeOf(m)].label)}</b></p>
+      <p style="font-size:11px;color:var(--text-faint);margin-top:10px">元件類型：<b id="rm-newtype">${esc(MGX_TYPES[mgxTypeOf(m)].label)}</b></p>
     </div>`,
     [
-      { txt: "еҸ–ж¶Ҳ", cls: "", fn: () => closeDialog() },
-      { txt: "е„ІеӯҳдҪҚзҪ®", cls: "primary", fn: () => {
+      { txt: "取消", cls: "", fn: () => closeDialog() },
+      { txt: "儲存位置", cls: "primary", fn: () => {
         const u = +$("rm-move-u").value;
         const patch = { rack_u: u };
         if (rackMoveTargetType) patch.mgx_type = rackMoveTargetType;
@@ -325,32 +325,32 @@ function rackMoveSetType(name, type) {
 let rackMoveTargetType = null;
 async function rackAddPassive() {
   const proj = rackView.project;
-  showDialog("вһ• ж–°еўһж©ҹж«ғе…ғд»¶пјҲз„Ў OS/BMC дәҰеҸҜпјү", `
+  showDialog("➕ 新增機櫃元件（無 OS/BMC 亦可）", `
     <div class="rm-modal-body">
-      <p style="margin-bottom:12px;font-size:12px;color:var(--text-faint)">з”Ёж–јеҠ е…Ҙ switch / power shelf / CDU / PDU / Storage зӯү<b>жІ’жңү OS жҲ– BMC</b>зҡ„е…ғд»¶гҖӮеҸӘйңҖеҗҚзЁұ + йЎһеһӢ + U ж§ҪеҚіеҸҜпјҢеҠ е…ҘеҫҢеҸҜеҶҚжҢҮжҙҫе°ҲжЎҲгҖӮ</p>
-      <label style="display:block;font-size:12px;color:var(--text-faint);margin-bottom:6px">е…ғд»¶еҗҚзЁұ *</label>
-      <input class="input" id="rp-name" style="width:100%;padding:8px;margin-bottom:12px" placeholder="дҫӢеҰӮ SW-01 / CDU-1 / PS-3">
-      <label style="display:block;font-size:12px;color:var(--text-faint);margin-bottom:6px">йЎһеһӢ</label>
+      <p style="margin-bottom:12px;font-size:12px;color:var(--text-faint)">用於加入 switch / power shelf / CDU / PDU / Storage 等<b>沒有 OS 或 BMC</b>的元件。只需名稱 + 類型 + U 槽即可，加入後可再指派專案。</p>
+      <label style="display:block;font-size:12px;color:var(--text-faint);margin-bottom:6px">元件名稱 *</label>
+      <input class="input" id="rp-name" style="width:100%;padding:8px;margin-bottom:12px" placeholder="例如 SW-01 / CDU-1 / PS-3">
+      <label style="display:block;font-size:12px;color:var(--text-faint);margin-bottom:6px">類型</label>
       <select class="input" id="rp-type" style="width:100%;padding:8px;margin-bottom:12px">
         ${Object.entries(MGX_TYPES).map(([k,v]) => `<option value="${k}">${v.icon} ${esc(v.label)}</option>`).join("")}
       </select>
-      <label style="display:block;font-size:12px;color:var(--text-faint);margin-bottom:6px">U ж§Ҫ</label>
+      <label style="display:block;font-size:12px;color:var(--text-faint);margin-bottom:6px">U 槽</label>
       <select class="input" id="rp-u" style="width:100%;padding:8px;margin-bottom:12px">
         ${Array.from({length:42},(_,i)=>42-i).map(u => `<option value="${u}">U${u}</option>`).join("")}
       </select>
-      <label style="display:block;font-size:12px;color:var(--text-faint);margin-bottom:6px">з®ЎзҗҶ IPпјҲйҒёеЎ«пјҢеҸҜ ping з”Ёпјү</label>
-      <input class="input" id="rp-ip" style="width:100%;padding:8px" placeholder="з•ҷз©әеүҮз„Ў IP">
+      <label style="display:block;font-size:12px;color:var(--text-faint);margin-bottom:6px">管理 IP（選填，可 ping 用）</label>
+      <input class="input" id="rp-ip" style="width:100%;padding:8px" placeholder="留空則無 IP">
     </div>`,
     [
-      { txt: "еҸ–ж¶Ҳ", cls: "", fn: () => closeDialog() },
-      { txt: "е»әз«ӢдёҰеҠ е…Ҙ", cls: "primary", fn: () => {
+      { txt: "取消", cls: "", fn: () => closeDialog() },
+      { txt: "建立並加入", cls: "primary", fn: () => {
         const name = $("rp-name").value.trim();
-        if (!name) return alert("и«ӢеЎ«е…ғд»¶еҗҚзЁұ");
+        if (!name) return alert("請填元件名稱");
         api("/api/rack/passive", { method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ name, mgx_type: $("rp-type").value, rack_u: +$("rp-u").value, manage_ip: $("rp-ip").value.trim(), project: proj }) })
           .then(() => loadMachines())
           .then(() => { closeDialog(); setView("rack"); })
-          .catch(e => alert("е»әз«ӢеӨұж•—пјҡ" + e.message));
+          .catch(e => alert("建立失敗：" + e.message));
       } },
     ]);
 }
@@ -358,31 +358,31 @@ function rackAddDialog() {
   const proj = rackView.project;
   const inRack = new Set(machines.filter(x => x.project === proj && x.level === "rack").map(x => x.name));
   const candidates = machines.filter(x => !inRack.has(x.name));
-  if (!candidates.length) { alert("жІ’жңүеҸҜеҠ е…Ҙзҡ„ж©ҹеҸ°пјҲжүҖжңүж©ҹеҸ°йғҪе·ІеңЁжӯӨж©ҹж«ғпјү"); return; }
-  const selOpts = candidates.map(m => `<option value="${esc(m.name)}">${esc(m.name)} (${esc(m.os_ip||"вҖ”")})</option>`).join("");
+  if (!candidates.length) { alert("沒有可加入的機台（所有機台都已在此機櫃）"); return; }
+  const selOpts = candidates.map(m => `<option value="${esc(m.name)}">${esc(m.name)} (${esc(m.os_ip||"—")})</option>`).join("");
   const members = machines.filter(x => x.level === "rack" && x.project === proj);
   const usedUs = new Set(members.filter(x => typeof x.rack_u === "number" && x.rack_u > 0).map(x => x.rack_u));
   let uopts = "";
-  for (let u = 42; u >= 1; u--) uopts += `<option value="${u}" ${usedUs.has(u) ? "disabled" : ""}>U${u}${usedUs.has(u) ? "пјҲе·Із”Ёпјү" : ""}</option>`;
-  showDialog("вһ• еҠ е…Ҙж©ҹж«ғ", `
+  for (let u = 42; u >= 1; u--) uopts += `<option value="${u}" ${usedUs.has(u) ? "disabled" : ""}>U${u}${usedUs.has(u) ? "（已用）" : ""}</option>`;
+  showDialog("➕ 加入機櫃", `
     <div class="rm-modal-body">
-      <p style="margin-bottom:12px;font-size:12px;color:var(--text-faint)">жҠҠж—ўжңүж©ҹеҸ°пјҲL10 жҲ– L11пјүеҠ е…Ҙж©ҹж«ғе°ҲжЎҲгҖҢ${esc(proj)}гҖҚдёҰжҢҮжҙҫ U ж§ҪгҖӮ</p>
-      <label style="display:block;font-size:12px;color:var(--text-faint);margin-bottom:6px">йҒёж“Үж©ҹеҸ°</label>
+      <p style="margin-bottom:12px;font-size:12px;color:var(--text-faint)">把既有機台（L10 或 L11）加入機櫃專案「${esc(proj)}」並指派 U 槽。</p>
+      <label style="display:block;font-size:12px;color:var(--text-faint);margin-bottom:6px">選擇機台</label>
       <select class="input" id="rm-add-m" style="width:100%;padding:8px;margin-bottom:12px">${selOpts}</select>
-      <label style="display:block;font-size:12px;color:var(--text-faint);margin-bottom:6px">йҒёж“Ү U ж§Ҫ</label>
+      <label style="display:block;font-size:12px;color:var(--text-faint);margin-bottom:6px">選擇 U 槽</label>
       <select class="input" id="rm-add-u" style="width:100%;padding:8px">${uopts}</select>
-      <label style="display:block;font-size:12px;color:var(--text-faint);margin:12px 0 6px">е…ғд»¶йЎһеһӢ</label>
+      <label style="display:block;font-size:12px;color:var(--text-faint);margin:12px 0 6px">元件類型</label>
       <select class="input" id="rm-add-type" style="width:100%;padding:8px">
         ${Object.entries(MGX_TYPES).map(([k, v]) => `<option value="${k}">${v.icon} ${esc(v.label)}</option>`).join("")}
       </select>
     </div>`,
     [
-      { txt: "еҸ–ж¶Ҳ", cls: "", fn: () => closeDialog() },
-      { txt: "еҠ е…Ҙ", cls: "primary", fn: () => {
+      { txt: "取消", cls: "", fn: () => closeDialog() },
+      { txt: "加入", cls: "primary", fn: () => {
         const nm = $("rm-add-m").value, u = +$("rm-add-u").value, ty = $("rm-add-type").value;
         rackAssign(nm, { project: proj, level: "rack", rack_u: u, mgx_type: ty })
           .then(() => { closeDialog(); setView("rack"); })
-          .catch(e => alert("еҠ е…ҘеӨұж•—пјҡ" + e.message));
+          .catch(e => alert("加入失敗：" + e.message));
       } },
     ]);
 }
@@ -391,7 +391,7 @@ function dialogBackdrop() {
   if (b) return b;
   b = document.createElement("div");
   b.className = "modal-backdrop"; b.id = "rm-dialog"; b.style.display = "none";
-  b.innerHTML = `<div class="modal rm-modal"><div class="modal-head"><div class="modal-title" id="rm-dialog-title"></div><button class="btn small" onclick="closeDialog()">вң•</button></div><div class="modal-body" id="rm-dialog-body"></div><div class="modal-foot" id="rm-dialog-foot"></div></div>`;
+  b.innerHTML = `<div class="modal rm-modal"><div class="modal-head"><div class="modal-title" id="rm-dialog-title"></div><button class="btn small" onclick="closeDialog()">✕</button></div><div class="modal-body" id="rm-dialog-body"></div><div class="modal-foot" id="rm-dialog-foot"></div></div>`;
   document.body.appendChild(b);
   return b;
 }
@@ -424,41 +424,41 @@ function pageRack() {
     loadLinks().then(() => { if (state.view === "rack") setView("rack"); });
   }
 
-  // еҸӘеҲ—гҖҢжңү L11пјҲRackпјүж©ҹеҸ°гҖҚзҡ„е°ҲжЎҲ
-  const selOpts = projSet.map(pn => `<option value="${esc(pn)}" ${pn === proj ? "selected" : ""}>${esc(pn)}пјҲ${racksAll.filter(m=>m.project===pn).length} еҸ°пјү</option>`).join("");
+  // 只列「有 L11（Rack）機台」的專案
+  const selOpts = projSet.map(pn => `<option value="${esc(pn)}" ${pn === proj ? "selected" : ""}>${esc(pn)}（${racksAll.filter(m=>m.project===pn).length} 台）</option>`).join("");
   const toolbar = `
     <span class="spacer"></span>
-    <label class="rack-sel">ж©ҹж«ғе°ҲжЎҲ
+    <label class="rack-sel">機櫃專案
       <select class="input" onchange="rackSetProject(this.value)">
-        <option value="">пјҲйҒёж“Үж©ҹж«ғе°ҲжЎҲпјү</option>
+        <option value="">（選擇機櫃專案）</option>
         ${selOpts}
       </select>
     </label>`;
 
   return `
     <div class="rack-hero">
-      <div class="rack-hero-title">рҹ—„ Rack Manager <span class="hint">пјҲж•ҙеҗҲй Ғпјҡж©ҹж«ғе№ійқўең– + еҚЎзүҮ + жё…е–®пјү</span></div>
-      <div class="rack-hero-sub">${esc(proj || "пјҲжңӘйҒёе°ҲжЎҲпјү")} е°ҲжЎҲ В· ${members.length} еҸ° | MGX е…ғд»¶пјҡServer / Switch / Power Shelf / CDU</div>
+      <div class="rack-hero-title">🗄 Rack Manager <span class="hint">（整合頁：機櫃平面圖 + 卡片 + 清單）</span></div>
+      <div class="rack-hero-sub">${esc(proj || "（未選專案）")} 專案 · ${members.length} 台 | MGX 元件：Server / Switch / Power Shelf / CDU</div>
       ${toolbar}
       ${anyRack ? `
-      <button class="btn primary" id="rack-ping-btn" onclick="rackPing('${esc(rackView.project)}')">рҹ“Ў Ping Rack</button>
-      <button class="btn" onclick="rackAddDialog()">вһ• еҠ е…Ҙж©ҹж«ғ</button>
-      <button class="btn" onclick="rackAddPassive()">вһ• ж–°еўһе…ғд»¶</button>
-      <button class="btn" onclick="linkAddDialog()">вһ• ж–°еўһйҖЈз·ҡ</button>
-      <button class="btn" onclick="rackPowerAll('${esc(rackView.project)}',true)">вҸ» й–Ӣж©ҹж•ҙж«ғ</button>
-      <button class="btn btn-danger" onclick="rackPowerAll('${esc(rackView.project)}',false)">вҸ» й—ңж©ҹж•ҙж«ғ</button>` : ""}
+      <button class="btn primary" id="rack-ping-btn" onclick="rackPing('${esc(rackView.project)}')">📡 Ping Rack</button>
+      <button class="btn" onclick="rackAddDialog()">➕ 加入機櫃</button>
+      <button class="btn" onclick="rackAddPassive()">➕ 新增元件</button>
+      <button class="btn" onclick="linkAddDialog()">➕ 新增連線</button>
+      <button class="btn" onclick="rackPowerAll('${esc(rackView.project)}',true)">⏻ 開機整櫃</button>
+      <button class="btn btn-danger" onclick="rackPowerAll('${esc(rackView.project)}',false)">⏻ 關機整櫃</button>` : ""}
     </div>
     <div class="rack-status-legend">
       ${Object.values(MGX_TYPES).filter((v, i, a) => a.findIndex(x => x.cls === v.cls) === i).map(v => `<span class="mgx-legend"><span class="mgx-dot ${v.cls}"></span>${esc(v.label)}</span>`).join("")}
-      &nbsp;В·&nbsp; зӢҖж…Ӣпјҡ<span class="ping-lamp on">рҹҹў</span> Up &nbsp;<span class="ping-lamp off">рҹ”ҙ</span> Down &nbsp;<span class="ping-lamp none">вЁӘ</span> жңӘ Ping
-      <span class="hint" style="float:right">вҮ… еҸҜжҸӣ U ж§Ҫ / е…ғд»¶йЎһеһӢпјӣй»һпјӢж”ҫзҪ®з©әж§Ҫпјӣй»һж јеӯҗзңӢи©іжғ…</span>
+      &nbsp;·&nbsp; 狀態：<span class="ping-lamp on">🟢</span> Up &nbsp;<span class="ping-lamp off">🔴</span> Down &nbsp;<span class="ping-lamp none">⨪</span> 未 Ping
+      <span class="hint" style="float:right">⇅ 可換 U 槽 / 元件類型；點＋放置空槽；點格子看詳情</span>
     </div>
     ${anyRack ? rackmapHtml(members, pinged) : emptyRackCard()}
     ${anyRack && members.length ? devicesHtml(members, pinged) : ""}
     ${anyRack && members.length ? rackTopoHtml(members) : ""}`;
 }
 function emptyRackCard() {
-  return `<div class="card" style="margin-top:18px"><div class="empty">зӣ®еүҚжІ’жңү L11пјҲRackпјүж•ҙж«ғж©ҹеҸ°гҖӮ<br>и«ӢеңЁгҖҢж–°еўһзі»зөұгҖҚжҠҠеұӨзҙҡйҒёжҲҗ <b>L11 В· Rack Level</b>пјҢжҲ–гҖҢвһ• еҠ е…Ҙж©ҹж«ғгҖҚжҠҠж—ўжңүж©ҹеҸ°ж”ҫйҖІдҫҶгҖӮ</div></div>`;
+  return `<div class="card" style="margin-top:18px"><div class="empty">目前沒有 L11（Rack）整櫃機台。<br>請在「新增系統」把層級選成 <b>L11 · Rack Level</b>，或「➕ 加入機櫃」把既有機台放進來。</div></div>`;
 }
 function rackmapHtml(members, pinged) {
   const rackU = {};
@@ -470,7 +470,7 @@ function rackmapHtml(members, pinged) {
   for (let u = 42; u >= 1; u--) {
     const m = rackU[u];
     if (!m) {
-      rows += `<div class="rm-row rm-empty"><span class="rm-u mono">U${u}</span><div class="rm-empty-space" onclick="rackEmptyClick(${u})" title="й»һж“Ҡж”ҫзҪ®ж©ҹеҸ°">пјӢ</div></div>`;
+      rows += `<div class="rm-row rm-empty"><span class="rm-u mono">U${u}</span><div class="rm-empty-space" onclick="rackEmptyClick(${u})" title="點擊放置機台">＋</div></div>`;
       continue;
     }
     const n = pinged.find(x => x.name === m.name);
@@ -480,26 +480,26 @@ function rackmapHtml(members, pinged) {
     const isPassive = !!m.passive;
     const click = isPassive ? `rackMoveDialog('${esc(m.name)}')` : `openMachine('${esc(m.name)}')`;
     const powerBtns = isPassive ? "" : `
-          <button class="btn small" title="й–Ӣж©ҹ" onclick="singlePower('${esc(m.name)}',true)">вҸ»</button>
-          <button class="btn small btn-danger" title="й—ңж©ҹ" onclick="singlePower('${esc(m.name)}',false)">вҸ»</button>`;
-    const nm = `${info.icon} ${esc(m.name)}${isPassive ? ' <span class="badge badge-rack" style="font-size:9px;padding:1px 6px">з„ЎBMC</span>' : ''}`;
+          <button class="btn small" title="開機" onclick="singlePower('${esc(m.name)}',true)">⏻</button>
+          <button class="btn small btn-danger" title="關機" onclick="singlePower('${esc(m.name)}',false)">⏻</button>`;
+    const nm = `${info.icon} ${esc(m.name)}${isPassive ? ' <span class="badge badge-rack" style="font-size:9px;padding:1px 6px">無BMC</span>' : ''}`;
     rows += `
     <div class="rm-row" data-u="${u}">
       <span class="rm-u mono">U${u}</span>
       <div class="rm-cell ${cls} ${info.cls}" onclick="${click}">
-        <span class="rm-lamp">${up === true ? "рҹҹў" : up === false ? "рҹ”ҙ" : "вЁӘ"}</span>
+        <span class="rm-lamp">${up === true ? "🟢" : up === false ? "🔴" : "⨪"}</span>
         <span class="rm-name">${nm}</span>
         <span class="rm-ip mono">${esc(m.os_ip || m.bmc_ip || "")}</span>
         <span class="rm-actions" onclick="event.stopPropagation()">
           ${powerBtns}
-          <button class="btn small" title="жҸӣдҪҚ/йЎһеһӢ" onclick="rackMoveDialog('${esc(m.name)}')">вҮ…</button>
+          <button class="btn small" title="換位/類型" onclick="rackMoveDialog('${esc(m.name)}')">⇅</button>
         </span>
       </div>
     </div>`;
   }
   return `
   <div class="rm-rack">
-    <div class="rm-head"><span></span><span>${esc(rackView.project)} вҖ” 42U ж©ҹж«ғпјҲпјӢж”ҫзҪ®пјү</span></div>
+    <div class="rm-head"><span></span><span>${esc(rackView.project)} — 42U 機櫃（＋放置）</span></div>
     ${rows}
   </div>`;
 }
@@ -508,16 +508,16 @@ function rackEmptyClick(u) {
   const members = machines.filter(x => x.project === proj && x.level === "rack");
   const inRack = new Set(members.map(x => x.name));
   const candidates = machines.filter(x => !inRack.has(x.name));
-  if (!candidates.length) { alert("жІ’жңүжңӘж”ҫзҪ®зҡ„ж©ҹеҸ°гҖӮи«Ӣе…ҲгҖҢвһ• еҠ е…Ҙж©ҹж«ғгҖҚж–°еўһпјҢжҲ–жҠҠж©ҹеҸ°з§»е…ҘжӯӨе°ҲжЎҲгҖӮ"); return; }
+  if (!candidates.length) { alert("沒有未放置的機台。請先「➕ 加入機櫃」新增，或把機台移入此專案。"); return; }
   const opts = candidates.map(m => `<option value="${esc(m.name)}">${esc(m.name)} (${esc(m.os_ip)})</option>`).join("");
-  showDialog(`ж”ҫзҪ®еҲ° U${u}`, `
-    <label style="display:block;font-size:12px;color:var(--text-faint);margin-bottom:6px">йҒёж“ҮиҰҒж”ҫеҲ° U${u} зҡ„ж©ҹеҸ°</label>
+  showDialog(`放置到 U${u}`, `
+    <label style="display:block;font-size:12px;color:var(--text-faint);margin-bottom:6px">選擇要放到 U${u} 的機台</label>
     <select class="input" id="rm-empty-m" style="width:100%;padding:8px">${opts}</select>`,
     [
-      { txt: "еҸ–ж¶Ҳ", cls: "", fn: () => closeDialog() },
-      { txt: "ж”ҫзҪ®", cls: "primary", fn: () => {
+      { txt: "取消", cls: "", fn: () => closeDialog() },
+      { txt: "放置", cls: "primary", fn: () => {
         const nm = $("rm-empty-m").value;
-        rackAssign(nm, { project: proj, level: "rack", rack_u: u }).then(() => { closeDialog(); setView("rack"); }).catch(e => alert("еӨұж•—пјҡ" + e.message));
+        rackAssign(nm, { project: proj, level: "rack", rack_u: u }).then(() => { closeDialog(); setView("rack"); }).catch(e => alert("失敗：" + e.message));
       } },
     ]);
 }
@@ -525,13 +525,13 @@ let devicesView = "cards";
 function devicesSetView(v) { devicesView = v; setView("rack"); }
 function devicesHtml(members, pinged) {
   const cardsView = devicesView === "cards";
-  // жё…е–®/еҚЎзүҮйғҪдҫқ U з”ұеӨ§еҲ°е°ҸпјҲU42вҶ’U1пјүжҺ’еҲ—
+  // 清單/卡片都依 U 由大到小（U42→U1）排列
   const byU = (a, b) => ((b.rack_u || 0) - (a.rack_u || 0));
   members = members.slice().sort(byU);
   const switchBtns = `
     <div class="dview-tabs">
-      <button class="btn small ${cardsView ? "active" : ""}" onclick="devicesSetView('cards')">в–Ұ еҚЎзүҮ</button>
-      <button class="btn small ${!cardsView ? "active" : ""}" onclick="devicesSetView('list')">в–° жё…е–®</button>
+      <button class="btn small ${cardsView ? "active" : ""}" onclick="devicesSetView('cards')">▦ 卡片</button>
+      <button class="btn small ${!cardsView ? "active" : ""}" onclick="devicesSetView('list')">▰ 清單</button>
     </div>`;
   let body;
   if (cardsView) {
@@ -541,66 +541,66 @@ function devicesHtml(members, pinged) {
       const info = mgxInfo(m);
       const isPassive = !!m.passive;
       const powerBtns = isPassive ? "" : `
-          <button class="btn small" onclick="singlePower('${esc(m.name)}',true)">вҸ» й–Ӣж©ҹ</button>
-          <button class="btn small btn-danger" onclick="singlePower('${esc(m.name)}',false)">вҸ» й—ңж©ҹ</button>`;
+          <button class="btn small" onclick="singlePower('${esc(m.name)}',true)">⏻ 開機</button>
+          <button class="btn small btn-danger" onclick="singlePower('${esc(m.name)}',false)">⏻ 關機</button>`;
       return `
       <div class="rack-card ${info.cls}-card" ${isPassive ? `onclick="rackMoveDialog('${esc(m.name)}')" style="cursor:pointer"` : ""}>
         <div class="rack-card-top">
-          <span class="rack-name">${info.icon} ${esc(m.name)}${isPassive ? ' <span class="badge badge-rack" style="font-size:9px;padding:1px 6px">з„ЎBMC</span>' : ''}</span>
-          <span class="rstatus ${up === true ? "green" : up === false ? "red" : "amber"}">${up === true ? "рҹҹў дёҠз·ҡ" : up === false ? "рҹ”ҙ йӣўз·ҡ" : "вЁӘ жңӘзҹҘ"}</span>
+          <span class="rack-name">${info.icon} ${esc(m.name)}${isPassive ? ' <span class="badge badge-rack" style="font-size:9px;padding:1px 6px">無BMC</span>' : ''}</span>
+          <span class="rstatus ${up === true ? "green" : up === false ? "red" : "amber"}">${up === true ? "🟢 上線" : up === false ? "🔴 離線" : "⨪ 未知"}</span>
         </div>
-        <div class="rack-mgx"><span class="mgx-dot ${info.cls}"></span> ${esc(info.label)} В· U${m.rack_u || "вҖ”"}</div>
-        <div class="rack-proj">е°ҲжЎҲ ${esc(m.project || "вҖ”")} В· OS ${esc(m.os_ip || "вҖ”")}<br>BMC ${esc(m.bmc_ip || "з„Ў")}</div>
+        <div class="rack-mgx"><span class="mgx-dot ${info.cls}"></span> ${esc(info.label)} · U${m.rack_u || "—"}</div>
+        <div class="rack-proj">專案 ${esc(m.project || "—")} · OS ${esc(m.os_ip || "—")}<br>BMC ${esc(m.bmc_ip || "無")}</div>
         <div class="rack-actions" ${isPassive ? `onclick="event.stopPropagation()"` : ""}>
           ${powerBtns}
-          <button class="btn small" onclick="rackMoveDialog('${esc(m.name)}')">вҮ… жҸӣдҪҚ</button>
-          <button class="btn small" onclick="openMachine('${esc(m.name)}')">в„№ и©іжғ…</button>
+          <button class="btn small" onclick="rackMoveDialog('${esc(m.name)}')">⇅ 換位</button>
+          <button class="btn small" onclick="openMachine('${esc(m.name)}')">ℹ 詳情</button>
         </div>
       </div>`;
     }).join("") + `</div>`;
   } else {
     body = `<div class="card"><div class="table-scroll"><table class="t rack-ping-table">
-      <thead><tr><th>U</th><th>Node</th><th>йЎһеһӢ</th><th>OS IP</th><th>BMC IP</th><th>зӢҖж…Ӣ</th><th>ж“ҚдҪң</th></tr></thead>
+      <thead><tr><th>U</th><th>Node</th><th>類型</th><th>OS IP</th><th>BMC IP</th><th>狀態</th><th>操作</th></tr></thead>
       <tbody>` + members.map(m => {
         const n = pinged.find(x => x.name === m.name);
         const up = n ? n.os_alive : null;
         const info = mgxInfo(m);
-        const lamp = v => v === true ? `<span class="ping-lamp on">рҹҹў</span>` : v === false ? `<span class="ping-lamp off">рҹ”ҙ</span>` : `<span class="ping-lamp none">вЁӘ</span>`;
+        const lamp = v => v === true ? `<span class="ping-lamp on">🟢</span>` : v === false ? `<span class="ping-lamp off">🔴</span>` : `<span class="ping-lamp none">⨪</span>`;
         return `<tr>
-          <td class="mono">U${m.rack_u || "вҖ”"}</td>
+          <td class="mono">U${m.rack_u || "—"}</td>
           <td class="mono">${esc(m.name)}</td>
           <td>${info.icon} ${esc(info.label)}</td>
           <td class="mono">${esc(m.os_ip)}</td>
-          <td class="mono">${esc(m.bmc_ip || "вҖ”")}</td>
+          <td class="mono">${esc(m.bmc_ip || "—")}</td>
           <td>${lamp(up)}</td>
           <td style="white-space:nowrap">
-            <button class="btn small" onclick="singlePower('${esc(m.name)}',true)">вҸ» й–Ӣ</button>
-            <button class="btn small btn-danger" onclick="singlePower('${esc(m.name)}',false)">вҸ» й—ң</button>
-            <button class="btn small" onclick="rackMoveDialog('${esc(m.name)}')">вҮ…</button>
-            <button class="btn small" onclick="openMachine('${esc(m.name)}')">в„№</button>
+            <button class="btn small" onclick="singlePower('${esc(m.name)}',true)">⏻ 開</button>
+            <button class="btn small btn-danger" onclick="singlePower('${esc(m.name)}',false)">⏻ 關</button>
+            <button class="btn small" onclick="rackMoveDialog('${esc(m.name)}')">⇅</button>
+            <button class="btn small" onclick="openMachine('${esc(m.name)}')">ℹ</button>
           </td>
         </tr>`;
       }).join("") + `</tbody></table></div></div>`;
   }
   return `
     <div class="dview-toolbar" style="display:flex;align-items:center;gap:10px;margin-top:18px">
-      <span class="rack-hero-sub">ж©ҹж«ғе…ғд»¶пјҲ${members.length}пјү</span>
+      <span class="rack-hero-sub">機櫃元件（${members.length}）</span>
       ${switchBtns}
     </div>
     ${body}`;
 }
 
-/* ---------- ж©ҹж«ғжӢ“жЁё / йҖЈз·ҡең– ---------- */
+/* ---------- 機櫃拓樸 / 連線圖 ---------- */
 let linksCache = [];          // [{a,b,type}]
 async function loadLinks() {
   try { const d = await api("/api/links"); linksCache = d.links || []; }
   catch (e) { linksCache = []; }
   return linksCache;
 }
-const LINK_TYPE = { eth: "Ethernet", ib: "InfiniBand", power: "йӣ»жәҗ", coolant: "ж¶ІеҶ·" };
+const LINK_TYPE = { eth: "Ethernet", ib: "InfiniBand", power: "電源", coolant: "液冷" };
 function linkCss(t) { return "lk-" + (t || "eth"); }
 function rackTopoHtml(members) {
-  // дҫқзӣ®еүҚе°ҲжЎҲзҜ©йҒёпјҡе…©з«ҜйғҪеңЁжң¬е°ҲжЎҲпјҲжҲ–иҮіе°‘дёҖз«ҜеңЁжң¬е°ҲжЎҲпјүзҡ„йҖЈз·ҡ
+  // 依目前專案篩選：兩端都在本專案（或至少一端在本專案）的連線
   const names = new Set(members.map(m => m.name));
   const rel = linksCache.filter(lk => names.has(lk.a) || names.has(lk.b));
   const involvedNm = new Set();
@@ -608,32 +608,32 @@ function rackTopoHtml(members) {
   const nodeHtml = [];
   members.forEach(m => {
     const deg = rel.filter(lk => lk.a === m.name || lk.b === m.name).length;
-    if (deg === 0 && involvedNm.size) return;   // жңүйҖЈз·ҡжҷӮеҸӘз•«жңүиў«йҖЈз·ҡзҡ„зҜҖй»һ
+    if (deg === 0 && involvedNm.size) return;   // 有連線時只畫有被連線的節點
     const info = mgxInfo(m);
     nodeHtml.push(`<div class="topo-node ${info.cls}" title="${esc(m.name)}">
       <span class="topo-ico">${info.icon}</span><span class="topo-name">${esc(m.name)}</span>
-      <span class="topo-deg">${deg} йҖЈз·ҡ</span></div>`);
+      <span class="topo-deg">${deg} 連線</span></div>`);
   });
   if (!rel.length) {
     return `<div class="card" style="margin-top:14px">
-      <div class="card-title">рҹ”Җ ж©ҹж«ғжӢ“жЁё / йҖЈз·ҡең–</div>
-      <div class="empty">жӯӨе°ҲжЎҲзӣ®еүҚжІ’жңүйҖЈз·ҡиіҮж–ҷгҖӮй»һгҖҢвһ• ж–°еўһйҖЈз·ҡгҖҚжҠҠ nodeвҶ”switch/PDU/CDU жҺҘиө·дҫҶгҖӮ<br>
-      е»әиӯ°е…ҲеҲҮжҸӣеҲ°гҖҢв–° жё…е–®гҖҚжҲ–дҪҝз”ЁгҖҢв–Ұ еҚЎзүҮгҖҚзўәиӘҚиҰҒйҖЈз·ҡзҡ„е…ғд»¶еҗҚзЁұгҖӮ</div>
+      <div class="card-title">🔀 機櫃拓樸 / 連線圖</div>
+      <div class="empty">此專案目前沒有連線資料。點「➕ 新增連線」把 node↔switch/PDU/CDU 接起來。<br>
+      建議先切換到「▰ 清單」或使用「▦ 卡片」確認要連線的元件名稱。</div>
     </div>`;
   }
   const linkList = rel.map(lk => {
     const t = LINK_TYPE[lk.type] || lk.type;
     return `<div class="topo-link ${linkCss(lk.type)}">
-      <span>${esc(lk.a)}</span><span class="topo-link-line">вҖ”${esc(t)}вҖ”</span><span>${esc(lk.b)}</span>
-      <button class="btn small" onclick="deleteLink('${esc(lk.a)}','${esc(lk.b)}')">вң•</button>
+      <span>${esc(lk.a)}</span><span class="topo-link-line">—${esc(t)}—</span><span>${esc(lk.b)}</span>
+      <button class="btn small" onclick="deleteLink('${esc(lk.a)}','${esc(lk.b)}')">✕</button>
     </div>`;
   }).join("");
   return `<div class="card" style="margin-top:14px">
-    <div class="card-title">рҹ”Җ ж©ҹж«ғжӢ“жЁё / йҖЈз·ҡең– <span class="hint">пјҲ${rel.length} жўқйҖЈз·ҡпјү</span></div>
+    <div class="card-title">🔀 機櫃拓樸 / 連線圖 <span class="hint">（${rel.length} 條連線）</span></div>
     <div class="topo-box">
       <div class="topo-nodes">${nodeHtml.join("")}</div>
       <div class="topo-legends">
-        ${Object.entries(LINK_TYPE).map(([k,v]) => `<span class="topo-legend ${linkCss(k)}">вҖ”${esc(v)}вҖ”</span>`).join("")}
+        ${Object.entries(LINK_TYPE).map(([k,v]) => `<span class="topo-legend ${linkCss(k)}">—${esc(v)}—</span>`).join("")}
       </div>
     </div>
     <div class="topo-links">${linkList}</div>
@@ -643,42 +643,42 @@ function linkAddDialog() {
   const proj = rackView.project;
   const members = machines.filter(x => x.project === proj && x.level === "rack");
   const opts = members.map(m => `<option value="${esc(m.name)}">${esc(m.name)} (${esc(mgxInfo(m).label)})</option>`).join("");
-  if (!members.length) { alert("жӯӨе°ҲжЎҲжІ’жңүж©ҹж«ғе…ғд»¶еҸҜйҖЈз·ҡ"); return; }
-  showDialog("вһ• ж–°еўһйҖЈз·ҡ", `
+  if (!members.length) { alert("此專案沒有機櫃元件可連線"); return; }
+  showDialog("➕ 新增連線", `
     <div class="rm-modal-body">
-      <p style="margin-bottom:12px;font-size:12px;color:var(--text-faint)">жҠҠе…©еҖӢж©ҹж«ғе…ғд»¶йҖЈиө·дҫҶпјҲnode вҶ” switch / PDU / CDUпјүгҖӮ</p>
-      <label style="display:block;font-size:12px;color:var(--text-faint);margin-bottom:6px">е…ғд»¶ A</label>
+      <p style="margin-bottom:12px;font-size:12px;color:var(--text-faint)">把兩個機櫃元件連起來（node ↔ switch / PDU / CDU）。</p>
+      <label style="display:block;font-size:12px;color:var(--text-faint);margin-bottom:6px">元件 A</label>
       <select class="input" id="lk-a" style="width:100%;padding:8px;margin-bottom:12px">${opts}</select>
-      <label style="display:block;font-size:12px;color:var(--text-faint);margin-bottom:6px">е…ғд»¶ B</label>
+      <label style="display:block;font-size:12px;color:var(--text-faint);margin-bottom:6px">元件 B</label>
       <select class="input" id="lk-b" style="width:100%;padding:8px;margin-bottom:12px">${opts}</select>
-      <label style="display:block;font-size:12px;color:var(--text-faint);margin:12px 0 6px">йҖЈз·ҡйЎһеһӢ</label>
+      <label style="display:block;font-size:12px;color:var(--text-faint);margin:12px 0 6px">連線類型</label>
       <select class="input" id="lk-type" style="width:100%;padding:8px">
         ${Object.entries(LINK_TYPE).map(([k,v]) => `<option value="${k}">${esc(v)}</option>`).join("")}
       </select>
     </div>`,
     [
-      { txt: "еҸ–ж¶Ҳ", cls: "", fn: () => closeDialog() },
-      { txt: "ж–°еўһйҖЈз·ҡ", cls: "primary", fn: () => {
+      { txt: "取消", cls: "", fn: () => closeDialog() },
+      { txt: "新增連線", cls: "primary", fn: () => {
         const a = $("lk-a").value, b = $("lk-b").value, t = $("lk-type").value;
-        if (a === b) return alert("A иҲҮ B дёҚиғҪзӣёеҗҢ");
+        if (a === b) return alert("A 與 B 不能相同");
         api("/api/links", { method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ a, b, type: t }) })
           .then(d => { linksCache = d.links || linksCache; closeDialog(); setView("rack"); })
-          .catch(e => alert("ж–°еўһеӨұж•—пјҡ" + e.message));
+          .catch(e => alert("新增失敗：" + e.message));
       } },
     ]);
 }
 async function deleteLink(a, b) {
-  if (!confirm(`еҲӘйҷӨжӯӨйҖЈз·ҡпјҲ${a} вҖ” ${b}пјүпјҹ`)) return;
+  if (!confirm(`刪除此連線（${a} — ${b}）？`)) return;
   try {
     const d = await api("/api/links", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ a, b }) });
     linksCache = d.links || linksCache;
     setView("rack");
-  } catch (e) { alert("еҲӘйҷӨеӨұж•—пјҡ" + e.message); }
+  } catch (e) { alert("刪除失敗：" + e.message); }
 }
 
 
-/* ---------- System managerй ҒпјҡL10/L11 еұӨзҙҡ + е°ҲжЎҲеҲҶзө„ ---------- */
+/* ---------- System manager頁：L10/L11 層級 + 專案分組 ---------- */
 const projectLevelFilter = { val: "all" };
 function setProjectLevelFilter(v) {
   projectLevelFilter.val = v;
@@ -686,7 +686,7 @@ function setProjectLevelFilter(v) {
   const holder = $("proj-sort-list");
   if (holder) { holder.outerHTML = renderProjectsList(); initProjectDrag(); }
 }
-// е°ҲжЎҲж”¶еҗҲзӢҖж…ӢпјҲд»Ҙе°ҲжЎҲеҗҚиЁҳйҢ„пјҢеӨ§йҮҸж©ҹеҸ°еҰӮ PROJ_K еҸҜзӣҙжҺҘж”¶иө·дҫҶпјү
+// 專案收合狀態（以專案名記錄，大量機台如 PROJ_K 可直接收起來）
 const projectCollapsed = {};   // { pname: bool }
 function renderCollapsed() {
   const holder = $("proj-sort-list");
@@ -706,7 +706,7 @@ function renderProjectsList() {
   let html = `<div id="proj-sort-list" class="proj-sort-list">`;
   const visibleProjects = projects.filter(p => projectMembers(p.name).some(m => f === "all" || m.level === f));
   if (!visibleProjects.length && !un.length) {
-    html += `<div class="card"><div class="empty">зӣ®еүҚйҖҷеҖӢеұӨзҙҡйӮ„жІ’жңүж©ҹеҸ°пјҢе…Ҳж–°еўһдёҖеҸ°гҖӮ</div></div>`;
+    html += `<div class="card"><div class="empty">目前這個層級還沒有機台，先新增一台。</div></div>`;
     return html + `</div>`;
   }
   visibleProjects.forEach((p, pi) => {
@@ -717,30 +717,30 @@ function renderProjectsList() {
     const collapsed = !!projectCollapsed[p.name];
     html += `
       <div class="proj-card card ${collapsed ? "collapsed" : ""}" data-pname="${esc(p.name)}">
-        <div class="proj-card-head" draggable="true" title="жӢ–еӢ•д»ҘиӘҝж•ҙе°ҲжЎҲй ҶеәҸ">
-          <div class="proj-card-grip">в ҝ</div>
+        <div class="proj-card-head" draggable="true" title="拖動以調整專案順序">
+          <div class="proj-card-grip">⠿</div>
           <div class="proj-card-info">
             <span class="proj-card-name">${esc(p.name)}</span>
-            <span class="proj-card-count">${members.length} еҸ° ${f==="all" ? `(R${rackN}/S${sysN})` : f==="rack" ? "В· L11" : "В· L10"}</span>
+            <span class="proj-card-count">${members.length} 台 ${f==="all" ? `(R${rackN}/S${sysN})` : f==="rack" ? "· L11" : "· L10"}</span>
             ${p.desc ? `<span class="proj-card-desc">${esc(p.desc)}</span>` : ""}
           </div>
           <span class="spacer"></span>
-          <button class="btn small proj-collapse-btn" onclick="event.stopPropagation();toggleProject('${esc(p.name)}')" title="${collapsed ? "еұ•й–ӢжӯӨе°ҲжЎҲ" : "ж”¶еҗҲжӯӨе°ҲжЎҲпјҲйҡұи—Ҹж©ҹеҸ°жё…е–®пјү"}">${collapsed ? "в–ј еұ•й–Ӣ" : "в–І ж”¶еҗҲ"}</button>
+          <button class="btn small proj-collapse-btn" onclick="event.stopPropagation();toggleProject('${esc(p.name)}')" title="${collapsed ? "展開此專案" : "收合此專案（隱藏機台清單）"}">${collapsed ? "▼ 展開" : "▲ 收合"}</button>
         </div>
         ${!collapsed && members.length ? `<table class="t">
-            <thead><tr><th></th><th>зі»зөұеҗҚзЁұ</th><th>еұӨзҙҡ</th><th>OS IP</th><th>BMC IP</th><th>OS зӢҖж…Ӣ</th><th>BMC зӢҖж…Ӣ</th><th>з§»еӢ•</th><th>ж“ҚдҪң</th></tr></thead>
+            <thead><tr><th></th><th>系統名稱</th><th>層級</th><th>OS IP</th><th>BMC IP</th><th>OS 狀態</th><th>BMC 狀態</th><th>移動</th><th>操作</th></tr></thead>
             <tbody>${rows.join("")}</tbody></table>`
-          : `${!collapsed ? `<div style="padding:10px 14px;color:var(--text-faint)">жӯӨе°ҲжЎҲеңЁжӯӨеұӨзҙҡе…§жІ’жңүж©ҹеҸ°</div>` : ""}`}
+          : `${!collapsed ? `<div style="padding:10px 14px;color:var(--text-faint)">此專案在此層級內沒有機台</div>` : ""}`}
       </div>`;
   });
   if (un.length) {
     html += `
       <div class="proj-card card" data-pname="">
         <div class="proj-card-head">
-          <div class="proj-card-grip" style="opacity:.35">в ҝ</div>
-          <div class="proj-card-info"><span class="proj-card-name">жңӘеҲҶйЎһ</span><span class="proj-card-count">${un.length} еҸ°</span></div>
+          <div class="proj-card-grip" style="opacity:.35">⠿</div>
+          <div class="proj-card-info"><span class="proj-card-name">未分類</span><span class="proj-card-count">${un.length} 台</span></div>
         </div>
-        <table class="t"><thead><tr><th></th><th>зі»зөұеҗҚзЁұ</th><th>еұӨзҙҡ</th><th>OS IP</th><th>BMC IP</th><th>з§»еӢ•</th><th>ж“ҚдҪң</th></tr></thead>
+        <table class="t"><thead><tr><th></th><th>系統名稱</th><th>層級</th><th>OS IP</th><th>BMC IP</th><th>移動</th><th>操作</th></tr></thead>
         <tbody>${un.map(m => machineRowUnassigned(m)).join("")}</tbody></table>
       </div>`;
   }
@@ -753,18 +753,18 @@ function pageProjects() {
   return `
     <div class="section-h flex-wrap">
       <span class="t" style="font-size:18px">System manager</span>
-      <span class="hint">е°ҲжЎҲеҲҶзө„ В· жӢ–жӣіеҚЎзүҮиӘҝж•ҙй ҶеәҸ</span>
+      <span class="hint">專案分組 · 拖曳卡片調整順序</span>
       <div class="lvl-tabs">
-        <button class="btn small lvl-tab ${projectLevelFilter.val==="all"?"active":""}" data-lvl="all" onclick="setProjectLevelFilter('all')">е…ЁйғЁ ${machines.length}</button>
-        <button class="btn small lvl-tab ${projectLevelFilter.val==="system"?"active":""}" data-lvl="system" onclick="setProjectLevelFilter('system')">рҹ–ҳ L10 зі»зөұ ${nSys}</button>
-        <button class="btn small lvl-tab ${projectLevelFilter.val==="rack"?"active":""}" data-lvl="rack" onclick="setProjectLevelFilter('rack')">рҹ—„ L11 ж•ҙж«ғ ${nRack}</button>
+        <button class="btn small lvl-tab ${projectLevelFilter.val==="all"?"active":""}" data-lvl="all" onclick="setProjectLevelFilter('all')">全部 ${machines.length}</button>
+        <button class="btn small lvl-tab ${projectLevelFilter.val==="system"?"active":""}" data-lvl="system" onclick="setProjectLevelFilter('system')">🖘 L10 系統 ${nSys}</button>
+        <button class="btn small lvl-tab ${projectLevelFilter.val==="rack"?"active":""}" data-lvl="rack" onclick="setProjectLevelFilter('rack')">🗄 L11 整櫃 ${nRack}</button>
       </div>
       <span class="spacer"></span>
-      <button class="btn small" onclick="collapseAllProjects(true)" title="жҠҠеҗ„е°ҲжЎҲзҡ„ж©ҹеҸ°жё…е–®е…ЁйғЁж”¶еҗҲпјҲйҒ©еҗҲеӨ§йҮҸж©ҹеҸ°пјү">в–І е…ЁйғЁж”¶еҗҲ</button>
-      <button class="btn small" onclick="collapseAllProjects(false)">в–ј е…ЁйғЁеұ•й–Ӣ</button>
-      <button class="btn" onclick="openProjectModal()">рҹ“Ғ з®ЎзҗҶе°ҲжЎҲ</button>
-      <button class="btn" onclick="refreshStatus()" id="refresh-btn">вҹі йҮҚж–°жҺғжҸҸ</button>
-      <button class="btn primary" onclick="openAdd()">пјӢ ж–°еўһзі»зөұ</button>
+      <button class="btn small" onclick="collapseAllProjects(true)" title="把各專案的機台清單全部收合（適合大量機台）">▲ 全部收合</button>
+      <button class="btn small" onclick="collapseAllProjects(false)">▼ 全部展開</button>
+      <button class="btn" onclick="openProjectModal()">📁 管理專案</button>
+      <button class="btn" onclick="refreshStatus()" id="refresh-btn">⟳ 重新掃描</button>
+      <button class="btn primary" onclick="openAdd()">＋ 新增系統</button>
     </div>
     ${renderProjectsList()}
   `;
@@ -773,58 +773,58 @@ function machineRowSortable(m, pi, mi, total) {
   const targetOpts = projects.filter(p => p.name !== m.project).map(p =>
     `<option value="${esc(p.name)}">${esc(p.name)}</option>`).join("");
   const lvlBadge = m.level === "rack"
-    ? `<span class="badge badge-rack">L11 В· Rack</span>`
-    : `<span class="badge badge-system">L10 В· Sys</span>`;
+    ? `<span class="badge badge-rack">L11 · Rack</span>`
+    : `<span class="badge badge-system">L10 · Sys</span>`;
   return `
     <tr>
       <td style="white-space:nowrap">
-        <button class="btn small" onclick="moveMachine('${esc(m.name)}',-1)" ${mi===0?"disabled":""} title="е«Җз·ҡ">в–І</button>
-        <button class="btn small" onclick="moveMachine('${esc(m.name)}',1)" ${mi===total-1?"disabled":""} title="дёӢз§»">в–ј</button>
+        <button class="btn small" onclick="moveMachine('${esc(m.name)}',-1)" ${mi===0?"disabled":""} title="嫀線">▲</button>
+        <button class="btn small" onclick="moveMachine('${esc(m.name)}',1)" ${mi===total-1?"disabled":""} title="下移">▼</button>
       </td>
       <td class="mono"><a href="#" class="mach-link" onclick="event.preventDefault();openMachine('${esc(m.name)}')"><b>${esc(m.name)}</b></a></td>
       <td>${lvlBadge}</td>
       <td class="mono">${esc(m.os_ip)}${m.os_user ? `<span style="color:var(--text-faint)"> (${esc(m.os_user)})</span>` : ""}</td>
-      <td class="mono">${esc(m.bmc_ip || "вҖ”")}</td>
+      <td class="mono">${esc(m.bmc_ip || "—")}</td>
       <td>${statusBadge(m.os_alive)}</td>
-      <td>${m.bmc_ip ? statusBadge(m.bmc_alive) : `<span style="color:var(--text-faint)">вҖ”</span>`}</td>
+      <td>${m.bmc_ip ? statusBadge(m.bmc_alive) : `<span style="color:var(--text-faint)">—</span>`}</td>
       <td>
         <select class="input move-sel" onchange="moveMachineTo('${esc(m.name)}', this.value)">
-          <option value="">з§»иҮівҖҰ</option>
+          <option value="">移至…</option>
           ${targetOpts}
-          ${m.project ? `<option value="">пјҲз§»й·Өе°ҲжЎҲпјү</option>` : ""}
+          ${m.project ? `<option value="">（移鷤專案）</option>` : ""}
         </select>
       </td>
       <td style="white-space:nowrap">
-        <button class="btn small" onclick="openTerm('${esc(m.name)}')">в–¶ Terminal</button>
-        <button class="btn small" onclick="deleteMachine('${esc(m.name)}')">еҲӘйҷӨ</button>
+        <button class="btn small" onclick="openTerm('${esc(m.name)}')">▶ Terminal</button>
+        <button class="btn small" onclick="deleteMachine('${esc(m.name)}')">刪除</button>
       </td>
     </tr>`;
 }
 function machineRowUnassigned(m) {
   const opts = projects.map(p => `<option value="${esc(p.name)}">${esc(p.name)}</option>`).join("");
   const lvlBadge = m.level === "rack"
-    ? `<span class="badge badge-rack">L11 В· Rack</span>`
-    : `<span class="badge badge-system">L10 В· Sys</span>`;
+    ? `<span class="badge badge-rack">L11 · Rack</span>`
+    : `<span class="badge badge-system">L10 · Sys</span>`;
   return `
     <tr>
       <td></td>
       <td class="mono"><a href="#" class="mach-link" onclick="event.preventDefault();openMachine('${esc(m.name)}')"><b>${esc(m.name)}</b></a></td>
       <td>${lvlBadge}</td>
       <td class="mono">${esc(m.os_ip)}</td>
-      <td class="mono">${esc(m.bmc_ip || "вҖ”")}</td>
+      <td class="mono">${esc(m.bmc_ip || "—")}</td>
       <td>
         <select class="input move-sel" onchange="moveMachineTo('${esc(m.name)}', this.value)">
-          <option value="">з§»иҮівҖҰ</option>
+          <option value="">移至…</option>
           ${opts}
         </select>
       </td>
       <td style="white-space:nowrap">
-        <button class="btn small" onclick="openTerm('${esc(m.name)}')">в–¶ Terminal</button>
-        <button class="btn small" onclick="deleteMachine('${esc(m.name)}')">еҲӘйҷӨ</button>
+        <button class="btn small" onclick="openTerm('${esc(m.name)}')">▶ Terminal</button>
+        <button class="btn small" onclick="deleteMachine('${esc(m.name)}')">刪除</button>
       </td>
     </tr>`;
 }
-/* ---------- з§»еӢ•пјҡе°ҲжЎҲжӢ–жӣіжҺ’еәҸ / ж©ҹеҸ°жҺ’еәҸ / ж©ҹеҸ°жҗ¬з§» ---------- */
+/* ---------- 移動：專案拖曳排序 / 機台排序 / 機台搬移 ---------- */
 function projectNamesInOrder() { return projects.map(p => p.name); }
 let _dragSrc = null;
 function initProjectDrag() {
@@ -893,9 +893,9 @@ async function moveMachineTo(name, project) {
   setView("projects");
 }
 
-// ж©ҹеҷЁи©іжғ…й ҒеҺ»жҠ–пјҡеӨҡеҖӢйқһеҗҢжӯҘијүе…ҘпјҲж„ҹжё¬еҷЁ poll / detail / refreshпјүе®ҢжҲҗжҷӮеҗ„иҮӘиҰҒжұӮйҮҚз№ӘпјҢ
-// иӢҘжҜҸж¬ЎйғҪж•ҙй ҒйҮҚз№ӘжңғйҖ жҲҗ chart еҸҚиҰҶйҮҚе»ә + telemetry йҮҚжҠ“ вҶ’ зӢӮи·іеҚЎжӯ»гҖӮ
-// е·ІеңЁ machine view жҷӮзҡ„йҮҚиӨҮи«ӢжұӮпјҢж–јдёҖзҹӯжҡ«иҰ–зӘ—е…§еҗҲдҪөзӮәдёҖж¬ЎгҖӮеҫһе…¶д»– view еҲҮе…ҘеүҮз«ӢеҚіжёІжҹ“гҖӮ
+// 機器詳情頁去抖：多個非同步載入（感測器 poll / detail / refresh）完成時各自要求重繪，
+// 若每次都整頁重繪會造成 chart 反覆重建 + telemetry 重抓 → 狂跳卡死。
+// 已在 machine view 時的重複請求，於一短暫視窗內合併為一次。從其他 view 切入則立即渲染。
 let _machineRenderTimer = null;
 function setView(view) {
   if (view === "machine" && state.view === "machine") {
@@ -905,7 +905,7 @@ function setView(view) {
     syncHash();
     return;
   }
-  // еҲҮеҲ°е…¶д»– viewпјҡеҸ–ж¶ҲеҸҜиғҪе°ҡжңӘеҹ·иЎҢзҡ„ machine еҺ»жҠ–йҮҚз№Ә
+  // 切到其他 view：取消可能尚未執行的 machine 去抖重繪
   if (_machineRenderTimer) { clearTimeout(_machineRenderTimer); _machineRenderTimer = null; }
   _renderMachine(view);
 }
@@ -920,7 +920,7 @@ function _renderMachine(view) {
   syncHash();
 }
 
-/* ---- URL еҲҶй Ғи·Ҝз”ұпјҲhashпјүпјҡйҮҚж–°ж•ҙзҗҶдёҚеӣһйҰ–й Ғ ---- */
+/* ---- URL 分頁路由（hash）：重新整理不回首頁 ---- */
 function currentRoute() {
   if (state.view === "machine") return "machine/" + encodeURIComponent(_activeMachine || "");
   return state.view || "dashboard";
@@ -941,7 +941,7 @@ function parseHash() {
   }
 }
 
-/* ============ System TelemetryпјҲCPU/DIMM/SSD/NIC/GPUпјү ============ */
+/* ============ System Telemetry（CPU/DIMM/SSD/NIC/GPU） ============ */
 let telCharts = {};
 const TEL_PALETTE = ["#2563eb", "#22c55e", "#e5484d", "#7c5cff", "#e0a800", "#14b8a6", "#f97316", "#ec4899", "#0ea5e9", "#84cc16"];
 let telMinutes = 60;
@@ -952,19 +952,19 @@ function telT(ts) {
   return `${p(d.getMonth()+1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 function telWindowLabel(min) {
-  if (min >= 1440) { const d = min / 1440; return d >= 1 && Number.isInteger(d) ? `${d} еӨ©` : `${d} еӨ©`; }
-  if (min >= 60) { const h = min / 60; return `${h} е°ҸжҷӮ`; }
-  return `${min} еҲҶйҗҳ`;
+  if (min >= 1440) { const d = min / 1440; return d >= 1 && Number.isInteger(d) ? `${d} 天` : `${d} 天`; }
+  if (min >= 60) { const h = min / 60; return `${h} 小時`; }
+  return `${min} 分鐘`;
 }
 function telToggleAllBtn(anyOpen) {
   const b = $("tel-collapse-all");
-  if (b) b.textContent = anyOpen ? "в–І е…ЁйғЁж”¶еҗҲ" : "в–ј е…ЁйғЁеұ•й–Ӣ";
+  if (b) b.textContent = anyOpen ? "▲ 全部收合" : "▼ 全部展開";
 }
 function syncTelBlocks() {
   document.querySelectorAll("#tel-grid .tel-block").forEach(blk => {
     const open = blk.dataset.open === "1";
     const arrow = blk.querySelector(".tel-arrow");
-    if (arrow) arrow.textContent = open ? "в–ј" : "в–¶";
+    if (arrow) arrow.textContent = open ? "▼" : "▶";
     const body = blk.querySelector(".tel-block-body");
     if (body) body.style.display = open ? "" : "none";
   });
@@ -974,7 +974,7 @@ function syncTelBlocks() {
 function toggleTel(key) {
   const blk = document.querySelector(`#tel-grid .tel-block[data-key="${key}"]`) ||
               document.querySelector(`#tel-grid .tel-block`);
-  // жүҫдёҚеҲ° data-key жҷӮз”Ё canvas id еҸҚжҹҘ
+  // 找不到 data-key 時用 canvas id 反查
   let target = blk;
   if (key) {
     const cv = document.getElementById(`tel-${key}`);
@@ -983,7 +983,7 @@ function toggleTel(key) {
   if (!target) return;
   target.dataset.open = target.dataset.open === "1" ? "0" : "1";
   syncTelBlocks();
-  // еұ•й–ӢеҫҢйҮҚз№ӘпјҲcanvas еҺҹе…Ҳйҡұи—ҸеҸҜиғҪжІ’з•«е…Ёпјү
+  // 展開後重繪（canvas 原先隱藏可能沒畫全）
   loadTelemetry();
 }
 function toggleTelAll() {
@@ -993,8 +993,8 @@ function toggleTelAll() {
   loadTelemetry();
 }
 function initTelemetry() {
-  if (!document.getElementById("tel-cpu")) return;  // йқһ machine й Ғ
-  // жё…йҷӨиҲҠ chartпјҲйҒҝе…ҚйҮҚе»әжҷӮйҮҚиӨҮпјү
+  if (!document.getElementById("tel-cpu")) return;  // 非 machine 頁
+  // 清除舊 chart（避免重建時重複）
   Object.keys(telCharts).forEach(k => { try { telCharts[k].destroy(); } catch(e){} });
   telCharts = {};
   const sel = $("tel-select");
@@ -1002,7 +1002,7 @@ function initTelemetry() {
     sel.value = String(telMinutes);
     sel.onchange = () => { telMinutes = +sel.value; loadTelemetry(); };
   }
-  // зөҰжҜҸеҖӢ block иЈң data-keyпјҲз”ұ canvas id жҺЁеҫ—пјү
+  // 給每個 block 補 data-key（由 canvas id 推得）
   document.querySelectorAll("#tel-grid .tel-block").forEach(blk => {
     const cv = blk.querySelector("canvas");
     if (cv && !blk.dataset.key) {
@@ -1012,7 +1012,7 @@ function initTelemetry() {
     }
   });
   syncTelBlocks();
-  // иӢҘе…Ёж”¶еҗҲеүҮеұ•й–Ӣ CPUпјҲзўәдҝқиҮіе°‘жңүең–пјү
+  // 若全收合則展開 CPU（確保至少有圖）
   if (![...document.querySelectorAll("#tel-grid .tel-block")].some(b => b.dataset.open === "1")) {
     const first = document.querySelector("#tel-grid .tel-block");
     if (first) first.dataset.open = "1";
@@ -1049,8 +1049,8 @@ function telSet(ch, labels, series, defs) {
   });
   ch.update();
 }
-// Telemetry з°Ўзҹӯ AI еҲҶжһҗпјҡжҠ“е–®ж©ҹи©ІзҜ„еңҚи¶ЁеӢў вҶ’ Ollama еӣһдёҖе°Ҹж®өж–Үеӯ— вҶ’ еЎ«е…Ҙ #tel-ai
-// еҗҢдёҖж©ҹеҸ°+зҜ„еңҚйҮҚиӨҮијүе…ҘзӣҙжҺҘз”Ёеҝ«еҸ–пјҢйҒҝе…ҚжҜҸж¬ЎйҮҚж•ҙйғҪжү“ OllamaпјҲијғж…ўпјүгҖӮ
+// Telemetry 簡短 AI 分析：抓單機該範圍趨勢 → Ollama 回一小段文字 → 填入 #tel-ai
+// 同一機台+範圍重複載入直接用快取，避免每次重整都打 Ollama（較慢）。
 const aiTelCache = {};
 async function telAnalyze(name, minutes) {
   const box = $("tel-ai");
@@ -1059,7 +1059,7 @@ async function telAnalyze(name, minutes) {
   if (aiTelCache[key] && box.dataset.k === key) {
     box.innerHTML = aiTelCache[key]; return;
   }
-  box.innerHTML = "вңЁ жӯЈеңЁеҲҶжһҗжӯӨзҜ„еңҚзҡ„зӣЈжҺ§и¶ЁеӢўвҖҰ";
+  box.innerHTML = "✨ 正在分析此範圍的監控趨勢…";
   box.dataset.k = key;
   let d;
   try {
@@ -1077,7 +1077,7 @@ async function loadTelemetry() {
   const name = _activeMachine;
   if (!name) return;
   const win = $("tel-window"); if (win) win.textContent = telWindowLabel(telMinutes);
-  telAnalyze(name, telMinutes);   // иғҢжҷҜи§ёзҷјз°Ўзҹӯ AI еҲҶжһҗпјҲдёҚйҳ»еЎһ telemetry з№Әең–пјү
+  telAnalyze(name, telMinutes);   // 背景觸發簡短 AI 分析（不阻塞 telemetry 繪圖）
   let d;
   try {
     d = await api(`/api/machine/${encodeURIComponent(name)}/telemetry?minutes=${telMinutes}`);
@@ -1086,11 +1086,11 @@ async function loadTelemetry() {
   const oarr = os.os || [];
   const oLabels = oarr.map(r => telT(r.ts));
 
-  // CPUпјҡдҪҝз”ЁзҺҮ %
+  // CPU：使用率 %
   let ch = telChart("tel-cpu", "%");
-  telSet(ch, oLabels, [{ key: "cpu", data: oarr.map(r => r.cpu_used) }], { cpu: { label: "CPU дҪҝз”ЁзҺҮ", color: "#2563eb" } });
+  telSet(ch, oLabels, [{ key: "cpu", data: oarr.map(r => r.cpu_used) }], { cpu: { label: "CPU 使用率", color: "#2563eb" } });
 
-  // CPU LoadпјҲ1/5/15 minпјү
+  // CPU Load（1/5/15 min）
   ch = telChart("tel-load", "load");
   telSet(ch, oLabels, [
     { key: "l1", data: oarr.map(r => r.load1) },
@@ -1098,34 +1098,34 @@ async function loadTelemetry() {
     { key: "l15", data: oarr.map(r => r.load15) },
   ], { l1: { label: "Load 1m", color: "#2563eb" }, l5: { label: "Load 5m", color: "#7c5cff" }, l15: { label: "Load 15m", color: "#84cc16" } });
 
-  // DIMMпјҡиЁҳжҶ¶й«”дҪҝз”ЁзҺҮ %пјҲеҫҢз«Ҝ mem_used_pctпјҢзјәеҖјжҷӮз”ұ used/total жҺЁз®—пјү
+  // DIMM：記憶體使用率 %（後端 mem_used_pct，缺值時由 used/total 推算）
   ch = telChart("tel-mem", "%");
-  telSet(ch, oLabels, [{ key: "usedpct", data: oarr.map(r => r.mem_used_pct != null ? r.mem_used_pct : (r.mem_total_gb ? r.mem_used_gb / r.mem_total_gb * 100 : null)) }], { usedpct: { label: "иЁҳжҶ¶й«”дҪҝз”ЁзҺҮ", color: "#e5484d" } });
+  telSet(ch, oLabels, [{ key: "usedpct", data: oarr.map(r => r.mem_used_pct != null ? r.mem_used_pct : (r.mem_total_gb ? r.mem_used_gb / r.mem_total_gb * 100 : null)) }], { usedpct: { label: "記憶體使用率", color: "#e5484d" } });
 
-  // DIMMпјҡе·Із”Ё + зёҪйҮҸ GB
+  // DIMM：已用 + 總量 GB
   ch = telChart("tel-memgb", "GB");
   telSet(ch, oLabels, [
     { key: "used", data: oarr.map(r => r.mem_used_gb) },
     { key: "total", data: oarr.map(r => r.mem_total_gb) },
-  ], { used: { label: "е·Із”Ё", color: "#e5484d" }, total: { label: "зёҪйҮҸ", color: "#94a3b8" } });
+  ], { used: { label: "已用", color: "#e5484d" }, total: { label: "總量", color: "#94a3b8" } });
 
-  // DIMMпјҡеҸҜз”Ё
+  // DIMM：可用
   ch = telChart("tel-swap", "GB");
-  telSet(ch, oLabels, [{ key: "avail", data: oarr.map(r => r.mem_avail_gb) }], { avail: { label: "еҸҜз”ЁиЁҳжҶ¶й«”", color: "#22c55e" } });
+  telSet(ch, oLabels, [{ key: "avail", data: oarr.map(r => r.mem_avail_gb) }], { avail: { label: "可用記憶體", color: "#22c55e" } });
 
-  // SSDпјҡеҗ„жҺӣијүй»һ %
+  // SSD：各掛載點 %
   ch = telChart("tel-disk", "%");
   const mounts = os.disk || [];
   const dLabels = mounts[0] ? mounts[0].ts.map(telT) : [];
   const dDefs = {}; mounts.forEach((m,i) => dDefs[m.mount] = { label: m.mount, color: TEL_PALETTE[i%TEL_PALETTE.length] });
   telSet(ch, dLabels, mounts.map((m,i) => ({ key: m.mount, data: m.pct })), dDefs);
 
-  // SSDпјҡе·Із”ЁйҮҸ GB
+  // SSD：已用量 GB
   ch = telChart("tel-diskused", "GB");
   const dUsedDefs = {}; mounts.forEach((m,i) => dUsedDefs[m.mount] = { label: m.mount, color: TEL_PALETTE[i%TEL_PALETTE.length] });
   telSet(ch, dLabels, mounts.map((m,i) => ({ key: m.mount, data: m.used_gb })), dUsedDefs);
 
-  // NICпјҲз¶Іи·Ҝеҗһеҗҗ MB/sпјү
+  // NIC（網路吞吐 MB/s）
   ch = telChart("tel-net", "MB/s");
   const nets = os.net || [];
   const allPts = nets.flatMap(n => n.points);
@@ -1138,14 +1138,14 @@ async function loadTelemetry() {
     const byTs = {}; n.points.forEach(p => byTs[p.ts] = p);
     const rx = tsArr.map(ts => byTs[ts] && byTs[ts].rx != null ? byTs[ts].rx/MB : null);
     const tx = tsArr.map(ts => byTs[ts] && byTs[ts].tx != null ? byTs[ts].tx/MB : null);
-    const tag = n.iface.length>14 ? n.iface.slice(0,13)+"вҖҰ" : n.iface;
+    const tag = n.iface.length>14 ? n.iface.slice(0,13)+"…" : n.iface;
     nSeries.push({ key: `tx${i}`, data: tx }); nSeries.push({ key: `rx${i}`, data: rx });
     nDefs[`tx${i}`] = { label: `${tag} TX`, color: col };
     nDefs[`rx${i}`] = { label: `${tag} RX`, color: col, dash: [4,4] };
   });
   telSet(ch, nLabels, nSeries, nDefs);
 
-  // GPUпјҡеҲ©з”ЁзҺҮ %
+  // GPU：利用率 %
   let gch = telChart("tel-gpu", "%");
   const gser = gpu.series || [];
   const gLabels = gser[0] ? gser[0].ts.map(telT) : [];
@@ -1153,22 +1153,22 @@ async function loadTelemetry() {
   const gDefs = {}; gser.forEach((s,i) => gDefs[`g${s.gpu}`] = { label: gName(s), color: TEL_PALETTE[i%TEL_PALETTE.length] });
   telSet(gch, gLabels, gser.map(s => ({ key: `g${s.gpu}`, data: s.util })), gDefs);
 
-  // GPUпјҡиЁҳжҶ¶й«”дҪҝз”Ё
+  // GPU：記憶體使用
   gch = telChart("tel-gpumem", "GB");
   const gmDefs = {}; gser.forEach((s,i) => gmDefs[`g${s.gpu}`] = { label: gName(s), color: TEL_PALETTE[i%TEL_PALETTE.length] });
   telSet(gch, gLabels, gser.map(s => ({ key: `g${s.gpu}`, data: s.mem_used })), gmDefs);
 
-  // GPUпјҡжә«еәҰ
-  gch = telChart("tel-gputemp", "В°C");
+  // GPU：溫度
+  gch = telChart("tel-gputemp", "°C");
   const gtDefs = {}; gser.forEach((s,i) => gtDefs[`g${s.gpu}`] = { label: gName(s), color: TEL_PALETTE[i%TEL_PALETTE.length] });
   telSet(gch, gLabels, gser.map(s => ({ key: `g${s.gpu}`, data: s.temp })), gtDefs);
 
-  // GPUпјҡеҠҹиҖ—
+  // GPU：功耗
   gch = telChart("tel-gpupow", "W");
   const gpDefs = {}; gser.forEach((s,i) => gpDefs[`g${s.gpu}`] = { label: gName(s), color: TEL_PALETTE[i%TEL_PALETTE.length] });
   telSet(gch, gLabels, gser.map(s => ({ key: `g${s.gpu}`, data: s.power })), gpDefs);
 }
-/* ---------- е–®ж©ҹи©іжғ…й Ғ ---------- */
+/* ---------- 單機詳情頁 ---------- */
 let _activeMachine = null;
 function openMachine(name) {
   _activeMachine = name;
@@ -1184,16 +1184,16 @@ function machineGo(view) {
 async function machineRefresh() {
   const name = _activeMachine;
   if (!name) return;
-  delete machineDetailCache[name];     // еј·еҲ¶йҮҚжҠ“и©іжғ… + OS/HWпјҲrefresh=1пјү
+  delete machineDetailCache[name];     // 強制重抓詳情 + OS/HW（refresh=1）
   await machineLoadDetail(name, true);
-  delete machineSensorsCache[name];    // еј·еҲ¶йҮҚжҠ“ж„ҹжё¬еҷЁпјҲrefresh=1пјү
+  delete machineSensorsCache[name];    // 強制重抓感測器（refresh=1）
   if (_activeMachine === name) await machineLoadSensors(name, true);
   if (_activeMachine === name) setView("machine");
 }
 const machineSensorsCache = {};
-// ж„ҹжё¬еҷЁжҳҜиғҢжҷҜжҠ“еҸ–зҡ„пјҲOpenBMC sdr list зҙ„ 20 з§’пјүгҖӮ
-// еҸӘжӣҙж–° #sensor-body еҚҖеЎҠпјҢзө•дёҚж•ҙй ҒйҮҚз№ӘпјҲйҒҝе…ҚжҜҸж¬ЎйғҪйҮҚз•« telemetry йҖ жҲҗзӢӮи·і/еҚЎжӯ»пјүгҖӮ
-// з„Ўеҝ«еҸ–жҷӮжҜҸ 3 з§’жҹҘдёҖж¬ЎпјӣжңүиҲҠеҖјпјҲrefreshingпјүжҷӮж”№жҜҸ 12 з§’з·©жҹҘпјҢжёӣе°‘й–ӢйҠ·гҖӮ
+// 感測器是背景抓取的（OpenBMC sdr list 約 20 秒）。
+// 只更新 #sensor-body 區塊，絕不整頁重繪（避免每次都重畫 telemetry 造成狂跳/卡死）。
+// 無快取時每 3 秒查一次；有舊值（refreshing）時改每 12 秒緩查，減少開銷。
 async function machineLoadSensors(name, refresh = false) {
   const poll = async () => {
     let d;
@@ -1204,38 +1204,38 @@ async function machineLoadSensors(name, refresh = false) {
       d = { error: e.message };
       machineSensorsCache[name] = d;
     }
-    if (_activeMachine !== name) return;         // е·ІеҲҮиө°пјҢеҒңжӯў
+    if (_activeMachine !== name) return;         // 已切走，停止
     const st = d && d.sensors;
-    // еҸӘжӣҙж–°ж„ҹжё¬еҷЁеҚЎзүҮжң¬й«”пјҢдёҚеӢ•ж•ҙеҖӢй ҒйқўпјҲsensor-body еҸӘеӯҳеңЁж–ј bmc_alive зҡ„и©іжғ…й Ғпјү
+    // 只更新感測器卡片本體，不動整個頁面（sensor-body 只存在於 bmc_alive 的詳情頁）
     const body = $("sensor-body");
     if (body) body.innerHTML = machineSensorsHtml(d, { bmc_alive: true }, name);
-    // ж„ҹжё¬еҷЁжңүиіҮж–ҷпјҲеҗ«иғҢжҷҜеҲ·ж–°дёӯпјүеҚіиҮӘеӢ•и§ёзҷјдёҖж¬Ў Sensor AI иЁәж–·
+    // 感測器有資料（含背景刷新中）即自動觸發一次 Sensor AI 診斷
     if (d && !d.error && d.sensors && (d.sensors.total || d.sensors.ok)) sensorAnalyze(name);
-    if (d.error) return;                         // еҮәйҢҜе°ұеҒңпјҲдёҚеҶҚијӘи©ўпјү
+    if (d.error) return;                         // 出錯就停（不再輪詢）
     if (d.loading) {
-      // refreshingпјҲеӣһиҲҠеҖјпјүжҲ–е°ҡз„ЎиіҮж–ҷ вҶ’ жҺ’дёӢдёҖијӘпјӣз„ЎиіҮж–ҷжҷӮжӣҙеҝ«
+      // refreshing（回舊值）或尚無資料 → 排下一輪；無資料時更快
       setTimeout(poll, (st && (st.total || st.ok)) ? 12000 : 3000);
     }
   };
   poll();
 }
 function machineSensorsHtml(d, base, name) {
-  if (!base.bmc_alive) return `<div class="empty">BMC зӣ®еүҚдёҚеҸҜйҖЈ</div>`;
+  if (!base.bmc_alive) return `<div class="empty">BMC 目前不可連</div>`;
   if (d && d.error) return `<div class="empty">${esc(d.error)}</div>`;
   const s = (d && d.sensors) || {};
-  // е®Ңе…ЁжІ’жңүиіҮж–ҷжҷӮжүҚйЎҜзӨәгҖҢжҠ“еҸ–дёӯгҖҚпјӣжңүиҲҠеҝ«еҸ–пјҲrefreshingпјүжҷӮз…§еёёйЎҜзӨәиіҮж–ҷдёҰеңЁиғҢжҷҜжӣҙж–°
+  // 完全沒有資料時才顯示「抓取中」；有舊快取（refreshing）時照常顯示資料並在背景更新
   if (!d || (d.loading && !Object.keys(s).length)) {
-    return `<div class="empty">рҹ”Қ ж„ҹжё¬еҷЁжҠ“еҸ–дёӯпјҲsdr list ијғж…ўпјҢзҙ„ 20 з§’пјүвҖҰ</div>`;
+    return `<div class="empty">🔍 感測器抓取中（sdr list 較慢，約 20 秒）…</div>`;
   }
-  const critRow = (s.critical_entries || []).map(l => `<li>рҹ”ҙ ${esc(l)}</li>`).join("");
-  const warnRow = (s.warning_entries || []).map(l => `<li>рҹҹ  ${esc(l)}</li>`).join("");
-  // е®Ңж•ҙ SDRпјҡж”ҫеӣәе®ҡй«ҳеәҰжЎҶе…§еҸҜеҫҖдёӢжӢүпјҢйҒҝе…Қз¶Ій ҒйҒҺй•·
+  const critRow = (s.critical_entries || []).map(l => `<li>🔴 ${esc(l)}</li>`).join("");
+  const warnRow = (s.warning_entries || []).map(l => `<li>🟠 ${esc(l)}</li>`).join("");
+  // 完整 SDR：放固定高度框內可往下拉，避免網頁過長
   const allRows = (s.entries || []).map(l => `<tr><td class="mono">${esc(l)}</td></tr>`).join("");
   const sdrBox = s.entries && s.entries.length
     ? `<div class="sdr-scroll">
         <table class="t sdr-table"><tbody>${allRows}</tbody></table>
       </div>
-      <span class="hint">е…ұ ${s.entries.length} зӯҶж„ҹжё¬еҷЁпјҲеҸҜжҚІеӢ•пјү</span>`
+      <span class="hint">共 ${s.entries.length} 筆感測器（可捲動）</span>`
     : "";
   return `
     <div class="sensor-kpis">
@@ -1244,13 +1244,13 @@ function machineSensorsHtml(d, base, name) {
       <div class="sensor-kpi"><b>${s.ok||0}</b><span>OK</span></div>
     </div>
     <ul class="alerts" style="margin-top:10px">
-      ${critRow || warnRow || `<li class="no-alert">вң” з„Ўз•°еёёж„ҹжё¬еҷЁ</li>`}
+      ${critRow || warnRow || `<li class="no-alert">✔ 無異常感測器</li>`}
     </ul>
-    <div class="tel-ai sensor-ai" id="sensor-ai">рҹӨ– жӯЈеңЁеҲҶжһҗж„ҹжё¬еҷЁзӢҖжіҒвҖҰ</div>
-    ${d.refreshing ? `<span class="hint">пјҲеҝ«еҸ–е·ІйҒҺжңҹпјҢиғҢжҷҜйҮҚж–°жҠ“еҸ–дёӯвҖҰпјү</span>` : ""}
+    <div class="tel-ai sensor-ai" id="sensor-ai">🤖 正在分析感測器狀況…</div>
+    ${d.refreshing ? `<span class="hint">（快取已過期，背景重新抓取中…）</span>` : ""}
     ${sdrBox}`;
 }
-// Sensor AI иЁәж–·пјҲжҜ”з…§ Telemetry AIпјүпјҡж„ҹжё¬еҷЁе°ұз·’еҫҢиҮӘеӢ•еҲҶжһҗдёҖж¬ЎпјҢзөҗжһңеҝ«еҸ–пјҢйҮҚз№ӘеҸҜйӮ„еҺҹгҖӮ
+// Sensor AI 診斷（比照 Telemetry AI）：感測器就緒後自動分析一次，結果快取，重繪可還原。
 const sensorAiDone = new Set();
 const sensorAiResult = {};
 async function sensorAnalyze(name) {
@@ -1260,17 +1260,17 @@ async function sensorAnalyze(name) {
     if (sensorAiResult[name] != null) box.innerHTML = sensorAiResult[name];
     return;
   }
-  box.innerHTML = "рҹӨ– жӯЈеңЁеҲҶжһҗж„ҹжё¬еҷЁзӢҖжіҒвҖҰ";
+  box.innerHTML = "🤖 正在分析感測器狀況…";
   let d;
   try {
     d = await api(`/api/machine/${encodeURIComponent(name)}/sensors/analyze`);
   } catch (e) {
-    box.innerHTML = "вҡҷпёҸ  Sensor AI з„Ўжі•йҖЈз·ҡ"; return;
+    box.innerHTML = "⚙️  Sensor AI 無法連線"; return;
   }
-  if (d && d.ok !== undefined && !d.ok) { box.innerHTML = `вҡҷпёҸ  ${esc(d.error || "ж„ҹжё¬еҷЁжңӘе°ұз·’")}`; return; }
-  if (!d || d.error) { box.innerHTML = "вҡҷпёҸ  Sensor AI е°ҡз„ЎиіҮж–ҷ"; return; }
+  if (d && d.ok !== undefined && !d.ok) { box.innerHTML = `⚙️  ${esc(d.error || "感測器未就緒")}`; return; }
+  if (!d || d.error) { box.innerHTML = "⚙️  Sensor AI 尚無資料"; return; }
   sensorAiDone.add(name);
-  sensorAiResult[name] = `рҹӨ– ${esc(d.analysis || d.summary || "")}`;
+  sensorAiResult[name] = `🤖 ${esc(d.analysis || d.summary || "")}`;
   const cur = $("#sensor-ai");
   if (cur) cur.innerHTML = sensorAiResult[name];
 }
@@ -1286,9 +1286,9 @@ async function machineLoadDetail(name, refresh = false) {
   if (_activeMachine === name) setView("machine");
 }
 
-/* ---- е–®ж©ҹи©іжғ…й Ғ ---- */
+/* ---- 單機詳情頁 ---- */
 
-/* зЎ¬й«”иіҮиЁҠпјҲCPU/DIMM/SSD/NIC/GPUпјүе°ҲжҘӯиЎЁж јејҸеҚЎзүҮе‘ҲзҸҫпјҲз„Ў emojiпјү */
+/* 硬體資訊（CPU/DIMM/SSD/NIC/GPU）專業表格式卡片呈現（無 emoji） */
 function hwItem(label, lines) {
   const rows = lines.filter(x=>x).map(l => `<div class="hw-line">${l}</div>`).join("");
   return `<div class="hw-item"><div class="hw-label">${label}</div><div class="hw-body"><div class="hw-lines">${rows}</div></div></div>`;
@@ -1297,7 +1297,7 @@ function hwHtml(oi) {
   const hw = (oi && oi.hw) || null;
   if (!hw) {
     if (oi && oi.raw) return `<pre class="mach-pre mono">${esc(oi.raw)}</pre>`;
-    return `<div class="empty">е°ҡжңӘжҠ“еҸ–зЎ¬й«”еһӢиҷҹпјҲйңҖ root + dmidecode/lspciпјү</div>`;
+    return `<div class="empty">尚未抓取硬體型號（需 root + dmidecode/lspci）</div>`;
   }
   let out = `<div class="hw-grid">`;
   const cpu = hw.cpu;
@@ -1308,22 +1308,22 @@ function hwHtml(oi) {
     const totalCores = sockets && cores ? sockets * cores : 0;
     const totalThreads = totalCores && threads ? totalCores * threads : 0;
     const specs = [
-      cpu.sockets ? `${cpu.sockets} Г— ${cpu.cores||"?"} ж ё` : "",
-      totalCores ? `е…ұ ${totalCores} ж ё` : "",
-      threads ? `жҜҸж ё ${threads} еҹ·иЎҢз·’` : "",
-      totalThreads ? `е…ұ ${totalThreads} еҹ·иЎҢз·’` : "",
-    ].filter(Boolean).join("гҖҖ") || "";
+      cpu.sockets ? `${cpu.sockets} × ${cpu.cores||"?"} 核` : "",
+      totalCores ? `共 ${totalCores} 核` : "",
+      threads ? `每核 ${threads} 執行緒` : "",
+      totalThreads ? `共 ${totalThreads} 執行緒` : "",
+    ].filter(Boolean).join("　") || "";
     out += hwItem("CPU", [
-      `<div class="cpu-model"><b>${esc(cpu.model || "вҖ”")}</b></div>`,
+      `<div class="cpu-model"><b>${esc(cpu.model || "—")}</b></div>`,
       specs ? `<div class="cpu-spec">${esc(specs)}</div>` : "",
     ]);
   }
   const d = hw.dimm;
   if (d) {
-    const size = `${d.count||""} жўқиЁҳжҶ¶й«”`;
+    const size = `${d.count||""} 條記憶體`;
     const parts = (d.parts||[]).map(p=>`<span class="hw-part">${esc(p)}</span>`).join("");
     out += hwItem("DIMM", [
-      `<b>${size}</b> <span class="mono">${(d.types||[]).join(" В· ")} ${(d.speeds||[]).join(" В· ")}</span>`,
+      `<b>${size}</b> <span class="mono">${(d.types||[]).join(" · ")} ${(d.speeds||[]).join(" · ")}</span>`,
       parts ? `<span class="hw-parts">${parts}</span>` : "",
     ]);
   }
@@ -1339,16 +1339,16 @@ function hwHtml(oi) {
   }
   const gpu = hw.gpu;
   if (gpu && gpu.length) {
-    // GPU еӨҡйЎҶжҷӮз”Ёе…©ж¬„з¶Іж јпјҢжёӣе°‘еһӮзӣҙз©әй–“
+    // GPU 多顆時用兩欄網格，減少垂直空間
     const rows = gpu.map(g => `<div class="gpu-cell"><span class="gpu-name">${esc(g.name)}</span> <span class="gpu-mem">${esc(g.mem)}</span> <span class="gpu-util">${esc(g.util)}</span></div>`).join("");
     out += `<div class="hw-item"><div class="hw-label">GPU</div><div class="hw-body"><div class="gpu-grid">${rows}</div></div></div>`;
   }
   const nic = hw.nic;
   if (nic && nic.length) {
-    // и§Јжһҗ lspci з¶ІеҚЎиЎҢ вҶ’ {type,model,count,buses}пјӣеҗҢеһӢиҷҹеҗҲдҪөиЁҲж•ёпјҢз”ЁеӨҡж¬„еҚЎзүҮзІҫз°Ўе‘ҲзҸҫ
+    // 解析 lspci 網卡行 → {type,model,count,buses}；同型號合併計數，用多欄卡片精簡呈現
     function tidyModel(raw) {
       let m = String(raw).replace(/\s*\(rev \d+\)\s*$/i, "").trim();
-      // йҖЈзәҢз§»йҷӨзөҗе°ҫзҡ„ Controller / Integrated / Network зӯүдҝ®йЈҫи©һпјҲжңғз–ҠеҠ еҮәзҸҫпјү
+      // 連續移除結尾的 Controller / Integrated / Network 等修飾詞（會疊加出現）
       while (/\b(controller|integrated|network|adapter)\b[\s:]*$/i.test(m)) {
         const next = m.replace(/\b(controller|integrated|network|adapter)\b[\s:]*$/i, "").replace(/\s{2,}/g, " ").trim();
         if (next === m) break;
@@ -1377,26 +1377,26 @@ function hwHtml(oi) {
         <div class="nic-top">
           <span class="nic-type ${g.type === "InfiniBand" ? "ib" : (g.type === "Ethernet" ? "eth" : "")}">${esc(g.type)}</span>
           <span class="nic-model">${esc(g.model)}</span>
-          ${g.count > 1 ? `<span class="nic-n">Г—${g.count}</span>` : ""}
+          ${g.count > 1 ? `<span class="nic-n">×${g.count}</span>` : ""}
         </div>
         <div class="nic-bus mono">${esc(g.buses.join(", "))}</div>
       </div>`).join("");
-    out += `<div class="hw-item"><div class="hw-label">NIC <span class="hw-sub">${(nic||[]).length} еҹ </span></div><div class="hw-body"><div class="nic-list">${cells}</div></div></div>`;
+    out += `<div class="hw-item"><div class="hw-label">NIC <span class="hw-sub">${(nic||[]).length} 埠</span></div><div class="hw-body"><div class="nic-list">${cells}</div></div></div>`;
   }
   out += `</div>`;
-  // OS ж‘ҳиҰҒпјҲdistro/uptime/cpu/memпјүеңЁжңҖдёҠйқў
+  // OS 摘要（distro/uptime/cpu/mem）在最上面
   const os = (oi && oi.os) || null;
   if (os && (os.distro || os.uptime)) {
     const osStats = [
       os.distro ? `<b>${esc(os.distro)}</b>` : "",
-      os.uptime ? `е·Ій–Ӣж©ҹ ${esc(os.uptime)}` : "",
-      os.cpu ? `CPU ${esc(os.cpu)} еҹ·иЎҢз·’` : "",
+      os.uptime ? `已開機 ${esc(os.uptime)}` : "",
+      os.cpu ? `CPU ${esc(os.cpu)} 執行緒` : "",
       os.mem ? esc(os.mem) : "",
     ].filter(v => v).map(v => `<span class="os-stat">${v}</span>`).join("");
     out = `<div class="os-summary">${osStats}</div>` + out;
   }
   if (oi && oi.raw) {
-    out += `<details class="hw-raw"><summary>еҺҹе§ӢијёеҮә (raw)</summary><pre class="mach-pre mono">${esc(oi.raw)}</pre></details>`;
+    out += `<details class="hw-raw"><summary>原始輸出 (raw)</summary><pre class="mach-pre mono">${esc(oi.raw)}</pre></details>`;
   }
   return out;
 }
@@ -1404,66 +1404,66 @@ function hwHtml(oi) {
 function pageMachine() {
   const name = _activeMachine;
   const m = machines.find(x => x.name === name);
-  if (!m) return `<div class="card"><div class="empty">жүҫдёҚеҲ°ж©ҹеҸ°</div></div>`;
+  if (!m) return `<div class="card"><div class="empty">找不到機台</div></div>`;
   const d = machineDetailCache[name];
   if (!d) {
     machineLoadDetail(name);
     return `
       <div class="mach-toolbar">
-        <button class="btn small" onclick="machineBack()">вҶҗ иҝ”еӣһ</button>
-        <span class="mach-name">рҹ–Ҙ ${esc(name)}</span>
+        <button class="btn small" onclick="machineBack()">← 返回</button>
+        <span class="mach-name">🖥 ${esc(name)}</span>
         <span class="spacer"></span>
-      <span class="hint">е°ҲжЎҲеҲҶзө„ В· жӢ–жӣіеҚЎзүҮиӘҝж•ҙй ҶеәҸ</span>
+      <span class="hint">專案分組 · 拖曳卡片調整順序</span>
       </div>
-      <div class="card"><div class="empty">жӯЈеңЁжҠ“еҸ–ж©ҹеҸ°иіҮиЁҠпјҲй–Ӣж©ҹиіҮиЁҠйңҖиҰҒ SSH, BMC з”Ё ipmitoolпјүвҖҰ</div></div>`;
+      <div class="card"><div class="empty">正在抓取機台資訊（開機資訊需要 SSH, BMC 用 ipmitool）…</div></div>`;
   }
   if (d.error) {
     return `
       <div class="mach-toolbar">
-        <button class="btn small" onclick="machineBack()">вҶҗ иҝ”еӣһ</button>
-        <span class="mach-name">рҹ–Ҙ ${esc(name)}</span>
+        <button class="btn small" onclick="machineBack()">← 返回</button>
+        <span class="mach-name">🖥 ${esc(name)}</span>
         <span class="spacer"></span>
-        <button class="btn small" onclick="machineRefresh()">вҹі йҮҚи©Ұ</button>
+        <button class="btn small" onclick="machineRefresh()">⟳ 重試</button>
       </div>
-      <div class="card"><div class="empty">ијүе…ҘеӨұж•—пјҡ${esc(d.error)}</div></div>`;
+      <div class="card"><div class="empty">載入失敗：${esc(d.error)}</div></div>`;
   }
   const base = d.machine || {};
   const lvlBadge = base.level === "rack"
-    ? `<span class="badge badge-rack">L11 В· Rack</span>` : `<span class="badge badge-system">L10 В· Sys</span>`;
+    ? `<span class="badge badge-rack">L11 · Rack</span>` : `<span class="badge badge-system">L10 · Sys</span>`;
   const osState = base.os_alive ? statusBadge(true) : statusBadge(false);
-  const bmcState = base.bmc_ip ? (base.bmc_alive ? statusBadge(true) : statusBadge(false)) : `<span style="color:var(--text-faint)">з„Ў</span>`;
-  // OS зі»зөұиіҮиЁҠпјҲеҸҜиғҪзӮәеҝ«еҸ–жӯ·еҸІеҖјпјү
-  // OS зі»зөұиіҮиЁҠпјҲзЎ¬й«”еһӢиҷҹеҚЎзүҮпјү
+  const bmcState = base.bmc_ip ? (base.bmc_alive ? statusBadge(true) : statusBadge(false)) : `<span style="color:var(--text-faint)">無</span>`;
+  // OS 系統資訊（可能為快取歷史值）
+  // OS 系統資訊（硬體型號卡片）
   let osInfoHtml = hwHtml(d.os_info || {});
-  if (d.os_info && d.os_info.fetched_at) osInfoHtml += `<span class="hint">жҠ“еҸ–жҷӮй–“пјҡ${esc(d.os_info.fetched_at)}</span>`;
-  // BMC FW + йӣ»жәҗ + ж„ҹжё¬
-  let fwHtml = `<div class="empty">BMC зӣ®еүҚдёҚеҸҜйҖЈпјҢз„ЎеҫһжҠ“еҸ–</div>`;
+  if (d.os_info && d.os_info.fetched_at) osInfoHtml += `<span class="hint">抓取時間：${esc(d.os_info.fetched_at)}</span>`;
+  // BMC FW + 電源 + 感測
+  let fwHtml = `<div class="empty">BMC 目前不可連，無從抓取</div>`;
   if (base.bmc_alive) {
     const fwRows = (d.fw || []).map(f => `<tr><td class="mono">${esc(f.key)}</td><td class="mono">${esc(f.value)}</td></tr>`).join("");
     fwHtml = fwRows ? `<table class="t fw-table"><tbody>${fwRows}</tbody></table>`
-                    : d.bmc_loading ? `<div class="empty">BMC йҖЈз·ҡжҠ“еҸ–дёӯпјҲCisco CIMC ијғж…ўзҙ„ 15вҖ“30 з§’пјүвҖҰ<br><span class="mono" style="font-size:11px">зЁҚеҫҢиҮӘеӢ•жӣҙж–°</span></div>`
-                    : `<div class="empty">з„Ў FW иіҮж–ҷ</div>`;
+                    : d.bmc_loading ? `<div class="empty">BMC 連線抓取中（Cisco CIMC 較慢約 15–30 秒）…<br><span class="mono" style="font-size:11px">稍後自動更新</span></div>`
+                    : `<div class="empty">無 FW 資料</div>`;
   }
-  // BIOS / Device FirmwareпјҲdmidecode + smartctl + ethtool + nvidia-smiпјҢи·Ё vendor е®№йҢҜпјү
+  // BIOS / Device Firmware（dmidecode + smartctl + ethtool + nvidia-smi，跨 vendor 容錯）
   const hwFw = (d.os_info && d.os_info.hw && d.os_info.hw.firmware) || null;
   if (hwFw) {
     let fwRows = "";
     if (hwFw.bios) {
-      const parts = [hwFw.bios.vendor, hwFw.bios.version, hwFw.bios.release].filter(Boolean).join(" В· ");
+      const parts = [hwFw.bios.vendor, hwFw.bios.version, hwFw.bios.release].filter(Boolean).join(" · ");
       fwRows += `<tr><td class="mono bfw-tag">BIOS</td><td class="mono">${esc(parts)}</td></tr>`;
     }
     (hwFw.ssd || []).forEach(s => fwRows += `<tr><td class="mono bfw-tag">SSD ${esc(s.dev)}</td><td class="mono">${esc(s.fw)}</td></tr>`);
     (hwFw.nic || []).forEach(n => fwRows += `<tr><td class="mono bfw-tag">NIC ${esc(n.iface)}</td><td class="mono">${esc(n.fw)}</td></tr>`);
-    (hwFw.gpu || []).forEach(g => fwRows += `<tr><td class="mono bfw-tag">GPU ${esc(g.index)}</td><td class="mono">${esc(g.fw) || "вҖ”"}</td></tr>`);
+    (hwFw.gpu || []).forEach(g => fwRows += `<tr><td class="mono bfw-tag">GPU ${esc(g.index)}</td><td class="mono">${esc(g.fw) || "—"}</td></tr>`);
     if (fwRows) {
       fwHtml += `
       <details class="bfw-wrap">
-        <summary class="bfw-title">пјӢ BIOS / иЈқзҪ®йҹҢй«” (OS) <span class="bfw-count">${(fwRows.match(/<tr>/g)||[]).length} й …</span></summary>
+        <summary class="bfw-title">＋ BIOS / 裝置韌體 (OS) <span class="bfw-count">${(fwRows.match(/<tr>/g)||[]).length} 項</span></summary>
         <table class="t fw-table bfw-table"><tbody>${fwRows}</tbody></table>
       </details>`;
     }
   }
-  // ж„ҹжё¬еҷЁпјҡзҚЁз«Ӣ /sensors з«Ҝй»һпјҢйқһеҗҢжӯҘијүе…ҘпјҲдёҚйҳ»еЎһдё»з•«йқўпјү
+  // 感測器：獨立 /sensors 端點，非同步載入（不阻塞主畫面）
   const sd = machineSensorsCache[name];
   if (base.bmc_alive && !sd) machineLoadSensors(name);
   const sensorHtml = machineSensorsHtml(sd, base, name);
@@ -1471,7 +1471,8 @@ function pageMachine() {
   if (base.bmc_alive && _activeMachine === name) {
     setTimeout(() => { if (state.view === "machine") sensorAnalyze(name); }, 60);
   }
-  // BMC иғҢжҷҜжҠ“еҸ–йҖІиЎҢдёӯ вҶ’ ж•ёз§’еҫҢиҮӘеӢ•йҮҚжү“ detailпјҲдёҚжү“ refreshпјҢи®Җеҝ«еҸ–пјүжӣҙж–°
+
+  // BMC 背景抓取進行中 → 數秒後自動重打 detail（不打 refresh，讀快取）更新
   if (d.bmc_loading) {
     setTimeout(() => {
       if (_activeMachine === name && state.view === "machine") {
@@ -1482,39 +1483,39 @@ function pageMachine() {
   }
   return `
     <div class="mach-toolbar">
-      <button class="btn small" onclick="machineBack()">вҶҗ иҝ”еӣһ</button>
-      <span class="mach-name">рҹ–Ҙ ${esc(name)} ${lvlBadge}</span>
+      <button class="btn small" onclick="machineBack()">← 返回</button>
+      <span class="mach-name">🖥 ${esc(name)} ${lvlBadge}</span>
       <span class="spacer"></span>
-      <button class="btn small" onclick="openTerm('${esc(name)}')">в–¶ Terminal</button>
-      ${m.passive ? "" : `<button class="btn small" onclick="runDiagnose('${esc(name)}')">рҹ©ә зі»зөұиЁәж–·</button>`}
-      <button class="btn small" onclick="machineRefresh()">вҹі йҮҚж–°ж•ҙзҗҶ</button>
+      <button class="btn small" onclick="openTerm('${esc(name)}')">▶ Terminal</button>
+      ${m.passive ? "" : `<button class="btn small" onclick="runDiagnose('${esc(name)}')">🩺 系統診斷</button>`}
+      <button class="btn small" onclick="machineRefresh()">⟳ 重新整理</button>
     </div>
     <div class="mach-grid">
       <div class="card">
-        <div class="card-title">еҹәжң¬иіҮиЁҠ</div>
+        <div class="card-title">基本資訊</div>
         <table class="t mach-info">
-          <tr><td>е°ҲжЎҲ</td><td>${esc(base.project || "жңӘеҲҶйЎһ")}</td></tr>
-          <tr><td>еұӨзҙҡ</td><td>${lvlBadge}</td></tr>
-          <tr><td>OS IP</td><td class="mono">${esc(base.os_ip)} (${esc(base.os_user||"")}) вҖ” <b>${osState}</b></td></tr>
-          <tr><td>BMC IP</td><td class="mono">${esc(base.bmc_ip||"вҖ”")} (${esc(base.bmc_user||"")}) вҖ” <b>${bmcState}</b></td></tr>
-          <tr><td>BMC йӣ»жәҗ</td><td>${base.bmc_alive ? powerBadge(d.power) : "вҖ”"}</td></tr>
+          <tr><td>專案</td><td>${esc(base.project || "未分類")}</td></tr>
+          <tr><td>層級</td><td>${lvlBadge}</td></tr>
+          <tr><td>OS IP</td><td class="mono">${esc(base.os_ip)} (${esc(base.os_user||"")}) — <b>${osState}</b></td></tr>
+          <tr><td>BMC IP</td><td class="mono">${esc(base.bmc_ip||"—")} (${esc(base.bmc_user||"")}) — <b>${bmcState}</b></td></tr>
+          <tr><td>BMC 電源</td><td>${base.bmc_alive ? powerBadge(d.power) : "—"}</td></tr>
         </table>
         ${base.bmc_ip ? `
         <div class="mach-power-actions">
-          <button class="btn small" onclick="machinePower('${esc(name)}',true)">вҸ» й–Ӣж©ҹ (ipmitool)</button>
-          <button class="btn small btn-danger" onclick="machinePower('${esc(name)}',false)">вҸ» й—ңж©ҹ (ipmitool)</button>
-      <span class="hint">е°ҲжЎҲеҲҶзө„ В· жӢ–жӣіеҚЎзүҮиӘҝж•ҙй ҶеәҸ</span>
+          <button class="btn small" onclick="machinePower('${esc(name)}',true)">⏻ 開機 (ipmitool)</button>
+          <button class="btn small btn-danger" onclick="machinePower('${esc(name)}',false)">⏻ 關機 (ipmitool)</button>
+      <span class="hint">專案分組 · 拖曳卡片調整順序</span>
         </div>` : ""}
       </div>
       <div class="card">
-        <div class="card-title">OS зі»зөұиіҮиЁҠ ${d.os_info && d.os_info.fetched_at ? `<span class="hint">(${d.os_info.fetched_at})</span>` : ""}</div>
+        <div class="card-title">OS 系統資訊 ${d.os_info && d.os_info.fetched_at ? `<span class="hint">(${d.os_info.fetched_at})</span>` : ""}</div>
         <div class="os-scroll">${osInfoHtml}</div>
       </div>
     </div>
     ${base.bmc_alive ? `
     <div class="mach-grid">
       <div class="card">
-        <div class="card-title">BMC ж„ҹжё¬еҷЁ (ipmitool sdr)</div>
+        <div class="card-title">BMC 感測器 (ipmitool sdr)</div>
         <div id="sensor-body">${sensorHtml}</div>
       </div>
       <div class="card">
@@ -1522,132 +1523,132 @@ function pageMachine() {
         ${fwHtml}
       </div>
     </div>` : `
-    <div class="card"><div class="empty">BMC (${esc(base.bmc_ip||"вҖ”")}) зӣ®еүҚдёҚеҸҜйҖЈпјҢз„Ўжі•жҠ“еҸ–ж„ҹжё¬еҷЁиҲҮ FW иіҮиЁҠгҖӮ</div></div>`}
+    <div class="card"><div class="empty">BMC (${esc(base.bmc_ip||"—")}) 目前不可連，無法抓取感測器與 FW 資訊。</div></div>`}
     ${m.passive ? "" : `<div class="card diag-card" style="margin-top:18px">
-      <div class="card-title">рҹ©ә зі»зөұиЁәж–·пјҲOllama еҲҶжһҗпјү</div>
+      <div class="card-title">🩺 系統診斷（Ollama 分析）</div>
       <div class="diag-body" id="diag-body"></div>
       ${diagBodyFill(name)}
     </div>`}
     <div class="card" style="margin-top:18px">
       <div class="card-title tel-card-title" onclick="toggleTelAll()">
-        <span>рҹ“Ҡ System Telemetry <span class="hint" id="tel-window"></span></span>
-        <span class="tel-collapse-all" id="tel-collapse-all">в–І е…ЁйғЁж”¶еҗҲ</span>
+        <span>📊 System Telemetry <span class="hint" id="tel-window"></span></span>
+        <span class="tel-collapse-all" id="tel-collapse-all">▲ 全部收合</span>
       </div>
       <div class="tel-toolbar">
-        <label class="tel-range-sel">жҷӮй–“зҜ„еңҚ
+        <label class="tel-range-sel">時間範圍
           <select class="input" id="tel-select">
-            <option value="10">10 еҲҶйҗҳ</option>
-            <option value="30">30 еҲҶйҗҳ</option>
-            <option value="60" selected>1 е°ҸжҷӮ</option>
-            <option value="360">6 е°ҸжҷӮ</option>
-            <option value="720">12 е°ҸжҷӮ</option>
-            <option value="1440">24 е°ҸжҷӮ</option>
-            <option value="2880">2 еӨ©</option>
-            <option value="10080">7 еӨ©</option>
-            <option value="43200">30 еӨ©</option>
+            <option value="10">10 分鐘</option>
+            <option value="30">30 分鐘</option>
+            <option value="60" selected>1 小時</option>
+            <option value="360">6 小時</option>
+            <option value="720">12 小時</option>
+            <option value="1440">24 小時</option>
+            <option value="2880">2 天</option>
+            <option value="10080">7 天</option>
+            <option value="43200">30 天</option>
           </select>
         </label>
-        <span class="tel-ai-hint">рҹӨ– Telemetry AI</span>
+        <span class="tel-ai-hint">🤖 Telemetry AI</span>
       </div>
-      <div class="tel-ai" id="tel-ai">вңЁ жӯЈеңЁеҲҶжһҗжӯӨзҜ„еңҚзҡ„зӣЈжҺ§и¶ЁеӢўвҖҰ</div>
+      <div class="tel-ai" id="tel-ai">✨ 正在分析此範圍的監控趨勢…</div>
       <div class="tel-grid" id="tel-grid">
         <div class="tel-block" data-open="1">
-          <div class="tel-block-head"><span class="tel-label">CPU <em>пјҲдёӯеӨ®иҷ•зҗҶеҷЁпјү</em></span></div>
+          <div class="tel-block-head"><span class="tel-label">CPU <em>（中央處理器）</em></span></div>
           <div class="tel-block-body">
-            <div class="chart-box"><div class="chart-title">CPU дҪҝз”ЁзҺҮ <span class="unit">пјқ еҗ„ж ёеҝғеҝҷзўҢжҜ”дҫӢзҡ„е№іеқҮпјҢ0~100%</span></div><canvas id="tel-cpu"></canvas></div>
-            <div class="chart-box"><div class="chart-title">CPU LoadпјҲе№іеқҮиІ ијүпјү <span class="unit">пјқ жҺ’йҡҠзӯүеҫ…зҡ„ж ёеҝғд»»еӢҷж•ёпјҢи¶…йҒҺж ёеҝғж•ёд»ЈиЎЁйҒҺијү</span></div><canvas id="tel-load"></canvas></div>
+            <div class="chart-box"><div class="chart-title">CPU 使用率 <span class="unit">＝ 各核心忙碌比例的平均，0~100%</span></div><canvas id="tel-cpu"></canvas></div>
+            <div class="chart-box"><div class="chart-title">CPU Load（平均負載） <span class="unit">＝ 排隊等待的核心任務數，超過核心數代表過載</span></div><canvas id="tel-load"></canvas></div>
           </div>
         </div>
         <div class="tel-block" data-open="1">
-          <div class="tel-block-head"><span class="tel-label">DIMM <em>пјҲиЁҳжҶ¶й«”пјү</em></span></div>
+          <div class="tel-block-head"><span class="tel-label">DIMM <em>（記憶體）</em></span></div>
           <div class="tel-block-body">
-            <div class="chart-box"><div class="chart-title">иЁҳжҶ¶й«”дҪҝз”ЁзҺҮ <span class="unit">пјқ е·Із”ЁпјҸзёҪе®№йҮҸ</span></div><canvas id="tel-mem"></canvas></div>
-            <div class="chart-box"><div class="chart-title">иЁҳжҶ¶й«”дҪҝз”ЁйҮҸ <span class="unit">пјқ е·Із”Ё vs зёҪйҮҸпјҲGBпјү</span></div><canvas id="tel-memgb"></canvas></div>
-            <div class="chart-box"><div class="chart-title">еҸҜз”ЁиЁҳжҶ¶й«” <span class="unit">пјқ еҸҜз”Ёзҡ„ GB</span></div><canvas id="tel-swap"></canvas></div>
+            <div class="chart-box"><div class="chart-title">記憶體使用率 <span class="unit">＝ 已用／總容量</span></div><canvas id="tel-mem"></canvas></div>
+            <div class="chart-box"><div class="chart-title">記憶體使用量 <span class="unit">＝ 已用 vs 總量（GB）</span></div><canvas id="tel-memgb"></canvas></div>
+            <div class="chart-box"><div class="chart-title">可用記憶體 <span class="unit">＝ 可用的 GB</span></div><canvas id="tel-swap"></canvas></div>
           </div>
         </div>
         <div class="tel-block" data-open="1">
-          <div class="tel-block-head"><span class="tel-label">SSD <em>пјҲеӣәж…ӢзЎ¬зўҹ / е„Іеӯҳпјү</em></span></div>
+          <div class="tel-block-head"><span class="tel-label">SSD <em>（固態硬碟 / 儲存）</em></span></div>
           <div class="tel-block-body">
-            <div class="chart-box"><div class="chart-title">жҺӣијүй»һдҪҝз”ЁзҺҮ <span class="unit">пјқ жҜҸеҖӢеҲҶеүІеҚҖе·Із”ЁзҷҫеҲҶжҜ”</span></div><canvas id="tel-disk"></canvas></div>
-            <div class="chart-box"><div class="chart-title">жҺӣијүй»һе·Із”ЁйҮҸ <span class="unit">пјқ жҜҸеҖӢеҲҶеүІеҚҖе·Із”Ёз©әй–“пјҲGBпјү</span></div><canvas id="tel-diskused"></canvas></div>
+            <div class="chart-box"><div class="chart-title">掛載點使用率 <span class="unit">＝ 每個分割區已用百分比</span></div><canvas id="tel-disk"></canvas></div>
+            <div class="chart-box"><div class="chart-title">掛載點已用量 <span class="unit">＝ 每個分割區已用空間（GB）</span></div><canvas id="tel-diskused"></canvas></div>
           </div>
         </div>
         <div class="tel-block" data-open="1">
-          <div class="tel-block-head"><span class="tel-label">NIC <em>пјҲз¶Іи·ҜеҚЎпјү</em></span></div>
+          <div class="tel-block-head"><span class="tel-label">NIC <em>（網路卡）</em></span></div>
           <div class="tel-block-body">
-            <div class="chart-box"><div class="chart-title">з¶Іи·ҜеҗһеҗҗйҮҸ <span class="unit">пјқ жҜҸејөз¶ІеҚЎ RXвҶ“ж”¶ / TXвҶ‘йҖҒпјҲMB/sпјү</span></div><canvas id="tel-net"></canvas></div>
+            <div class="chart-box"><div class="chart-title">網路吞吐量 <span class="unit">＝ 每張網卡 RX↓收 / TX↑送（MB/s）</span></div><canvas id="tel-net"></canvas></div>
           </div>
         </div>
         <div class="tel-block" data-open="1">
-          <div class="tel-block-head"><span class="tel-label">GPU <em>пјҲйЎҜзӨәеҚЎпјү</em></span></div>
+          <div class="tel-block-head"><span class="tel-label">GPU <em>（顯示卡）</em></span></div>
           <div class="tel-block-body">
-            <div class="chart-box"><div class="chart-title">GPU дҪҝз”ЁзҺҮ <span class="unit">пјқ GPU ж ёеҝғйҒӢз®—иІ ијү</span></div><canvas id="tel-gpu"></canvas></div>
-            <div class="chart-box"><div class="chart-title">GPU иЁҳжҶ¶й«”дҪҝз”Ё <span class="unit">пјқ VRAMпјҲGBпјү</span></div><canvas id="tel-gpumem"></canvas></div>
-            <div class="chart-box"><div class="chart-title">GPU жә«еәҰ <span class="unit">пјқ йЎҜзӨәеҚЎжә«еәҰпјҲВ°Cпјү</span></div><canvas id="tel-gputemp"></canvas></div>
-            <div class="chart-box"><div class="chart-title">GPU еҠҹиҖ— <span class="unit">пјқ йЎҜзӨәеҚЎеҠҹиҖ—пјҲWпјү</span></div><canvas id="tel-gpupow"></canvas></div>
+            <div class="chart-box"><div class="chart-title">GPU 使用率 <span class="unit">＝ GPU 核心運算負載</span></div><canvas id="tel-gpu"></canvas></div>
+            <div class="chart-box"><div class="chart-title">GPU 記憶體使用 <span class="unit">＝ VRAM（GB）</span></div><canvas id="tel-gpumem"></canvas></div>
+            <div class="chart-box"><div class="chart-title">GPU 溫度 <span class="unit">＝ 顯示卡溫度（°C）</span></div><canvas id="tel-gputemp"></canvas></div>
+            <div class="chart-box"><div class="chart-title">GPU 功耗 <span class="unit">＝ 顯示卡功耗（W）</span></div><canvas id="tel-gpupow"></canvas></div>
           </div>
         </div>
       </div>
-      <div class="footer-hint">Telemetry з”ұеҫҢз«Ҝе®ҡжҷӮйҖҸйҒҺ SSH ж”¶йӣҶпјҲnvidia-smi + /procпјүпјҢдёҚйңҖеңЁиў«зӣЈжҺ§ж©ҹеҷЁе®үиЈқ agentгҖӮ</div>
+      <div class="footer-hint">Telemetry 由後端定時透過 SSH 收集（nvidia-smi + /proc），不需在被監控機器安裝 agent。</div>
     </div>`;
 }
-// зі»зөұиЁәж–·зөҗжһңжҡ«еӯҳпјҲkey=ж©ҹеҸ°еҗҚпјүпјҢйҒҝе…Қй Ғйқў async жӣҙж–°жҷӮиў«жё…жҺү
+// 系統診斷結果暫存（key=機台名），避免頁面 async 更新時被清掉
 const diagStore = {};   // { name: {state:'loading'|'done'|'error', html:'...'} }
 
 function diagBodyFill(name) {
   const s = diagStore[name];
-  if (!s) return `<div class="empty">й»һдёҠж–№гҖҢрҹ©ә зі»зөұиЁәж–·гҖҚжҢүйҲ•пјҢж”¶йӣҶ dmesg / journalctl / GPU / BMC event logпјҢдёҰз”ұ Ollama еҲҶжһҗе•ҸйЎҢиҲҮе»әиӯ°иҷ•зҗҶгҖӮ</div>`;
-  if (s.state === "loading") return `<div class="empty">вҸі жӯЈеңЁж”¶йӣҶиіҮж–ҷдёҰе‘јеҸ« Ollama еҲҶжһҗпјҲзҙ„ 30~60 з§’пјүвҖҰ</div>`;
-  return s.html || `<div class="empty">(з„Ўзөҗжһң)</div>`;
+  if (!s) return `<div class="empty">點上方「🩺 系統診斷」按鈕，收集 dmesg / journalctl / GPU / BMC event log，並由 Ollama 分析問題與建議處理。</div>`;
+  if (s.state === "loading") return `<div class="empty">⏳ 正在收集資料並呼叫 Ollama 分析（約 30~60 秒）…</div>`;
+  return s.html || `<div class="empty">(無結果)</div>`;
 }
 function runDiagnose(name) {
-  const btn = [...document.querySelectorAll("button")].find(b => b.textContent.includes("зі»зөұиЁәж–·") || b.textContent.includes("иЁәж–·дёӯ"));
+  const btn = [...document.querySelectorAll("button")].find(b => b.textContent.includes("系統診斷") || b.textContent.includes("診斷中"));
   diagStore[name] = { state: "loading", html: "" };
-  if (btn) { btn.disabled = true; btn.textContent = "вҸі иЁәж–·дёӯвҖҰ"; }
+  if (btn) { btn.disabled = true; btn.textContent = "⏳ 診斷中…"; }
   const body = $("diag-body");
   if (body) body.innerHTML = diagBodyFill(name);
   api(`/api/machine/${encodeURIComponent(name)}/diagnose`, {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ include_bmc: true })
   }).then(d => {
-    if (!d.ok) throw new Error(d.error || "еҲҶжһҗеӨұж•—");
+    if (!d.ok) throw new Error(d.error || "分析失敗");
     if (d.note) { diagStore[name] = { state: "done", html: `<div class="empty">${esc(d.note)}</div>` }; return; }
-    const md = d.report || "(з„ЎеҲҶжһҗзөҗжһң)";
+    const md = d.report || "(無分析結果)";
     const bmcMode = d.collect && d.collect.bmc_mode === "os_local"
-      ? "жң¬ж©ҹ ipmitoolпјҲSSH йҖІ OS еҹ·иЎҢпјү"
-      : d.collect && d.collect.bmc ? "OOB lanplus" : "вҖ”";
+      ? "本機 ipmitool（SSH 進 OS 執行）"
+      : d.collect && d.collect.bmc ? "OOB lanplus" : "—";
     diagStore[name] = { state: "done", html: `
       <div class="diag-report"><pre class="mach-pre mono">${esc(md)}</pre></div>
-      <details class="diag-raw"><summary>иЁәж–·еҺҹе§ӢиіҮж–ҷпјҲж”¶йӣҶжҷӮй–“ ${esc(d.collected_at||"вҖ”")} В· IPMIпјҡ${esc(bmcMode)}пјү</summary>
-        <pre class="mach-pre mono">${esc((d.collect&&d.collect.os)||"(з„Ў OS иіҮж–ҷ)")}</pre>
+      <details class="diag-raw"><summary>診斷原始資料（收集時間 ${esc(d.collected_at||"—")} · IPMI：${esc(bmcMode)}）</summary>
+        <pre class="mach-pre mono">${esc((d.collect&&d.collect.os)||"(無 OS 資料)")}</pre>
         ${d.collect && d.collect.bmc ? `<pre class="mach-pre mono">===== BMC SEL =====\n${esc(d.collect.bmc)}</pre>` : ""}
       </details>` };
   }).catch(e => {
-    diagStore[name] = { state: "error", html: `<div class="empty" style="color:var(--danger)">иЁәж–·еӨұж•—пјҡ${esc(e.message)}</div>` };
+    diagStore[name] = { state: "error", html: `<div class="empty" style="color:var(--danger)">診斷失敗：${esc(e.message)}</div>` };
   }).finally(() => {
     const b2 = $("diag-body");
     if (b2) b2.innerHTML = diagBodyFill(name);
-    if (btn) { btn.disabled = false; btn.textContent = "рҹ©ә зі»зөұиЁәж–·"; }
+    if (btn) { btn.disabled = false; btn.textContent = "🩺 系統診斷"; }
   });
 }
 async function machinePower(name, on) {
-  if (!confirm(`зўәе®ҡиҰҒгҖҢ${on?"й–Ӣж©ҹ":"й—ңж©ҹ"}гҖҚ${name} е—ҺпјҹпјҲйҖҸйҒҺ BMC ipmitoolпјү`)) return;
+  if (!confirm(`確定要「${on?"開機":"關機"}」${name} 嗎？（透過 BMC ipmitool）`)) return;
   try {
     const r = await api(`/api/machine/${encodeURIComponent(name)}/power`, {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ on })
     });
     await machineLoadDetail(name);
-    setTimeout(() => alert(`${name} ${r.ok?(on?"е·Ій–Ӣж©ҹ":"е·Ій—ңж©ҹ"):"ж“ҚдҪңеӨұж•—пјҡ"+(r.info||"")}\nBMC зӣ®еүҚзӢҖж…Ӣпјҡ${r.power_status}`), 250);
+    setTimeout(() => alert(`${name} ${r.ok?(on?"已開機":"已關機"):"操作失敗："+(r.info||"")}\nBMC 目前狀態：${r.power_status}`), 250);
   } catch (e) {
-    alert("ж“ҚдҪңеӨұж•—пјҡ" + e.message);
+    alert("操作失敗：" + e.message);
   }
 }
-/* ---------- ж–°еўһзі»зөұ ---------- */
+/* ---------- 新增系統 ---------- */
 async function fillProjectSelect(selId) {
   const sel = $(selId);
   if (!sel) return;
   const cur = sel.value;
-  sel.innerHTML = `<option value="">вҖ” жңӘеҲҶйЎһ вҖ”</option>` + projects.map(p => `<option value="${esc(p.name)}">${esc(p.name)}</option>`).join("");
+  sel.innerHTML = `<option value="">— 未分類 —</option>` + projects.map(p => `<option value="${esc(p.name)}">${esc(p.name)}</option>`).join("");
   sel.value = cur;
 }
 function openAdd() {
@@ -1656,18 +1657,18 @@ function openAdd() {
   $("add-modal").style.display = "flex";
   $("add-err").style.display = "none";
   $("save-btn").disabled = false;
-  $("save-btn").textContent = "е„ІеӯҳдёҰжё¬и©ҰйҖЈз·ҡ";
+  $("save-btn").textContent = "儲存並測試連線";
 }
 function closeAdd() { $("add-modal").style.display = "none"; }
 function showErr(msg) { const e = $("add-err"); e.textContent = msg; e.style.display = "block"; }
-// дҫқ OS иіҮиЁҠжҺўжё¬пјҡжҠ“ hostname дёҰз”Ё OS жң¬ж©ҹ ipmitool lan print иҮӘеӢ•её¶е…Ҙ BMC IP
+// 依 OS 資訊探測：抓 hostname 並用 OS 本機 ipmitool lan print 自動帶入 BMC IP
 async function probeBmc() {
   const btn = $("probe-bmc-btn");
   const os_ip = $("f-os-ip").value.trim();
   const os_user = $("f-os-user").value.trim();
   const os_pass = $("f-os-pass").value;
-  if (!os_ip || !os_user || !os_pass) { showErr("и«Ӣе…ҲеЎ« OS IPгҖҒSSH еёіиҷҹи·ҹеҜҶзўјпјҢеҶҚжҠ“еҸ– BMC IP"); return; }
-  btn.disabled = true; btn.textContent = "рҹ”Қ жҠ“еҸ–дёӯвҖҰ"; showErr("");
+  if (!os_ip || !os_user || !os_pass) { showErr("請先填 OS IP、SSH 帳號跟密碼，再抓取 BMC IP"); return; }
+  btn.disabled = true; btn.textContent = "🔍 抓取中…"; showErr("");
   try {
     const d = await api("/api/machines/probe-bmc", {
       method: "POST",
@@ -1676,21 +1677,21 @@ async function probeBmc() {
     });
     if (d.ok) {
       $("f-bmc-ip").value = d.bmc_ip;
-      showErr(""); // жҲҗеҠҹпјҡBMC IP е·ІиҮӘеӢ•её¶е…ҘпјҲеҸҚзҒ°ж¬„дҪҚпјү
+      showErr(""); // 成功：BMC IP 已自動帶入（反灰欄位）
     } else {
       if (d.ipmitool_ok === false) {
-        alert("вҡ пёҸ з„Ўжі•иҮӘеӢ•жҠ“еҸ– BMC IPпјҡ\nOS е…§жңӘеҒөжё¬еҲ° ipmitoolгҖӮ\n\nи«Ӣе…ҲеңЁи©Ідё»ж©ҹе®үиЈқ ipmitoolпјҲдҫӢеҰӮ apt-get install ipmitoolпјүпјҢд№ӢеҫҢеҶҚйҮҚж–°жҠ“еҸ–гҖӮ");
+        alert("⚠️ 無法自動抓取 BMC IP：\nOS 內未偵測到 ipmitool。\n\n請先在該主機安裝 ipmitool（例如 apt-get install ipmitool），之後再重新抓取。");
       } else {
-        alert("вҡ пёҸ жҠ“еҸ– BMC IP еӨұж•—пјҡ\n" + (d.error || "жңӘзҹҘйҢҜиӘӨ"));
+        alert("⚠️ 抓取 BMC IP 失敗：\n" + (d.error || "未知錯誤"));
       }
     }
   } catch (e) {
-    alert("вҡ пёҸ жҠ“еҸ– BMC IP еӨұж•—пјҡ\n" + e.message);
+    alert("⚠️ 抓取 BMC IP 失敗：\n" + e.message);
   } finally {
-    btn.disabled = false; btn.textContent = "рҹ”Қ дҫқ OS жҠ“еҸ– BMC IPпјҲйңҖ ipmitoolпјү";
+    btn.disabled = false; btn.textContent = "🔍 依 OS 抓取 BMC IP（需 ipmitool）";
   }
 }
-// й–Ӣе•ҹж–°еўһзі»зөұиЎЁе–®жҷӮйҮҚиЁӯ BMC IPпјҲйҒҝе…Қж®ҳз•ҷдёҠж¬Ўзҡ„пјү
+// 開啟新增系統表單時重設 BMC IP（避免殘留上次的）
 function resetBmcProbe() {
   const f = $("f-bmc-ip");
   if (f) f.value = "";
@@ -1707,43 +1708,43 @@ async function saveMachine() {
     project: $("f-project").value,
     level: $("f-level").value == "rack" ? "rack" : "system",
   };
-  if (!body.os_ip || !body.os_user || !body.os_pass) { showErr("и«ӢеЎ« OS IPгҖҒSSH еёіиҷҹи·ҹеҜҶзўј"); return; }
-  if (!body.project) { showErr("и«ӢйҒёж“Үе°ҲжЎҲпјҲжІ’жңүжЎҲеӯҗзҡ„и«Ӣе…Ҳй–Ӣе°ҲжЎҲеҲҶйЎһпјү"); return; }
+  if (!body.os_ip || !body.os_user || !body.os_pass) { showErr("請填 OS IP、SSH 帳號跟密碼"); return; }
+  if (!body.project) { showErr("請選擇專案（沒有案子的請先開專案分類）"); return; }
   const btn = $("save-btn");
-  btn.disabled = true; btn.textContent = "йҖЈз·ҡдёӯвҖҰ"; showErr("");
+  btn.disabled = true; btn.textContent = "連線中…"; showErr("");
   try {
     const data = await api("/api/machines", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
     const name = data.machine.name;
     await Promise.all([loadMachines(), loadProjects()]);
     closeAdd(); setView("dashboard");
-    alert("вң… зі»зөұе·Іж–°еўһпјҡhostname = " + name + "\nеұӨзҙҡ = " + (body.level === "rack" ? "L11 Rack" : "L10 System"));
+    alert("✅ 系統已新增：hostname = " + name + "\n層級 = " + (body.level === "rack" ? "L11 Rack" : "L10 System"));
   } catch (e) {
-    showErr("ж–°еўһеӨұж•—пјҡ\n" + e.message);
-    btn.disabled = false; btn.textContent = "е„ІеӯҳдёҰжё¬и©ҰйҖЈз·ҡ";
+    showErr("新增失敗：\n" + e.message);
+    btn.disabled = false; btn.textContent = "儲存並測試連線";
   }
 }
-/* ---------- еҲӘйҷӨ ---------- */
+/* ---------- 刪除 ---------- */
 function deleteMachine(name) {
-  if (!confirm("зўәе®ҡиҰҒеҲӘйҷӨзі»зөұ " + name + " е—Һпјҹ")) return;
+  if (!confirm("確定要刪除系統 " + name + " 嗎？")) return;
   fetch("/api/machines/" + encodeURIComponent(name), { method: "DELETE" })
     .then(() => Promise.all([loadMachines(), loadProjects()]))
     .then(() => setView(state.view));
 }
-/* ---------- йҮҚж–°жҺғжҸҸ ---------- */
+/* ---------- 重新掃描 ---------- */
 async function refreshStatus() {
   const btn = $("refresh-btn");
-  if (btn) { btn.disabled = true; btn.textContent = "жҺғжҸҸдёӯвҖҰ"; }
+  if (btn) { btn.disabled = true; btn.textContent = "掃描中…"; }
   try { await loadMachines(); setView(state.view); }
-  catch (e) { alert("йҮҚж–°жҺғжҸҸеӨұж•—пјҡ" + e.message); }
-  finally { if (btn) { btn.disabled = false; btn.textContent = "вҹі йҮҚж–°жҺғжҸҸ"; } }
+  catch (e) { alert("重新掃描失敗：" + e.message); }
+  finally { if (btn) { btn.disabled = false; btn.textContent = "⟳ 重新掃描"; } }
 }
-/* ---------- е°ҲжЎҲз®ЎзҗҶ ---------- */
+/* ---------- 專案管理 ---------- */
 function togglePw(id, btn) {
   const el = $(id);
-  if (el.type === "password") { el.type = "text"; btn.textContent = "рҹ·Ҳ"; }
-  else { el.type = "password"; btn.textContent = "рҹ‘Ғ"; }
+  if (el.type === "password") { el.type = "text"; btn.textContent = "🷈"; }
+  else { el.type = "password"; btn.textContent = "👁"; }
 }
-/* ---------- е°ҲжЎҲз®ЎзҗҶ ---------- */
+/* ---------- 專案管理 ---------- */
 function openProjectModal() {
   resetProjectForm();
   renderProjectList();
@@ -1751,18 +1752,18 @@ function openProjectModal() {
   $("project-modal").style.display = "flex";
 }
 function closeProjectModal() { resetProjectForm(); $("project-modal").style.display = "none"; }
-const LEVELS = { system: "L10 В· System", rack: "L11 В· Rack" };
+const LEVELS = { system: "L10 · System", rack: "L11 · Rack" };
 function renderProjectList() {
   $("project-list-body").innerHTML = projects.map(p => {
     const canDelete = p.machine_count === 0;
     const racks = machines.filter(m => m.project === p.name && m.level === "rack").length;
     const systems = machines.filter(m => m.project === p.name && m.level !== "rack").length;
-    return `<tr><td><b>${esc(p.name)}</b></td><td>${esc(p.desc || "")}</td><td>${p.machine_count}пјҲR${racks}/S${systems}пјү</td>
+    return `<tr><td><b>${esc(p.name)}</b></td><td>${esc(p.desc || "")}</td><td>${p.machine_count}（R${racks}/S${systems}）</td>
       <td style="white-space:nowrap">
-        <button class="btn small" onclick="editProjectStart('${esc(p.name)}')">зҝ®ж”№</button>
-        <button class="btn small${canDelete ? "" : " disabled"}" title="${canDelete ? "еҲӘйҷӨ" : "жӯӨе°ҲжЎҲйӮ„жңүж©ҹеҸ°пјҢз„Ўжі•еҲӘйҷӨ"}" ${canDelete ? `onclick="deleteProject('${esc(p.name)}')"` : "disabled"}>еҲӘйҷӨ</button>
+        <button class="btn small" onclick="editProjectStart('${esc(p.name)}')">翮改</button>
+        <button class="btn small${canDelete ? "" : " disabled"}" title="${canDelete ? "刪除" : "此專案還有機台，無法刪除"}" ${canDelete ? `onclick="deleteProject('${esc(p.name)}')"` : "disabled"}>刪除</button>
       </td></tr>`;
-  }).join("") || `<tr><td colspan="4" style="color:var(--text-faint)">йӮ„жІ’жңүе°ҲжЎҲпјҢи«Ӣе…ҲеңЁз·ҡж–°еўһгҖӮ</td></tr>`;
+  }).join("") || `<tr><td colspan="4" style="color:var(--text-faint)">還沒有專案，請先在線新增。</td></tr>`;
 }
 let editingProjectName = null;
 function editProjectStart(name) {
@@ -1771,20 +1772,20 @@ function editProjectStart(name) {
   editingProjectName = name;
   $("new-project-name").value = proj.name;
   $("new-project-desc").value = proj.desc || "";
-  $("project-add-btn").textContent = "е„Іеӯҳдҝ®ж”№";
+  $("project-add-btn").textContent = "儲存修改";
   $("project-err").style.display = "none";
 }
 function resetProjectForm() {
   editingProjectName = null;
   $("new-project-name").value = "";
   $("new-project-desc").value = "";
-  $("project-add-btn").textContent = "ж–°еўһе°ҲжЎҲ";
+  $("project-add-btn").textContent = "新增專案";
 }
 async function addProject() {
   const name = $("new-project-name").value.trim();
   const desc = $("new-project-desc").value.trim();
   const err = $("project-err");
-  if (!name) { err.style.display = "block"; err.textContent = "и«ӢеЎ«е°ҲжЎҲеҗҚзЁұ"; return; }
+  if (!name) { err.style.display = "block"; err.textContent = "請填專案名稱"; return; }
   err.style.display = "none";
   try {
     if (editingProjectName) {
@@ -1801,7 +1802,7 @@ async function addProject() {
   }
 }
 async function deleteProject(name) {
-  if (!confirm("зўәе®ҡиҰҒеҲӘйҷӨе°ҲжЎҲгҖҢ" + name + "гҖҚе—Һпјҹ")) return;
+  if (!confirm("確定要刪除專案「" + name + "」嗎？")) return;
   const err = $("project-err");
   try {
     await api("/api/projects/" + encodeURIComponent(name), { method: "DELETE" });
@@ -1812,13 +1813,13 @@ async function deleteProject(name) {
     err.style.display = "block"; err.textContent = e.message;
   }
 }
-/* ---------- зөӮз«Ҝж©ҹпјҲе·ҰеҸіпјҡе·Ұ OS / еҸі BMCпјү ---------- */
+/* ---------- 終端機（左右：左 OS / 右 BMC） ---------- */
 let termInstances = null;
 function openTerm(name) {
-  $("term-title").innerHTML = `<span class="grip">в–Ұ</span> зөӮз«Ҝж©ҹ вҖ” ${esc(name)}`;
+  $("term-title").innerHTML = `<span class="grip">▦</span> 終端機 — ${esc(name)}`;
   resetTermGeometry();
-  $("term-os-status").innerHTML = `OS <span class="term-badge warn">йҖЈз·ҡдёӯ</span>`;
-  $("term-bmc-status").innerHTML = `BMC <span class="term-badge warn">йҖЈз·ҡдёӯ</span>`;
+  $("term-os-status").innerHTML = `OS <span class="term-badge warn">連線中</span>`;
+  $("term-bmc-status").innerHTML = `BMC <span class="term-badge warn">連線中</span>`;
   $("term-modal").style.display = "flex";
   setupTermPane("term-os");
   setupTermPane("term-bmc");
@@ -1846,7 +1847,7 @@ class Term {
     this.term = null; this.ws = null; this.fitAddon = null;
   }
   connect() {
-    if (!window.Terminal) { this.setStatus("зЁӢејҸеЁ«жңӘијүе…ҳ", "err"); return; }
+    if (!window.Terminal) { this.setStatus("程式娫未載兘", "err"); return; }
     this.term = new Terminal({
       cursorBlink: true, fontSize: 13,
       fontFamily: '"Cascadia Mono","Consolas","Noto Sans Mono CJK TC",monospace',
@@ -1860,13 +1861,13 @@ class Term {
     const proto = location.protocol === "https:" ? "wss://" : "ws://";
     this.ws = new WebSocket(proto + location.host + this.url);
     this.term.onData(d => { if (this.ws && this.ws.readyState === 1) this.ws.send(d); });
-    this.ws.onopen = () => { this.setStatus("е·ІйҖЈз·ҡ", "ok"); this.sendResize(); };
+    this.ws.onopen = () => { this.setStatus("已連線", "ok"); this.sendResize(); };
     this.ws.onmessage = e => {
       if (e.data instanceof Blob) { e.data.arrayBuffer().then(buf => this.term.write(new Uint8Array(buf))); }
       else { try { const j = JSON.parse(e.data); if (j.type === "error") this.setStatus(j.msg, "err"); } catch { this.term.write(e.data); } }
     };
-    this.ws.onclose = () => this.setStatus("е·Іж–·з·ҡ", "err");
-    this.ws.onerror = () => this.setStatus("йҖЈз·ҡйҢҜиӘӨ", "err");
+    this.ws.onclose = () => this.setStatus("已斷線", "err");
+    this.ws.onerror = () => this.setStatus("連線錯誤", "err");
   }
   setStatus(text, cls) { if (this.statusEl) this.statusEl.innerHTML = `${this.url.includes("/bmc") ? "BMC" : "OS"} <span class="term-badge ${cls}">${esc(text)}</span>`; }
   fit() {
@@ -1923,7 +1924,7 @@ function initTermDrag() {
     requestAnimationFrame(() => fitAll());
   }
 }
-/* ---------- е•ҹеӢ• ---------- */
+/* ---------- 啟動 ---------- */
 function buildNav() {
   const nav = $("nav");
   let cur = null;
@@ -1940,13 +1941,13 @@ $("theme-toggle")?.addEventListener("click", () => applyTheme(root.dataset.theme
 window.addEventListener("keydown", (e) => { if (e.key === "Escape") { closeAdd(); closeProjectModal(); } });
 document.addEventListener("DOMContentLoaded", async () => {
   loadTheme(); buildNav(); initTermDrag();
-  parseHash();                      // и®ҖеҸ– URL hashпјҢжҢҮе®ҡеҲқе§ӢеҲҶй Ғ
+  parseHash();                      // 讀取 URL hash，指定初始分頁
   window.addEventListener("resize", () => fitAll());
   window.addEventListener("hashchange", () => { parseHash(); setView(state.view); });
   try {
     await Promise.all([loadMachines(), loadProjects()]);
     setView(state.view);
   } catch (e) {
-    $("content").innerHTML = `<div class="empty">еҫҢз«Ҝз„Ўжі•йҖЈз·ҡпјҲ${esc(e.message)}пјү<br>и«ӢзўәиӘҚжңүе•ҹеӢ• python еҫҢз«ҜзЁӢејҸгҖӮ</div>`;
+    $("content").innerHTML = `<div class="empty">後端無法連線（${esc(e.message)}）<br>請確認有啟動 python 後端程式。</div>`;
   }
 });
