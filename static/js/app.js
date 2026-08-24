@@ -299,55 +299,53 @@ async function rackDoPower(name, action) {
     alert("操作失敗：" + e.message);
   }
 }
-// 元件控制對話框：開機／關機／AUX cycle ＋ 自訂開關機指令設定
+// 元件控制對話框：開機／關機／reboot／AUX cycle ＋ -C 17 選擇
 function machControlDialog(name) {
   const m = machines.find(x => x.name === name);
   if (!m) return;
   const info = mgxInfo(m);
   const hasPower = m.os_ip || m.bmc_ip;
-  const varList = ["$BMC_IP", "$BMC_AC", "$BMC_PW", "$BMC_PORT", "$OS_IP"]
-    .map(v => `<code class="mono" style="padding:1px 5px;background:var(--bg-panel-2);border:1px solid var(--border);border-radius:4px">${v}</code>`).join(" ");
-  const defOn = `ipmitool -I lanplus -H $BMC_IP -U $BMC_AC -P $BMC_PW -C 17 chassis power on`;
-  const defOff = `ipmitool -I lanplus -H $BMC_IP -U $BMC_AC -P $BMC_PW -C 17 chassis power off`;
-  const defAux = `ipmitool -I lanplus -H $BMC_IP -U $BMC_AC -P $BMC_PW -C 17 chassis power cycle`;
+  const useC17 = m.use_c17 !== false;
   showDialog(`⚙ 元件控制 — ${info.icon} ${esc(name)}`, `
     <div class="rm-modal-body">
       <p style="margin-bottom:12px;font-size:12px;color:var(--text-faint)">
         選擇要對「<b>${esc(name)}</b>」進行的控制（${hasPower ? "此元件有連線資訊可控制" : "⚠️ 此元件沒有 BMC / OS 資訊" }）。
       </p>
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px">
-        <button class="btn" ${hasPower?"":"disabled"} onclick="singlePower('${esc(name)}',true)">⏻ 開機</button>
-        <button class="btn btn-danger" ${hasPower?"":"disabled"} onclick="singlePower('${esc(name)}',false)">⏻ 關機</button>
+        <button class="btn btn-good" ${hasPower?"":"disabled"} onclick="singlePower('${esc(name)}',true)">⏻ 開機</button>
+        <button class="btn btn-good" ${hasPower?"":"disabled"} onclick="singlePower('${esc(name)}',false)">⏻ 關機</button>
+        <button class="btn btn-warn" ${hasPower?"":"disabled"} onclick="machineReboot('${esc(name)}')">⟳ Reboot</button>
         <button class="btn" ${hasPower?"":"disabled"} onclick="auxCycle('${esc(name)}')">⚡ AUX / AC cycle</button>
       </div>
       <p style="font-size:11px;color:var(--text-faint)">點上方按鈕即直接執行（會先彈確認）。</p>
 
       <hr style="border:none;border-top:1px solid var(--border);margin:14px 0">
-      <div style="font-size:13px;font-weight:700;margin-bottom:6px">自訂開關機 / AUX 指令</div>
-      <p style="font-size:11.5px;color:var(--text-faint);margin-bottom:8px">
-        不填＝用預設 ipmitool。填了就用你的指令（可含變數，執行時自動代入）<br>
-        可用變數：${varList}<br>
-        <span class="hint">例：某些 BMC 不吃 -C 17，把「-C 17」刪掉即可；Switch/CDU/PDU 可填 reboot/reset 指令。</span>
+      <div style="font-size:13px;font-weight:700;margin-bottom:6px">開關機邏輯</div>
+      <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;padding:6px 0">
+        <input type="checkbox" id="ctl-c17" ${useC17 ? "checked" : ""} style="width:16px;height:16px">
+        <span>使用 <code class="mono">-C 17</code>（ipmitool HMAC-SHA1 cipher suite）</span>
+      </label>
+      <p style="font-size:11.5px;color:var(--text-faint);margin-top:6px">
+        預設勾選（fleet_l OpenBMC 需 -C 17）。若你的 BMC 不吃 -C 17（例如要 -C 3），取消勾選即可。
       </p>
-      <label style="display:block;font-size:12px;color:var(--text-faint);margin-bottom:4px">開機指令（power on）</label>
-      <input class="input" id="ctl-on" style="width:100%;padding:8px;margin-bottom:10px;font-family:monospace" placeholder="${esc(defOn)}" value="${esc(m.power_on_cmd||"")}">
-      <label style="display:block;font-size:12px;color:var(--text-faint);margin-bottom:4px">關機指令（power off）</label>
-      <input class="input" id="ctl-off" style="width:100%;padding:8px;margin-bottom:10px;font-family:monospace" placeholder="${esc(defOff)}" value="${esc(m.power_off_cmd||"")}">
-      <label style="display:block;font-size:12px;color:var(--text-faint);margin-bottom:4px">AUX / AC cycle 指令</label>
-      <input class="input" id="ctl-aux" style="width:100%;padding:8px;font-family:monospace" placeholder="${esc(defAux)}" value="${esc(m.aux_cmd||"")}">
     </div>`,
     [
       { txt: "關閉", cls: "", fn: () => closeDialog() },
-      { txt: "儲存指令", cls: "primary", fn: () => {
-        rackAssign(name, {
-          power_on_cmd: $("ctl-on").value.trim(),
-          power_off_cmd: $("ctl-off").value.trim(),
-          aux_cmd: $("ctl-aux").value.trim(),
-        }).then(() => { closeDialog(); setView("rack"); }).catch(e => alert("儲存失敗：" + e.message));
+      { txt: "儲存設定", cls: "primary", fn: () => {
+        const use = !!$("ctl-c17").checked;
+        rackAssign(name, { use_c17: use }).then(() => { closeDialog(); setView("rack"); }).catch(e => alert("儲存失敗：" + e.message));
       } },
     ]);
 }
-// 整櫃 list 自選清單 ping 結果
+// Reboot：SSH 進 OS 下 reboot（無 OS 才用 BMC power reset）
+async function machineReboot(name) {
+  if (!confirm(`確定要「Reboot」${name} 嗎？（OS reboot）`)) return;
+  try {
+    const r = await api(`/api/machine/${encodeURIComponent(name)}/reboot`, { method: "POST" });
+    setView("rack");
+    setTimeout(() => alert(`${name} ${r.ok ? "已送出 reboot ⟳" : "操作失敗：" + (r.info||"")}`), 200);
+  } catch (e) { alert("操作失敗：" + e.message); }
+}
 function rackPingNode(m) {
   const n = (rackView.pinged || []).find(x => x.name === m.name);
   const osUp = n ? n.os_alive : null;
@@ -604,13 +602,14 @@ function pageRack() {
       <button class="btn" onclick="rackAddDialog()">➕ 加入機櫃</button>
       <button class="btn" onclick="rackAddPassive()">➕ 新增元件</button>
       <button class="btn" onclick="linkAddDialog()">🗺 新增拓樸</button>
+      <button class="btn" title="自動建立 server→switch、CDU→switch、Powershelf→switch 的模擬連線，看看拓樸圖長怎樣" onclick="rackDemoTopo()">🧪 模擬拓樸</button>
       <button class="btn" onclick="rackPowerAllDialog()">⏻ 開機整櫃</button>
       <button class="btn btn-danger" onclick="rackPowerAllDialog(false)">⏻ 關機整櫃</button>
       <button class="btn primary" onclick="rackBroadcastDialog('${esc(rackView.project)}')">📡 廣播終端</button>` : ""}
     </div>
     <div class="rack-status-legend">
       ${Object.values(MGX_TYPES).filter((v, i, a) => a.findIndex(x => x.cls === v.cls) === i).map(v => `<span class="mgx-legend"><span class="mgx-dot ${v.cls}"></span>${esc(v.label)}</span>`).join("")}
-      &nbsp;·&nbsp; 狀態：<span class="ping-lamp on">🟢</span> Up &nbsp;<span class="ping-lamp off">🔴</span> Down &nbsp;<span class="ping-lamp none">⨪</span> 未 Ping
+      &nbsp;·&nbsp; ${rackStatusCounts(members, pinged)}
     </div>
     ${anyRack && members.length ? rackLayoutHtml(members, pinged) : (anyRack ? emptyRackCard() : "")}
     `;
@@ -639,52 +638,84 @@ function rackmapHtml(members, pinged) {
     const u = (typeof m.rack_u === "number" && m.rack_u > 0) ? m.rack_u : 42;
     rackU[u] = m;
   });
+  // 計算每個 U 槽是否被占用（多 U 元件佔用連續多槽）
+  const occupied = (m) => {
+    const u = (typeof m.rack_u === "number" && m.rack_u > 0) ? m.rack_u : 42;
+    const s = (typeof m.rack_size === "number" && m.rack_size > 0 && m.rack_size <= 42) ? m.rack_size : 1;
+    return { u, s };
+  };
+  const filledU = new Set();
+  let blocks = [];     // 多 U 元件（跨列）
+  members.forEach(m => {
+    const { u, s } = occupied(m);
+    if (s > 1) blocks.push({ m, u, s });
+    for (let k = u; k >= Math.max(u - s + 1, 1); k--) filledU.add(k);
+  });
+
+  // 單 U 元件與空格：由上往下每 U 一行
   let rows = "";
   let u = 42;
   while (u >= 1) {
+    // 若此槽是多 U 元件的延伸部分（非起始），由起始 U 的整塊負責，跳過
+    const startsHere = members.find(m => {
+      const { u: mu, s } = occupied(m);
+      return mu === u && s > 1;
+    });
+    if (startsHere) {
+      const { m, s } = startsHere;
+      rows += rackBlockRow(m, u, s, pinged);
+      u -= s;
+      continue;
+    }
+    if (filledU.has(u)) { u--; continue; }   // 多 U 元件延伸槽（已被塊處理）
     const m = rackU[u];
-    if (!m) {
-      rows += `<div class="rm-row rm-empty"><span class="rm-u mono">U${u}</span><div class="rm-empty-space" onclick="rackEmptyClick(${u})" title="點擊放置機台">＋</div></div>`;
+    if (m && (m.rack_size || 1) <= 1) {
+      rows += rackBlockRow(m, u, 1, pinged);
       u--;
       continue;
     }
-    const size = (typeof m.rack_size === "number" && m.rack_size > 0 && m.rack_size <= 42) ? m.rack_size : 1;
-    const n = pinged.find(x => x.name === m.name);
-    const up = n ? n.os_alive : null;
-    const info = mgxInfo(m);
-    const cls = up === true ? "green" : up === false ? "red" : "none";
-    const isPassive = !!m.passive;
-    const click = isPassive ? `rackMoveDialog('${esc(m.name)}')` : `openMachine('${esc(m.name)}')`;
-    const ctrlBtn = `<button class="btn small" title="開機/關機/AUX cycle 與設定指令" onclick="machControlDialog('${esc(m.name)}')">⚙</button>`;
-    const nm = `${info.icon} ${esc(m.name)}${isPassive ? ' <span class="badge badge-rack" style="font-size:9px;padding:1px 6px">無BMC</span>' : ''}`;
-    const uRange = size > 1 ? `U${u}–${u - size + 1}` : `U${u}`;
-    rows += `
-    <div class="rm-row ${size > 1 ? "rm-multi" : ""}" data-u="${u}" style="--size:${size}">
-      <span class="rm-u mono">${uRange}</span>
-      <div class="rm-cell ${cls} ${info.cls}" onclick="${click}" style="${size > 1 ? `min-height:calc(var(--rack-row-h) * ${size})` : ""}">
-        <div class="rm-cell-inner">
-          <span class="rm-lamp">${up === true ? "🟢" : up === false ? "🔴" : "⨪"}</span>
-          <span class="rm-name">${nm}</span>
-          <span class="rm-ip mono">${esc(m.bmc_ip || m.os_ip || "")}</span>
-          <span class="rm-u-tag mono" >${uRange}</span>
-          <span class="rm-actions" onclick="event.stopPropagation()">
-            ${ctrlBtn}
-            <button class="btn small" title="換位/類型" onclick="rackMoveDialog('${esc(m.name)}')">⇅</button>
-            <button class="btn small" title="詳情" onclick="openMachine('${esc(m.name)}')">ℹ</button>
-          </span>
-        </div>
-      </div>
-    </div>`;
-    // 多 U 元件：底下占用列只顯示 U 標籤與延伸背景
-    for (let k = u - 1; k >= Math.max(u - size + 1, 1); k--) {
-      rows += `<div class="rm-row rm-span"><span class="rm-u mono">U${k}</span><div class="rm-span-fill"></div></div>`;
-    }
-    u -= size;
+    rows += `<div class="rm-row" style="grid-row:${43-u} / ${44-u}"><span class="rm-u"><span class="mono">U${u}</span></span><div class="rm-empty-slot" onclick="rackEmptyClick(${u})" title="點擊放置機台">＋</div></div>`;
+    u--;
   }
   return `
   <div class="rm-rack">
     <div class="rm-head"><span></span><span>${esc(rackView.project)} — 42U 標準機櫃</span></div>
+    <div class="rm-body">
     ${rows}
+    </div>
+  </div>`;
+}
+// 建立一個元件列；>1U 用 rm-block 跨 grid 多列（grid-row span）
+function rackBlockRow(m, u, size, pinged) {
+  const n = pinged.find(x => x.name === m.name);
+  const up = n ? n.os_alive : null;
+  const info = mgxInfo(m);
+  const cls = up === true ? "green" : up === false ? "red" : "none";
+  const isPassive = !!m.passive;
+  const click = isPassive ? `rackMoveDialog('${esc(m.name)}')` : `openMachine('${esc(m.name)}')`;
+  const ctrlBtn = `<button class="btn small" title="開機/關機/reboot/AUX" onclick="machControlDialog('${esc(m.name)}')">⚙</button>`;
+  const termBtn = `<button class="btn small" title="終端機" onclick="openTermDialog('${esc(m.name)}')">▶</button>`;
+  const nm = `${info.icon} ${esc(m.name)}`;
+  const uRange = size > 1 ? `U${u}–${u - size + 1}` : `U${u}`;
+  // CSS grid row 1 在最上方（U42）；topRow = 43 - u
+  const topRow = 43 - u;
+  const span = ` style="grid-row:${topRow} / ${topRow + size}"`;
+  return `
+  <div class="rm-row ${size > 1 ? "rm-block" : ""}" data-u="${u}" ${span}>
+    <span class="rm-u" style="${size > 1 ? "" : "border-bottom:1px solid var(--border-soft)"}"><span class="mono">${uRange}</span></span>
+    <div class="rm-cell ${cls} ${info.cls}" onclick="${click}" style="align-items:${size > 1 ? "center" : "stretch"}">
+      <div class="rm-cell-inner">
+        <span class="rm-lamp">${up === true ? "🟢" : up === false ? "🔴" : "⨪"}</span>
+        <span class="rm-name">${nm}</span>
+        <span class="rm-ip mono">${esc(m.bmc_ip || m.os_ip || "")}</span>
+        <span class="rm-u-tag mono">${uRange}</span>
+        <span class="rm-actions" onclick="event.stopPropagation()">
+          ${ctrlBtn}
+          ${termBtn}
+          <button class="btn small" title="換位/類型" onclick="rackMoveDialog('${esc(m.name)}')">⇅</button>
+        </span>
+      </div>
+    </div>
   </div>`;
 }
 function rackEmptyClick(u) {
@@ -733,7 +764,7 @@ function devicesHtml(members, pinged) {
   members = members.slice().sort(byU);
   const lamp = v => v === true ? `<span class="ping-lamp on">🟢</span>` : v === false ? `<span class="ping-lamp off">🔴</span>` : `<span class="ping-lamp none">⨪</span>`;
   const body = `<div class="card"><div class="table-scroll"><table class="t rack-ping-table">
-    <thead><tr><th>U</th><th>Node</th><th>類型</th><th>OS IP</th><th>BMC IP</th><th>狀態</th><th>操作</th></tr></thead>
+    <thead><tr><th>U</th><th>Node</th><th>類型</th><th>OS IP</th><th>BMC IP</th><th>操作</th></tr></thead>
     <tbody>` + members.map(m => {
       const n = pinged.find(x => x.name === m.name);
       const isServerLike = (mgxTypeOf(m) !== "switch" && mgxTypeOf(m) !== "pdu" && mgxTypeOf(m) !== "powershelf" && mgxTypeOf(m) !== "cdu");
@@ -747,20 +778,16 @@ function devicesHtml(members, pinged) {
       const bmcCell = !isServerLike
         ? `<span class="hint" style="color:var(--text-faint)">—</span>`
         : (m.bmc_ip ? `${lamp(bmcUp)} <span class="ping-ip mono">${esc(m.bmc_ip)}</span>` : `<span style="color:var(--text-faint)">—</span>`);
-      const upLbl = isServerLike
-        ? (osUp === true || bmcUp === true ? `<span class="ping-lamp on">🟢</span>` : osUp === false || bmcUp === false ? `<span class="ping-lamp off">🔴</span>` : `<span class="ping-lamp none">⨪</span>`)
-        : lamp(osUp);
       return `<tr>
         <td class="mono">U${m.rack_u || "—"}${(m.rack_size||1)>1?`<span class="hint"> (+${(m.rack_size||1)-1})</span>`:""}</td>
         <td class="mono"><a href="#" class="mach-link" onclick="event.preventDefault();openMachine('${esc(m.name)}')"><b>${esc(m.name)}</b></a></td>
         <td>${info.icon} ${esc(info.label)}</td>
         <td class="mono">${osCell}</td>
         <td class="mono">${bmcCell}</td>
-        <td>${upLbl}</td>
         <td style="white-space:nowrap">
-          <button class="btn small" title="開機/關機/AUX cycle 與設定指令" onclick="machControlDialog('${esc(m.name)}')">⚙</button>
+          <button class="btn small" title="開機/關機/reboot/AUX" onclick="machControlDialog('${esc(m.name)}')">⚙</button>
+          <button class="btn small" title="終端機" onclick="openTermDialog('${esc(m.name)}')">▶</button>
           <button class="btn small" onclick="rackMoveDialog('${esc(m.name)}')">⇅</button>
-          <button class="btn small" onclick="openMachine('${esc(m.name)}')">ℹ</button>
         </td>
       </tr>`;
     }).join("") + `</tbody></table></div></div>`;
@@ -882,9 +909,14 @@ function rackTopoHtml(members) {
     const leafPort = isAleaf ? (lk.a_port || "?") : (lk.b_port || "?");
     const hubPort = isAleaf ? (lk.b_port || "") : (lk.a_port || "");
     const lbl = `${esc(lk.type)} ${leafPort}${hubPort ? "→" + esc(hubPort) : ""}`;
+    const tooltip = `${esc(lk.type)} 連線${leafPort ? ` ${esc(leafPort)}` : ""}${hubPort ? ` → ${esc(hubPort)}` : ""}\n${esc(leafSide)} ↔ ${esc(hubSide)}`;
     edgeSvg += `
-      <path d="${d}" class="topo-edge" stroke="${col}" fill="none" stroke-width="2" stroke-dasharray="0" />
-      <text x="${mid}" y="${(fromY + toY) / 2 - 3}" text-anchor="middle" class="topo-edge-lbl" fill="${col}">${lbl}</text>`;
+      <g class="topo-edge-group">
+        <path d="${d}" class="topo-edge" stroke="${col}" fill="none" stroke-width="2" stroke-dasharray="0" />
+        <path d="${d}" class="topo-edge-hit" />
+        <text x="${mid}" y="${(fromY + toY) / 2 - 3}" text-anchor="middle" class="topo-edge-lbl" fill="${col}">${lbl}</text>
+        <title>${esc(tooltip)}</title>
+      </g>`;
   });
 
   // 圖例
@@ -900,6 +932,47 @@ function rackTopoHtml(members) {
       <span class="hint" style="margin-left:auto">左＝交換/電源/冷卻 · 右＝伺服/儲存</span>
     </div>
   </div>`;
+}
+// 機櫃狀態摘要：依 ping 結果加總 Up / Down / 未 Ping
+function rackStatusCounts(members, pinged) {
+  let up = 0, down = 0, none = 0;
+  members.forEach(m => {
+    const n = pinged.find(x => x.name === m.name);
+    const upOs = n ? n.os_alive : null;
+    const upBmc = n ? n.bmc_alive : null;
+    if (upOs === true || upBmc === true) up++;
+    else if (upOs === false || upBmc === false) down++;
+    else none++;
+  });
+  return `狀態：<span class="ping-lamp on">🟢</span> Up ${up} &nbsp;<span class="ping-lamp off">🔴</span> Down ${down} &nbsp;<span class="ping-lamp none">⨪</span> 未 Ping ${none}`;
+}
+// 模擬拓樸：自動把 server→sw1/sw2（eth/ib），cdu→sw1（coolant），powershelf→sw2（power）接起來。
+// 依元件類型挑前兩個 switch、第一個 cdu、第一個 powershelf、前面幾台 server/storage。
+async function rackDemoTopo() {
+  const proj = rackView.project;
+  const members = machines.filter(x => x.project === proj && x.level === "rack");
+  const sw = members.filter(m => mgxTypeOf(m) === "switch").slice(0, 2);
+  const cdu = members.find(m => mgxTypeOf(m) === "cdu");
+  const ps = members.find(m => mgxTypeOf(m) === "powershelf" || mgxTypeOf(m) === "pdu");
+  const servers = members.filter(m => mgxTypeOf(m) === "server" || mgxTypeOf(m) === "storage" || mgxTypeOf(m) === "network");
+  if (!sw.length) { alert("此機櫃沒有 switch，無法建立模擬拓樸。請先加入 switch。"); return; }
+  if (!confirm(`要自動建立模擬拓樸嗎？\n• ${servers.length} 台 server → ${sw.map(s=>s.name).join(" / ")}（Ethernet）\n${cdu ? `• ${cdu.name} → ${sw[0].name}（液冷 coolant）\n` : ""}${ps ? `• ${ps.name} → ${sw[sw.length>1?1:0].name}（電源 power）\n` : ""}這會新增連線資料。`)) return;
+  const created = [];
+  const add = async (a, b, type, a_port, b_port) => {
+    try { await api("/api/links", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({ a, b, type, a_port: a_port||"", b_port: b_port||"" }) }); created.push(`${a}↔${b}`); } catch(e) {}
+  };
+  // server → 每個 switch 各一條 eth + (第二台起)不同 NIC
+  servers.forEach((s, i) => {
+    const p1 = `eth${i+1}`, p2a = (i % sw.length) === 0 ? "1/0/1" : "1/0/3";
+    add(s.name, sw[i % sw.length].name, "eth", p1, p2a);
+  });
+  // 液冷：cdu → sw1
+  if (cdu && sw[0]) add(cdu.name, sw[0].name, "coolant", "port-A", "cool-lo");
+  // 電源：powershelf → sw2
+  if (ps) add(ps.name, sw[sw.length > 1 ? 1 : 0].name, "power", "PS1", "PWR-A");
+  await loadLinks();
+  setView("rack");
+  setTimeout(() => alert(`已建立模擬拓樸 ${created.length ? "（" + created.length + " 條）" : "（重複則已跳過）"}，請看右側連線圖。`), 200);
 }
 function linkAddDialog() {
   const proj = rackView.project;
@@ -1761,7 +1834,7 @@ function pageMachine() {
       <button class="btn small" onclick="machineBack()">← 返回</button>
       <span class="mach-name">🖥 ${esc(name)} ${lvlBadge}</span>
       <span class="spacer"></span>
-      <button class="btn small" onclick="openTerm('${esc(name)}')">▶ Terminal</button>
+      <button class="btn small" onclick="openTermDialog('${esc(name)}')">▶ Terminal</button>
       ${m.passive ? "" : `<button class="btn small" onclick="runDiagnose('${esc(name)}')">🩺 系統診斷</button>`}
       <button class="btn small" onclick="machineRefresh()">⟳ 重新整理</button>
     </div>
@@ -1777,9 +1850,17 @@ function pageMachine() {
         </table>
         ${base.bmc_ip ? `
         <div class="mach-power-actions">
-          <button class="btn small" onclick="machinePower('${esc(name)}',true)">⏻ 開機 (ipmitool)</button>
-          <button class="btn small btn-danger" onclick="machinePower('${esc(name)}',false)">⏻ 關機 (ipmitool)</button>
-      <span class="hint">專案分組 · 拖曳卡片調整順序</span>
+          <button class="btn small btn-good" onclick="machinePower('${esc(name)}',true)">⏻ 開機</button>
+          <button class="btn small btn-good" onclick="machinePower('${esc(name)}',false)">⏻ 關機</button>
+          <button class="btn small btn-warn" onclick="machineRebootDetail('${esc(name)}')">⟳ Reboot</button>
+          <button class="btn small" onclick="machineAuxDetail('${esc(name)}')">⚡ AC cycle</button>
+        </div>
+        <div class="mach-c17-toggle">
+          <label style="display:flex;align-items:center;gap:8px;font-size:12px;cursor:pointer;padding:6px 0">
+            <input type="checkbox" id="mach-c17" ${base.use_c17 !== false ? "checked" : ""} onchange="machineSetC17('${esc(name)}', this.checked)" style="width:15px;height:15px">
+            <span>使用 <code class="mono" style="padding:1px 5px;background:var(--bg-panel-2);border:1px solid var(--border);border-radius:4px">-C 17</code>（ipmitool cipher）</span>
+          </label>
+          <span class="hint">預設勾選；若你的 BMC 不吃 -C 17（改 -C 3）請取消勾選。</span>
         </div>` : ""}
       </div>
       <div class="card">
@@ -1918,6 +1999,30 @@ async function machinePower(name, on) {
     alert("操作失敗：" + e.message);
   }
 }
+// 系統詳情頁 Reboot（OS reboot，無 OS 才用 BMC reset）
+async function machineRebootDetail(name) {
+  if (!confirm(`確定要「Reboot」${name} 嗎？（OS reboot）`)) return;
+  try {
+    const r = await api(`/api/machine/${encodeURIComponent(name)}/reboot`, { method: "POST" });
+    await machineLoadDetail(name);
+    setTimeout(() => alert(`${name} ${r.ok ? "已送出 reboot ⟳" : "操作失敗：" + (r.info||"")}`), 250);
+  } catch (e) { alert("操作失敗：" + e.message); }
+}
+async function machineAuxDetail(name) {
+  if (!confirm(`確定要對「${name}」執行 AC cycle（完整斷電重上電）嗎？`)) return;
+  try {
+    const r = await api(`/api/machine/${encodeURIComponent(name)}/aux`, { method: "POST" });
+    setTimeout(() => alert(`${name} ${r.ok ? "AC cycle 已送出 ⚡" : "操作失敗：" + (r.info||"")}`), 250);
+  } catch (e) { alert("操作失敗：" + e.message); }
+}
+// 切換該元件是否使用 -C 17
+async function machineSetC17(name, val) {
+  try {
+    await api(`/api/machines/${encodeURIComponent(name)}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ use_c17: !!val })
+    });
+  } catch (e) { alert("儲存失敗：" + e.message); }
+}
 /* ---------- 新增系統 ---------- */
 async function fillProjectSelect(selId) {
   const sel = $(selId);
@@ -1984,7 +2089,9 @@ async function saveMachine() {
     level: $("f-level").value == "rack" ? "rack" : "system",
   };
   if (!body.os_ip || !body.os_user || !body.os_pass) { showErr("請填 OS IP、SSH 帳號跟密碼"); return; }
-  if (body.bmc_ip && (!body.bmc_user || !body.bmc_pass)) { showErr("有填 BMC IP 時，BMC 帳號和密碼為必填（供開關機/遠端管理用）。若暫時無 BMC 可先留空 BMC IP。"); return; }
+  if (body.level === "system") {
+    if (!body.bmc_user || !body.bmc_pass) { showErr("BMC 帳號和密碼為必填（供開關機/遠端管理用）— 欄位已標示紅色 *。"); return; }
+  } else if (body.bmc_ip && (!body.bmc_user || !body.bmc_pass)) { showErr("有填 BMC IP 時，BMC 帳號和密碼為必填。"); return; }
   if (!body.project) { showErr("請選擇專案（沒有案子的請先開專案分類）"); return; }
   const btn = $("save-btn");
   btn.disabled = true; btn.textContent = "連線中…"; showErr("");
@@ -2091,21 +2198,114 @@ async function deleteProject(name) {
 }
 /* ---------- 終端機（左右：左 OS / 右 BMC） ---------- */
 let termInstances = null;
-function openTerm(name) {
+// 把帳密資訊編進 URL 查詢（passive 元件點開時需動態填）
+function _termUrl(name, kind, creds) {
+  let u = `/ws/terminal/${encodeURIComponent(name)}/${kind}`;
+  if (creds) {
+    const p = new URLSearchParams({ host: creds.host || "", user: creds.user || "", pass: creds.pass || "", port: creds.port || "" });
+    u += "?" + p.toString();
+  }
+  return u;
+}
+// 所有元件點「▶」都走這：有存量連線資訊直接開；沒有或 passive → 先請填帳密
+function openTermDialog(name) {
+  const m = machines.find(x => x.name === name);
+  if (!m) return;
+  const hasCreds = (m.os_ip && m.os_user && m.os_pass) || (m.bmc_ip && m.bmc_user && m.bmc_pass);
+  const hasOs = m.os_ip && m.os_user && m.os_pass;
+  const hasBmc = m.bmc_ip && m.bmc_user && m.bmc_pass;
+
+  const osPrefillHost = m.os_ip || "";
+  const bmcPrefillHost = m.bmc_ip || "";
+  const kinds = [];
+  if (hasOs) kinds.push("os");
+  if (hasBmc) kinds.push("bmc");
+  if (!kinds.length) kinds.push("os");   // passive 未知 → 預設 OS
+
+  let osFields = hasOs
+    ? `<span class="hint">將直接使用元件已存的 OS 帳密連線</span>`
+    : `
+      <label style="display:block;font-size:12px;color:var(--text-faint);margin:8px 0 4px">OS Host</label>
+      <input class="input" id="td-os-host" style="width:100%;padding:8px" value="${esc(osPrefillHost)}" placeholder="ssh host / ip">
+      <label style="display:block;font-size:12px;color:var(--text-faint);margin:8px 0 4px">OS 帳號</label>
+      <input class="input" id="td-os-user" style="width:100%;padding:8px" placeholder="root">
+      <label style="display:block;font-size:12px;color:var(--text-faint);margin:8px 0 4px">OS 密碼</label>
+      <input class="input" id="td-os-pass" type="password" style="width:100%;padding:8px" placeholder="••••">`;
+  let bmcFields = hasBmc
+    ? `<span class="hint">將直接使用元件已存的 BMC 帳密連線</span>`
+    : `
+      <label style="display:block;font-size:12px;color:var(--text-faint);margin:8px 0 4px">BMC/IPMI Host</label>
+      <input class="input" id="td-bmc-host" style="width:100%;padding:8px" value="${esc(bmcPrefillHost)}" placeholder="bmc host / ip">
+      <label style="display:block;font-size:12px;color:var(--text-faint);margin:8px 0 4px">BMC 帳號</label>
+      <input class="input" id="td-bmc-user" style="width:100%;padding:8px" placeholder="admin">
+      <label style="display:block;font-size:12px;color:var(--text-faint);margin:8px 0 4px">BMC 密碼</label>
+      <input class="input" id="td-bmc-pass" type="password" style="width:100%;padding:8px" placeholder="••••">`;
+
+  showDialog(`◈ 終端機 — ${esc(name)}`, `
+    <div class="rm-modal-body">
+      <p style="font-size:12px;color:var(--text-faint);margin-bottom:8px">
+        此元件 ${hasCreds ? "已存有連線資訊（直接使用）" : "沒有已存的連線帳密，請填一下要連到哪台（OS 與 BMC 擇一即可）"}。
+      </p>
+      <div style="margin-bottom:10px">
+        <div style="font-size:13px;font-weight:700;margin:10px 0 2px">🖥 OS <span class="hint">（作業系統 / shell）</span></div>
+        ${osFields}
+      </div>
+      <div>
+        <div style="font-size:13px;font-weight:700;margin:10px 0 2px">🌐 BMC / IPMI <span class="hint">（BMC shell / ipmitool）</span></div>
+        ${bmcFields}
+      </div>
+    </div>`,
+    [
+      { txt: "取消", cls: "", fn: () => closeDialog() },
+      { txt: "連接終端", cls: "primary", fn: () => {
+        const osCreds = hasOs ? null : {
+          host: ($("td-os-host") && $("td-os-host").value.trim()) || m.os_ip || "",
+          user: ($("td-os-user") && $("td-os-user").value.trim()) || "",
+          pass: ($("td-os-pass") && $("td-os-pass").value) || "",
+          port: m.os_port || 22,
+        };
+        const bmcCreds = hasBmc ? null : {
+          host: ($("td-bmc-host") && $("td-bmc-host").value.trim()) || m.bmc_ip || "",
+          user: ($("td-bmc-user") && $("td-bmc-user").value.trim()) || "",
+          pass: ($("td-bmc-pass") && $("td-bmc-pass").value) || "",
+          port: m.bmc_port || 623,
+        };
+        // 至少要有一組有效 creds
+        const osOK = hasOs || (osCreds.host && osCreds.user && osCreds.pass);
+        const bmcOK = hasBmc || (bmcCreds.host && bmcCreds.user && bmcCreds.pass);
+        if (!osOK && !bmcOK) { alert("請至少填一組 OS 或 BMC 的 host／帳號／密碼"); return; }
+        closeDialog();
+        openTermAt(name, hasOs ? { host: m.os_ip, user: m.os_user, pass: m.os_pass, port: m.os_port || 22 } : (osOK ? osCreds : null),
+                  hasBmc ? { host: m.bmc_ip, user: m.bmc_user, pass: m.bmc_pass, port: m.bmc_port || 623 } : (bmcOK ? bmcCreds : null));
+      } },
+    ]);
+}
+// 用指定的 os/bmc creds 開起終端窗
+function openTermAt(name, osCreds, bmcCreds) {
+  const showOs = !!(osCreds && osCreds.host && osCreds.user && osCreds.pass);
+  const showBmc = !!(bmcCreds && bmcCreds.host && bmcCreds.user && bmcCreds.pass);
   $("term-title").innerHTML = `<span class="grip">▦</span> 終端機 — ${esc(name)}`;
   resetTermGeometry();
   $("term-os-status").innerHTML = `OS <span class="term-badge warn">連線中</span>`;
   $("term-bmc-status").innerHTML = `BMC <span class="term-badge warn">連線中</span>`;
+  $("term-os-pane").style.display = showOs ? "" : "none";
+  $("term-bmc-pane").style.display = showBmc ? "" : "none";
   $("term-modal").style.display = "flex";
   setupTermPane("term-os");
   setupTermPane("term-bmc");
-  termInstances = {
-    os: new Term("term-os", `/ws/terminal/${encodeURIComponent(name)}/os`, "term-os-status"),
-    bmc: new Term("term-bmc", `/ws/terminal/${encodeURIComponent(name)}/bmc`, "term-bmc-status"),
-  };
-  termInstances.os.connect();
-  termInstances.bmc.connect();
+  termInstances = {};
+  if (showOs) termInstances.os = new Term("term-os", _termUrl(name, "os", osCreds), "term-os-status");
+  if (showBmc) termInstances.bmc = new Term("term-bmc", _termUrl(name, "bmc", bmcCreds), "term-bmc-status");
+  Object.values(termInstances).forEach(t => t.connect());
   requestAnimationFrame(() => fitAll());
+}
+// 原本的 openTerm：使用已存帳密（有 os+bmc 連兩窗；沒有就帶 creds 為空）
+function openTerm(name) {
+  const m = machines.find(x => x.name === name);
+  if (!m) return;
+  openTermAt(name,
+    (m.os_ip && m.os_user && m.os_pass) ? { host: m.os_ip, user: m.os_user, pass: m.os_pass, port: m.os_port || 22 } : null,
+    (m.bmc_ip && m.bmc_user && m.bmc_pass) ? { host: m.bmc_ip, user: m.bmc_user, pass: m.bmc_pass, port: m.bmc_port || 623 } : null);
 }
 function setupTermPane(id) { $(id).innerHTML = ""; }
 function fitAll() {

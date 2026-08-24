@@ -200,12 +200,14 @@ _IPMI_CIPHER = os.environ.get("IPMI_CIPHER", "17")
 def _ipmi_cmd(m, sub_args):
     """組 ipmitool 命令（統一 -I lanplus -H -U -P -C cipher + 子指令）。
     依使用者指定格式：ipmitool -I lanplus -H <BMC_IP> -U <user> -P <pass> -C 17 <sub...>。
-    sub_args 例如 ["chassis","power","status"]。"""
+    sub_args 例如 ["chassis","power","status"]。
+    machine.use_c17 為 False 時改用 3（或 IPMI_CIPHER 環境變數），即「不加 -C 17」。"""
     if not m.get("bmc_ip") or not m.get("bmc_user") or not m.get("bmc_pass"):
         return None
+    cipher = _IPMI_CIPHER if m.get("use_c17", True) else (os.environ.get("IPMI_CIPHER_NO17", "3"))
     return ["ipmitool", "-I", "lanplus",
             "-H", m["bmc_ip"], "-U", m["bmc_user"], "-P", m["bmc_pass"],
-            "-C", _IPMI_CIPHER] + sub_args
+            "-C", cipher] + sub_args
 
 
 # ---- 自訂開關機 / AUX(AC cycle) 指令（變數代入）----
@@ -243,7 +245,11 @@ def run_control_cmd(m, action):
     else:
         cmd_tpl = m.get("aux_cmd") or ""
     if cmd_tpl:
-        cmd = subst_vars(cmd_tpl, m)
+        cmd0 = subst_vars(cmd_tpl, m)
+        # use_c17 關閉時，將自訂指令中的「-C 17」移除（例如改為 -C 3 / 不加）
+        if not m.get("use_c17", True):
+            cmd0 = cmd0.replace(" -C 17", "").replace(" -c 17", "")
+        cmd = cmd0
         try:
             # 支援用 shell 執行，方便用戶寫 ipmitool / redfishcurl / ssh 等
             r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=30)
@@ -410,6 +416,7 @@ def add_machine(body: AddMachine):
         "bmc_port": body.bmc_port,
         "project": body.project,
         "level": body.level if body.level in ("system", "rack") else "system",
+        "use_c17": True,
         "order": max([x.get("order", 0) for x in machines.values()] or [-1]) + 1,
         "created": datetime.datetime.now().isoformat(timespec="seconds"),
     }
@@ -496,6 +503,7 @@ def add_rack_passive(body: AddRackPassive):
         "rack_u": body.rack_u if 0 < body.rack_u <= 47 else 1,
         "rack_side": body.rack_side if body.rack_side in ("front", "rear") else "front",
         "rack_size": body.rack_size if 0 < body.rack_size <= 42 else 1,
+        "use_c17": True,
         "passive": True,
         "order": max([x.get("order", 0) for x in machines.values()] or [-1]) + 1,
         "created": datetime.datetime.now().isoformat(timespec="seconds"),
@@ -544,6 +552,8 @@ def edit_machine(name: str, body: dict):
     for f in ("power_on_cmd", "power_off_cmd", "aux_cmd"):
         if f in body:
             m[f] = str(body[f] or "").strip()
+    if "use_c17" in body:
+        m["use_c17"] = bool(body["use_c17"])
     _save_data()
     return {"ok": True, "machine": m}
 
@@ -795,6 +805,33 @@ def machine_aux_cycle(name: str, body: dict = None):
     m = machines[name]
     ok, info = run_control_cmd(m, "aux")
     return {"ok": ok, "action": "aux", "info": info}
+
+
+@app.post("/api/machine/{name}/reboot")
+def machine_reboot(name: str, body: dict = None):
+    """對機台執行 OS reboot。透過 sshpass/ssh 到 OS 下 reboot；無 OS 才改用 BMC chassis power reset。"""
+    if name not in machines:
+        raise HTTPException(404, f"機台不存在: {name}")
+    m = machines[name]
+    ok, info = _reboot_machine(m)
+    return {"ok": ok, "action": "reboot", "info": info}
+
+
+def _reboot_machine(m):
+    """OS reboot：SSH 進 OS 下 reboot。若無 OS 連線資訊，退而求其次用 BMC chassis power reset。"""
+    if m.get("os_ip") and m.get("os_user") and m.get("os_pass"):
+        out, rc, err = ssh_run(m["os_ip"], m.get("os_user", ""), m.get("os_pass", ""),
+                               m.get("os_port", 22), "sudo -n true 2>/dev/null && sudo reboot || reboot", timeout=10)
+        if rc == 0 or ("reboot" in (out or "") or "Connection" in (err or "")):
+            return True, "已送出 reboot（OS）— SSH 可能馬上斷線代表正在重開"
+        # ssh 執行 reboot 後連線通常會立刻斷，rc 可能非 0，但能連上且送出即視為成功
+        if err and ("closed" in err.lower() or "refused" in err.lower() or "broken" in err.lower()):
+            return True, "已送出 reboot（OS 連線中斷，代表正在重開）"
+        return False, f"SSH 無法送 reboot：{err or '無回應'}"
+    if m.get("bmc_ip") and m.get("bmc_user") and m.get("bmc_pass"):
+        ok, info = ipmi_power(m, "reset")
+        return ok, f"（無 OS，改用 BMC power reset）{info}"
+    return False, "此元件無 OS 亦無 BMC，無法 reboot"
 
 
 @app.get("/api/machine/{name}/power")
@@ -1246,13 +1283,20 @@ def edit_project(name: str, body: AddProject):
 
 
 # ---- 網頁終端機（xterm / SSH bridge）----
-def _start_terminal(websocket: WebSocket, machine, kind: str):
+def _start_terminal(websocket: WebSocket, machine, kind: str, overrides: dict = None):
     """建立 paramiko 互動 shell，並在 SSH <-> WebSocket 之間橋接。
-    kind: 'os' 連 OS；'bmc' 連 BMC。"""
+    kind: 'os' 連 OS；'bmc' 連 BMC。overrides 可覆寫 host/user/pass/port（例如 passive 元件點開時由前端動態填帳密）。"""
+    overrides = overrides or {}
     if kind == "os":
-        host, user, pw, port = machine["os_ip"], machine["os_user"], machine["os_pass"], machine["os_port"]
+        host = overrides.get("host") or machine.get("os_ip", "")
+        user = overrides.get("user") or machine.get("os_user", "")
+        pw   = overrides.get("pass") or machine.get("os_pass", "")
+        port = overrides.get("port") or machine.get("os_port", 22)
     else:
-        host, user, pw, port = machine["bmc_ip"], machine["bmc_user"], machine["bmc_pass"], machine["bmc_port"]
+        host = overrides.get("host") or machine.get("bmc_ip", "")
+        user = overrides.get("user") or machine.get("bmc_user", "")
+        pw   = overrides.get("pass") or machine.get("bmc_pass", "")
+        port = overrides.get("port") or machine.get("bmc_port", 623)
 
     if not host or not user or not pw:
         asyncio.run_coroutine_threadsafe(
@@ -1312,8 +1356,16 @@ async def terminal(websocket: WebSocket, name: str, kind: str):
         await websocket.close()
         return
 
+    # 前端可透過 query 傳遞一次性連線資訊（用於 passive 元件動態填帳密）
+    q = websocket.query_params
+    overrides = {}
+    for key in ("host", "user", "pass", "port"):
+        v = q.get(key)
+        if v:
+            overrides[key] = v
+
     loop = asyncio.get_event_loop()
-    client, channel = _start_terminal(websocket, machine, kind)
+    client, channel = _start_terminal(websocket, machine, kind, overrides)
     if client is None or channel is None:
         await websocket.close()
         return
