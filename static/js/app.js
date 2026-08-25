@@ -750,10 +750,9 @@ function rackBlockRow(m, u, size, pinged) {
   const termBtn = `<button class="btn small" title="終端機" onclick="openTermDialog('${esc(m.name)}')">▶</button>`;
   const delBtn = `<button class="btn small btn-del" title="從機櫃移除（不刪除 System Manager，怕放錯可拿掉）" onclick="rackUnmount('${esc(m.name)}')">✕</button>`;
   const nm = `${info.icon} ${esc(m.name)}`;
-  const uRange = size > 1 ? `U${u}–${u - size + 1}` : `U${u}`;
   const uStack = size > 1
     ? Array.from({ length: size }, (_, i) => `<span class="mono">U${u - i}</span>`).join("")
-    : `<span class="mono">${uRange}</span>`;
+    : `<span class="mono">U${u}</span>`;
   // CSS grid row 1 在最上方（U48）；topRow = ROW_TOP - u
   const topRow = ROW_TOP - u;
   const span = ` style="grid-row:${topRow} / ${topRow + size}"`;
