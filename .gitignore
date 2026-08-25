@@ -8,3 +8,7 @@ backup/
 # Python 暫存
 __pycache__/
 *.pyc
+
+# node terminal bridge
+node_modules/
+terminal_bridge/node_modules/

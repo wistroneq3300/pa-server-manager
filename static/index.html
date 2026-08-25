@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Wistron PA Server Manager</title>
-<link rel="stylesheet" href="/static/css/style.css?v=20260825b2">
+<link rel="stylesheet" href="/static/css/style.css?v=20260827h">
 <link rel="stylesheet" href="/static/vendor/xterm/xterm.css">
 </head>
 <body>
@@ -15,7 +15,7 @@
   <aside class="sidebar">
     <div class="brand">
       <div class="logo-row">
-        <div class="logo-mark">PA</div>
+        <img class="logo-mark logo-img" src="/static/img/wistronlogo.png" alt="Wistron">
         <div class="logo-txt">
           <div class="l1">Wistron PA</div>
         </div>
@@ -64,7 +64,7 @@
       <div class="field-row">
         <div class="field">
           <label>層級（Level）<span class="req">*</span></label>
-          <select id="f-level" class="input">
+          <select id="f-level" class="input" onchange="onAddLevelChange()">
             <option value="system">L10 · System Level（單機）</option>
             <option value="rack">L11 · Rack Level（整櫃）</option>
           </select>
@@ -73,6 +73,24 @@
           <label>專案 <span class="req">*</span></label>
           <select id="f-project" class="input">
             <option value="">— 未分類 —</option>
+          </select>
+        </div>
+      </div>
+      <div class="field-row" id="f-rack-size-wrap" style="display:none">
+        <div class="field">
+          <label>機櫃占用高度 <span class="hint" style="font-weight:400">（L11 用，多 U 元件如 CDU/PDU/Switch）</span></label>
+          <select id="f-rack-size" class="input">
+            <option value="1" selected>1U</option>
+            <option value="2">2U</option>
+            <option value="3">3U</option>
+            <option value="4">4U</option>
+            <option value="6">6U</option>
+            <option value="8">8U</option>
+            <option value="12">12U</option>
+            <option value="16">16U</option>
+            <option value="24">24U</option>
+            <option value="32">32U</option>
+            <option value="42">42U</option>
           </select>
         </div>
       </div>
@@ -108,7 +126,11 @@
           <input id="f-bmc-ip" type="text" placeholder="由 ipmitool 自動抓取" class="input" disabled>
         </div>
       </div>
-      <button type="button" class="btn small" id="probe-bmc-btn" onclick="probeBmc()">🔍 依 OS 抓取 BMC IP（需 ipmitool）</button>
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <button type="button" class="btn small" id="probe-bmc-btn" onclick="probeBmc()">🔍 依 OS 抓取 BMC IP（需 ipmitool）</button>
+        <span id="probe-bmc-dot" class="dot-sm" title="抓取 BMC IP 狀態"></span>
+        <span id="probe-bmc-msg"></span>
+      </div>
       <div class="field-row">
         <div class="field">
           <label>BMC 帳號 <span class="req" id="bmc-user-req">*</span></label>
@@ -220,6 +242,6 @@
 <script src="/static/vendor/xterm/xterm.js"></script>
 <script src="/static/vendor/xterm/addon-fit.js"></script>
 <script src="/static/vendor/chartjs/chart.umd.min.js"></script>
-<script src="/static/js/app.js?v=20260825b2"></script>
+<script src="/static/js/app.js?v=20260827h"></script>
 </body>
 </html>

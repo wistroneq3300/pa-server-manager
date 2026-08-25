@@ -18,6 +18,7 @@ import threading
 import base64
 import datetime
 import time
+import websockets
 import paramiko
 from concurrent.futures import ThreadPoolExecutor
 
@@ -122,6 +123,7 @@ class AddMachine(BaseModel):
     bmc_port: int = 22
     project: str = ""
     level: str = "system"   # 'system' = L10 單機; 'rack' = L11 整櫃
+    rack_size: int = 1      # L11 rack level 用：機櫃占用高度（U 數）
 
 
 class AddProject(BaseModel):
@@ -403,6 +405,20 @@ def add_machine(body: AddMachine):
         raise HTTPException(400, f"專案不存在: {body.project}")
 
     name = hostname
+    # 衝突檢查：hostname / os_ip / bmc_ip 任一與現有機台重複時明確擋下，
+    # 避免「默默覆蓋」造成既有機台消失。允許加入時才寫入。
+    conflicts = []
+    for mk, mv in machines.items():
+        if mk == name:
+            conflicts.append(f"主機名稱「{name}」已被 {mk}（專案 {mv.get('project') or '-'}）使用")
+        if mv.get("os_ip") and mv["os_ip"] == body.os_ip:
+            conflicts.append(f"OS IP {body.os_ip} 已被「{mk}」使用")
+        if body.bmc_ip and mv.get("bmc_ip") and mv["bmc_ip"] == body.bmc_ip:
+            conflicts.append(f"BMC IP {body.bmc_ip} 已被「{mk}」使用")
+    if conflicts:
+        detail = "；".join(dict.fromkeys(conflicts))
+        raise HTTPException(400, f"無法新增：偵測到衝突 — {detail}。若確實要重複新增，請先處理既有機台，或確認這是同一個名稱/IP。")
+
     rec = {
         "id": _seq,
         "name": name,
@@ -416,6 +432,7 @@ def add_machine(body: AddMachine):
         "bmc_port": body.bmc_port,
         "project": body.project,
         "level": body.level if body.level in ("system", "rack") else "system",
+        "rack_size": body.rack_size if body.level == "rack" and 0 < body.rack_size <= 48 else 1,
         "use_c17": True,
         "order": max([x.get("order", 0) for x in machines.values()] or [-1]) + 1,
         "created": datetime.datetime.now().isoformat(timespec="seconds"),
@@ -488,7 +505,7 @@ def add_rack_passive(body: AddRackPassive):
         raise HTTPException(400, "請填元件名稱")
     if name in machines:
         raise HTTPException(400, f"名稱已存在: {name}")
-    valid = ("server", "switch", "powershelf", "pdu", "cdu", "storage", "network")
+    valid = ("server", "switch", "powershelf", "pdu", "cdu", "storage", "network", "blanking")
     if body.mgx_type not in valid:
         raise HTTPException(400, f"元件類型無效: {body.mgx_type}")
     rec = {
@@ -500,9 +517,9 @@ def add_rack_passive(body: AddRackPassive):
         "project": body.project or "",
         "level": "rack",
         "mgx_type": body.mgx_type,
-        "rack_u": body.rack_u if 0 < body.rack_u <= 47 else 1,
+        "rack_u": body.rack_u if 0 < body.rack_u <= 48 else 1,
         "rack_side": body.rack_side if body.rack_side in ("front", "rear") else "front",
-        "rack_size": body.rack_size if 0 < body.rack_size <= 42 else 1,
+        "rack_size": body.rack_size if 0 < body.rack_size <= 48 else 1,
         "use_c17": True,
         "passive": True,
         "order": max([x.get("order", 0) for x in machines.values()] or [-1]) + 1,
@@ -533,11 +550,11 @@ def edit_machine(name: str, body: dict):
     # Rack Manager 擴充欄位：MGX 元件類型 + 機櫃位置（U 數 & 前後排）
     if "mgx_type" in body:
         t = str(body["mgx_type"])
-        m["mgx_type"] = t if t in ("server", "switch", "pdu", "powershelf", "cdu", "storage", "network") else "server"
+        m["mgx_type"] = t if t in ("server", "switch", "pdu", "powershelf", "cdu", "storage", "network", "blanking") else "server"
     if "rack_u" in body:
         try:
             m["rack_u"] = int(body["rack_u"])
-            if m["rack_u"] < 0 or m["rack_u"] > 47:
+            if m["rack_u"] < 0 or m["rack_u"] > 48:
                 m["rack_u"] = 0
         except Exception:
             pass
@@ -546,7 +563,7 @@ def edit_machine(name: str, body: dict):
         m["rack_side"] = side if side in ("front", "rear") else "front"
     if "rack_size" in body:
         try:
-            m["rack_size"] = max(1, min(42, int(body["rack_size"])))
+            m["rack_size"] = max(1, min(48, int(body["rack_size"])))
         except Exception:
             pass
     for f in ("power_on_cmd", "power_off_cmd", "aux_cmd"):
@@ -1343,61 +1360,67 @@ def _channel_pump(channel, websocket, loop, stop_flag):
     asyncio.run_coroutine_threadsafe(websocket.close(), loop)
 
 
-@app.websocket("/ws/terminal/{name}/{kind}")
-async def terminal(websocket: WebSocket, name: str, kind: str):
+TERM_BRIDGE_URL = "ws://127.0.0.1:6968"
+
+
+async def _proxy_ws(websocket: WebSocket, target_path: str):
+    """把前端 WebSocket 雙向代理到 node terminal bridge（port 6968）。
+    target_path 為要連到 bridge 的路徑（例如 /ws/terminal/{name}/{kind} 或 /ws/broadcast）。"""
     await websocket.accept()
-    if kind not in ("os", "bmc"):
-        await websocket.send_json({"type": "error", "msg": "kind 必須是 os 或 bmc"})
-        await websocket.close()
-        return
-    machine = machines.get(name)
-    if not machine:
-        await websocket.send_json({"type": "error", "msg": f"找不到機台: {name}"})
-        await websocket.close()
-        return
-
-    # 前端可透過 query 傳遞一次性連線資訊（用於 passive 元件動態填帳密）
-    q = websocket.query_params
-    overrides = {}
-    for key in ("host", "user", "pass", "port"):
-        v = q.get(key)
-        if v:
-            overrides[key] = v
-
-    loop = asyncio.get_event_loop()
-    client, channel = _start_terminal(websocket, machine, kind, overrides)
-    if client is None or channel is None:
-        await websocket.close()
-        return
-
-    stop_flag = threading.Event()
-    t = threading.Thread(target=_channel_pump, args=(channel, websocket, loop, stop_flag), daemon=True)
-    t.start()
-
+    url = TERM_BRIDGE_URL + target_path
     try:
-        while True:
-            msg = await websocket.receive()
-            if "bytes" in msg and msg["bytes"]:
-                channel.send(msg["bytes"])
-            elif "text" in msg and msg["text"]:
-                # 支援 JSON 控制訊息，例如 resize
+        async with websockets.connect(url, max_size=None) as upstream:
+            async def client_to_upstream():
                 try:
-                    cmd = json.loads(msg["text"])
-                    if cmd.get("type") == "resize" and cmd.get("cols") and cmd.get("rows"):
-                        channel.resize_pty(width=cmd["cols"], height=cmd["rows"])
+                    while True:
+                        message = await websocket.receive()
+                        if message["type"] == "websocket.disconnect":
+                            break
+                        text = message.get("text")
+                        if text is not None:
+                            await upstream.send(text)
+                        else:
+                            await upstream.send(message.get("bytes"))
                 except Exception:
-                    channel.send(msg["text"].encode())
-    except WebSocketDisconnect:
-        pass
-    except Exception:
-        pass
-    finally:
-        stop_flag.set()
+                    pass
+                finally:
+                    try:
+                        await upstream.close()
+                    except Exception:
+                        pass
+
+            async def upstream_to_client():
+                try:
+                    async for data in upstream:
+                        if isinstance(data, (bytes, bytearray)):
+                            await websocket.send_bytes(bytes(data))
+                        else:
+                            await websocket.send_text(str(data))
+                except Exception:
+                    pass
+                finally:
+                    try:
+                        await websocket.close()
+                    except Exception:
+                        pass
+
+            await asyncio.gather(client_to_upstream(), upstream_to_client())
+    except Exception as exc:
         try:
-            channel.close()
-            client.close()
+            await websocket.send_json({"type": "error", "msg": f"無法連到 terminal bridge：{exc}"})
         except Exception:
             pass
+        try:
+            await websocket.close()
+        except Exception:
+            pass
+
+
+@app.websocket("/ws/terminal/{name}/{kind}")
+async def terminal(websocket: WebSocket, name: str, kind: str):
+    # 終端已移轉至獨立的 node/ssh2 bridge（port 6968，事件驅動，避免 paramiko
+    # 併發 SSH 造成 "Invalid packet blocking"）。此處雙向代理到 bridge 對應路徑。
+    await _proxy_ws(websocket, f"/ws/terminal/{name}/{kind}")
 
 
 # ---- 整櫃廣播終端（Broadcast Terminal）----
@@ -1426,117 +1449,9 @@ def _open_broadcast_shell(machine):
 
 @app.websocket("/ws/rack-broadcast")
 async def rack_broadcast(websocket: WebSocket):
-    await websocket.accept()
-    # 前端連線後第一個 JSON：{"targets":[name,...], "kind":"os"}
-    try:
-        hello = await websocket.receive_json()
-    except Exception:
-        await websocket.close()
-        return
-    names = hello.get("targets") or []
-    kind = hello.get("kind") or "os"
-    if kind != "os":
-        await websocket.send_json({"type": "error", "msg": "廣播終端目前僅支援 OS shell"})
-        await websocket.close()
-        return
-
-    loop = asyncio.get_event_loop()
-    shells = {}            # name -> (client, channel)
-    failed = []            # 連不上的主機
-    for nm in names:
-        m = machines.get(nm)
-        if not m:
-            failed.append(nm)
-            continue
-        client, ch = _open_broadcast_shell(m)
-        if client is None or ch is None:
-            failed.append(nm)
-            continue
-        shells[nm] = (client, ch)
-
-    if shells:
-        await websocket.send_json({"type": "ready", "joined": list(shells.keys()), "failed": failed})
-    else:
-        await websocket.send_json({"type": "error", "msg": "沒有主機可連線：%s" % (", ".join(failed) or "未知")})
-        await websocket.close()
-        return
-
-    # 每台機器一個輸出 pump thread：輸出依機器名稱標記成 JSON 送回前端
-    stop_flag = threading.Event()
-    active_lock = threading.Lock()
-
-    def pump_output(name, channel):
-        while not stop_flag.is_set():
-            try:
-                if channel.recv_ready():
-                    data = channel.recv(4096)
-                    if data:
-                        asyncio.run_coroutine_threadsafe(
-                            websocket.send_json({"type": "out", "name": name, "data": bytes(data).decode("utf-8", errors="replace")}),
-                            loop,
-                        )
-                elif channel.exit_status_ready() and not channel.recv_ready():
-                    break
-                else:
-                    import time
-                    time.sleep(0.02)
-            except Exception:
-                break
-        # 結束時通知該主機中斷
-        asyncio.run_coroutine_threadsafe(
-            websocket.send_json({"type": "closed", "name": name}), loop)
-
-    threads = []
-    for nm, (_, ch) in shells.items():
-        t = threading.Thread(target=pump_output, args=(nm, ch), daemon=True)
-        t.start()
-        threads.append(t)
-
-    def broadcast_bytes(data: bytes):
-        for nm, (_, ch) in shells.items():
-            try:
-                ch.send(data)
-            except Exception:
-                pass
-
-    try:
-        while True:
-            msg = await websocket.receive()
-            if "bytes" in msg and msg["bytes"]:
-                broadcast_bytes(msg["bytes"])
-            elif "text" in msg and msg["text"]:
-                try:
-                    cmd = json.loads(msg["text"])
-                    if cmd.get("type") == "broadcast" and "data" in cmd:
-                        broadcast_bytes(cmd["data"].encode("utf-8") if isinstance(cmd["data"], str) else bytes(cmd["data"]))
-                    elif cmd.get("type") == "sendOne" and cmd.get("name") and "data" in cmd:
-                        pair = shells.get(cmd["name"])
-                        if pair:
-                            pair[1].send(cmd["data"].encode("utf-8") if isinstance(cmd["data"], str) else bytes(cmd["data"]))
-                    elif cmd.get("type") == "resize" and cmd.get("cols") and cmd.get("rows"):
-                        for _, ch in shells.values():
-                            try:
-                                ch.resize_pty(width=cmd["cols"], height=cmd["rows"])
-                            except Exception:
-                                pass
-                except Exception:
-                    # 非 JSON：視為廣播純文字
-                    try:
-                        broadcast_bytes(msg["text"].encode())
-                    except Exception:
-                        pass
-    except WebSocketDisconnect:
-        pass
-    except Exception:
-        pass
-    finally:
-        stop_flag.set()
-        for nm, (client, ch) in shells.items():
-            try:
-                ch.close()
-                client.close()
-            except Exception:
-                pass
+    # 廣播終端已移轉至 node terminal bridge（/ws/broadcast，port 6968）。此處
+    # 把 /ws/rack-broadcast 雙向代理到 bridge 的 /ws/broadcast，路徑不同需轉換。
+    await _proxy_ws(websocket, "/ws/broadcast")
 
 
 # ---- AI Copilot（串本機 Ollama）----

@@ -89,6 +89,8 @@ body {
   display:flex;align-items:center;justify-content:center;
   font-weight:800;color:#fff;font-size:17px;box-shadow:0 2px 10px rgba(0,168,120,.45);
 }
+/* Wistron logo 圖片取代「PA」方塊：比例放大、貼合側欄 */
+.brand .logo-img{width:auto;height:30px;border-radius:0;background:transparent;box-shadow:none}
 .brand .logo-txt .l1 { font-weight:700;font-size:13px;color:#fff;letter-spacing:.3px; }
 .brand .manager-label {
   margin-top:2px;font-size:10px;color:#7f9cb4;letter-spacing:.6px;font-weight:600;
@@ -207,14 +209,21 @@ body {
 .input[disabled]{background:var(--bg-panel-2);color:var(--text-faint);cursor:not-allowed;opacity:.7}
 
 table.t{width:100%;border-collapse:collapse}
+.proj-table-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;width:100%}
+.proj-table-scroll table.t{min-width:760px;width:100%}
+.proj-table-scroll table.t th,.proj-table-scroll table.t td{white-space:nowrap}
 .t th{text-align:left;font-size:11px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.4px;border-bottom:1px solid var(--border);padding:8px;white-space:nowrap}
 .t td{border-bottom:1px solid var(--border-soft);padding:8px;font-size:12px}
-/* 系統管理專案卡片：固定表格配置，跨卡片同欄等寬、層級欄水平對齊一致（不受系統名稱長度影響） */
-.proj-card .t{table-layout:fixed}
-.proj-card .t th:nth-child(1),.proj-card .t td:nth-child(1){width:66px;text-align:left}
-/* 層級欄固定寬度（對齊點），系統名稱欄固定佔比並可截斷 */
-.proj-card .t th:nth-child(2),.proj-card .t td:nth-child(2){width:22%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.proj-card .t th:nth-child(3),.proj-card .t td:nth-child(3){width:92px;white-space:nowrap}
+/* 系統管理專案表格：放進 .proj-table-scroll（overflow-x:auto + min-width），
+   改用 auto 表格布局 → 每欄依內容自適應，操作欄按鈕保持自然寬度，不再被 table-layout:fixed
+   均分壓扁而向右溢出。卡片太窄時整個表格可水平捲動，不會把「刪除」擠到畫面外。 */
+.proj-card .t{min-width:760px}
+.proj-card .t th:nth-child(1),.proj-card .t td:nth-child(1){width:60px;text-align:left}
+/* 各專案表格用一致的固定欄寬 → 不同專案卡片的「名稱/層級/IP」欄位水平對齊一致 */
+.proj-card .t th:nth-child(2),.proj-card .t td:nth-child(2){width:210px;max-width:210px;text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.proj-card .t th:nth-child(3),.proj-card .t td:nth-child(3){width:100px;white-space:nowrap}
+.proj-card .t th:nth-child(4),.proj-card .t td:nth-child(4){width:170px;white-space:nowrap}
+.proj-card .t th:nth-child(5),.proj-card .t td:nth-child(5){width:150px;white-space:nowrap}
 .proj-card .t td:nth-child(2) .mono{display:inline-block;max-width:100%;overflow:hidden;text-overflow:ellipsis;vertical-align:bottom}
 /* 未分類表格（少兩欄）也對齊層級欄起點：第2欄為系統名稱、第3欄為層級 */
 .proj-card .t th:nth-child(8),.proj-card .t td:nth-child(8){white-space:nowrap}
@@ -277,6 +286,30 @@ table.t{width:100%;border-collapse:collapse}
   background:var(--bg-panel-2);color:var(--text);font-size:13px;outline:none;font-family:inherit
 }
 .input:focus{border-color:var(--w-green)}
+/* placeholder 一律淺灰：避免某些欄位（尤其 BMC 密碼 pw-input）在部分瀏覽器顯示較深 */
+.input::placeholder{color:var(--text-faint);opacity:1}
+/* BMC IP 掃描結果訊息：成功綠、失敗紅 */
+#probe-bmc-msg{font-size:12.5px;font-weight:600}
+#probe-bmc-msg.ok{color:#16a34a}
+#probe-bmc-msg.err{color:#ef4444}
+.input::-webkit-input-placeholder{color:var(--text-faint);opacity:1}
+.input::-moz-placeholder{color:var(--text-faint);opacity:1}
+/* BMC 密碼欄在 WebKit 會被上方 -webkit-text-fill-color(深色) 蓋掉 placeholder
+   補一條 placeholder 淺灰且 !important 覆蓋，與「例: root」一致 */
+input#f-bmc-pass::-webkit-input-placeholder{color:var(--text-faint) !important;-webkit-text-fill-color:var(--text-faint) !important;opacity:1}
+input#f-bmc-pass::placeholder{color:var(--text-faint) !important;-webkit-text-fill-color:var(--text-faint) !important;opacity:1}
+input#f-bmc-pass::-moz-placeholder{color:var(--text-faint) !important;opacity:1}
+/* 移除 BMC 密碼欄由瀏覽器 autofill/必填提示造成的紅框，統一為一般輸入框樣式 */
+input#f-bmc-pass,
+input#f-bmc-pass:-webkit-autofill,
+input#f-bmc-pass:autofill{
+  border:1px solid var(--border) !important;
+  outline:none !important;
+  box-shadow:0 0 0 1000px var(--bg-panel-2) inset !important;
+  -webkit-box-shadow:0 0 0 1000px var(--bg-panel-2) inset !important;
+  -webkit-text-fill-color:var(--text) !important;
+  caret-color:var(--text);
+}
 .error-box{background:var(--red-bg);color:var(--red);border:1px solid rgba(220,38,38,.3);border-radius:6px;padding:9px 12px;font-size:12px;margin-top:6px}
 .success-box{background:var(--green-bg);color:var(--green);border:1px solid rgba(22,163,74,.3);border-radius:6px;padding:9px 12px;font-size:12px;margin-top:6px}
 
@@ -375,6 +408,12 @@ table.t{width:100%;border-collapse:collapse}
 .bc-tab .lamp.on{background:var(--green)}
 .bc-tab .lamp.err{background:var(--red)}
 .bc-tab .lamp.none{background:var(--text-faint)}
+/* 抓取 BMC IP 狀態燈：灰=待機、紅=掃描中/失敗、綠=已抓到 */
+.dot-sm{width:9px;height:9px;border-radius:50%;background:var(--text-faint);flex-shrink:0;transition:background .2s}
+.dot-sm.scan{background:var(--red);box-shadow:0 0 0 0 rgba(220,38,38,.6);animation:pulse 1s infinite}
+.dot-sm.ok{background:var(--green)}
+.dot-sm.fail{background:var(--red)}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(220,38,38,.6)}70%{box-shadow:0 0 0 6px rgba(220,38,38,0)}100%{box-shadow:0 0 0 0 rgba(220,38,38,0)}}
 .bc-tab.active{border-color:var(--accent-blue);color:var(--text);background:var(--bg-panel)}
 .bc-tab .x{opacity:.6;margin-left:2px;font-size:12px}
 .bc-tab .x:hover{opacity:1;color:var(--red)}
@@ -608,6 +647,11 @@ table.t{width:100%;border-collapse:collapse}
 .hw-lines .hw-line{display:block;padding:1px 0}
 .cpu-model{font-size:15px}
 .cpu-spec{color:var(--text-dim);margin-top:4px}
+/* CPU/DIMM 卡片的 tag 徽章（與 NIC 卡片一致的質感） */
+.hw-tags{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+.hw-tag{display:inline-flex;align-items:center;padding:1px 10px;background:var(--bg);border:1px solid var(--border-soft);border-radius:20px;font-size:11px;color:var(--accent-blue);line-height:1.8}
+.hw-parts{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.hw-part{font-size:10px;font-family:var(--mono);padding:2px 8px;background:var(--bg-panel-2);border:1px dashed var(--border);border-radius:4px;color:var(--text-dim);word-break:break-all}
 .gpu-grid{display:grid;grid-template-columns:repeat(2, minmax(0,1fr));gap:3px 12px}
 .gpu-cell{font-size:12px;line-height:1.4;padding:2px 0}
 .gpu-cell .gpu-name{font-weight:600;word-break:break-word}
@@ -650,7 +694,8 @@ table.t{width:100%;border-collapse:collapse}
 .mgx-dot.mgx-cdu{background:#14b8a6}
 .mgx-dot.mgx-storage{background:#0ea5e9}
 .mgx-dot.mgx-network{background:#f97316}
-.rm-rack{max-width:600px;border-radius:14px;margin-top:12px;--rack-row-h:28px;
+.mgx-dot.mgx-blanking{background:#6b7280}
+.rm-rack{max-width:430px;border-radius:14px;margin-top:12px;--rack-row-h:26px;
   padding:8px 34px; /* 左右留導軌空間 */
   background:linear-gradient(180deg,#1a1d24,#0e1013);
   box-shadow:0 10px 30px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.06);
@@ -664,17 +709,21 @@ table.t{width:100%;border-collapse:collapse}
   color:#fff;font-weight:700;padding:9px 16px;display:flex;gap:40px;align-items:center;
   border-radius:8px 8px 0 0;letter-spacing:.4px;margin:0 -34px;
   box-shadow:inset 0 1px 0 rgba(255,255,255,.12)}
-.rm-body{display:grid;grid-template-rows:repeat(42,var(--rack-row-h));grid-auto-rows:var(--rack-row-h);grid-auto-flow:row;
+.rm-body{display:grid;grid-template-rows:repeat(48,var(--rack-row-h));grid-auto-rows:var(--rack-row-h);grid-auto-flow:row;
   background:radial-gradient(ellipse at 20% 0%, rgba(255,255,255,.03), transparent 60%),linear-gradient(180deg,#101318,#111418);
   border-radius:0 0 10px 10px;margin:8px -28px 0}
-.rm-row{display:grid;grid-template-columns:46px 1fr;align-items:stretch}
-.rm-row.rm-block{grid-column:1 / -1;grid-template-columns:46px 1fr}
-.rm-u{display:flex;align-items:stretch;justify-content:center;font-size:10px;color:rgba(255,255,255,.42);
+.rm-row{display:grid;grid-template-columns:58px minmax(0,1fr);align-items:stretch}
+.rm-row.rm-block{grid-column:1 / -1;grid-template-columns:58px minmax(0,1fr);overflow:hidden}
+.rm-u{display:flex;align-items:center;justify-content:center;min-width:0;overflow:hidden;font-size:13px;font-weight:700;color:rgba(255,255,255,.95);
   background:repeating-linear-gradient(180deg,transparent 0 9px,rgba(255,255,255,.04) 9px 14px);
-  border-right:1px solid rgba(255,255,255,.07);text-shadow:0 1px 0 #000}
-.rm-u>span{display:flex;align-items:center;justify-content:center;width:100%;font-family:monospace;letter-spacing:.5px}
-.rm-u>span::before,.rm-u>span::after{content:"\2022";font-size:9px;margin:0 2px;color:rgba(255,255,255,.22)}
-.rm-empty-slot{display:flex;align-items:center;justify-content:center;font-size:15px;color:rgba(255,255,255,.35);cursor:pointer;
+  border-right:1px solid rgba(255,255,255,.07);text-shadow:0 1px 0 #000;padding:0 2px}
+.rm-u>span{display:inline-flex;align-items:center;justify-content:center;font-family:monospace;letter-spacing:0;white-space:nowrap;font-size:13px;font-weight:700;line-height:1;min-width:0;max-width:100%}
+.rm-u>span::before,.rm-u>span::after{display:none}
+/* >1U block：U 欄由「U4–1」單一字串改成獨立的 U4/U3/U2/U1 上下堆疊，與機櫃 U 尺對齊 */
+.rm-u.rm-u-block{flex-direction:column;justify-content:stretch;gap:0;padding:0}
+.rm-u.rm-u-block>span{flex:1 1 0%;width:100%;min-height:0}
+.rm-u.rm-u-block>span:not(:last-child){border-bottom:1px solid rgba(255,255,255,.07)}
+.rm-empty-slot{display:flex;align-items:center;justify-content:center;font-size:14px;color:rgba(255,255,255,.75);cursor:pointer;
   transition:background .15s;border-left:1px solid transparent}
 .rm-empty-slot:hover{background:rgba(45,120,255,.14);color:#6ea8ff}
 .rm-cell{display:flex;align-items:stretch;gap:8px;padding:0;cursor:pointer;transition:transform .12s,box-shadow .12s;
@@ -682,8 +731,8 @@ table.t{width:100%;border-collapse:collapse}
   border-radius:4px 3px 0 0;box-shadow:0 1px 2px rgba(0,0,0,.4);margin:1px 1px}
 .rm-cell:hover{transform:translateY(-1px);box-shadow:0 3px 8px rgba(0,0,0,.5), inset 0 0 0 1px rgba(255,255,255,.12);z-index:2}
 .rm-cell::after{content:"";position:absolute;top:0;left:0;right:0;height:3px;background:radial-gradient(circle at 30% -40%,rgba(255,255,255,.35),transparent 70%)}
-.rm-cell-inner{display:flex;align-items:center;gap:8px;padding:4px 9px;width:100%;min-height:26px;position:relative}
-.rm-u-tag{font-size:9px;color:rgba(255,255,255,.55);border:1px solid rgba(255,255,255,.14);border-radius:3px;padding:0 4px;flex-shrink:0;font-family:monospace}
+.rm-cell-inner{display:flex;align-items:center;gap:7px;padding:2px 26px 2px 8px;width:100%;min-height:0;position:relative;overflow:hidden}
+.rm-u-tag{font-size:8px;color:rgba(255,255,255,.55);border:1px solid rgba(255,255,255,.14);border-radius:3px;padding:0 4px;flex-shrink:0;font-family:monospace}
 .rm-cell.green{box-shadow:inset 3px 0 0 #22c55e, 0 1px 2px rgba(0,0,0,.4)}
 .rm-cell.red{box-shadow:inset 3px 0 0 var(--red), 0 1px 2px rgba(0,0,0,.4)}
 .rm-cell.none{box-shadow:inset 3px 0 0 rgba(255,255,255,.2), 0 1px 2px rgba(0,0,0,.4)}
@@ -693,11 +742,13 @@ table.t{width:100%;border-collapse:collapse}
 .rm-cell.mgx-cdu{background:linear-gradient(120deg,#14343a,#0f2a30);border-color:#1c5a64}
 .rm-cell.mgx-storage{background:linear-gradient(120deg,#1d3348,#15283a)}
 .rm-cell.mgx-network{background:linear-gradient(120deg,#3d2b18,#2e2112)}
+.rm-cell.mgx-blanking{background:repeating-linear-gradient(45deg,#181b1f,#181b1f 6px,#20242a 6px,#20242a 12px);
+  border:1px dashed #4b5563;border-left:none;color:#9ca3af}
 .rm-lamp{font-size:12px;width:16px;text-align:center;filter:drop-shadow(0 0 3px currentColor)}
-.rm-name{font-weight:700;font-size:12px;color:#e8f0ff;min-width:0;overflow:hidden;text-overflow:ellipsis;text-shadow:0 1px 0 #000}
-.rm-ip{font-size:10px;color:rgba(255,255,255,.5);flex-shrink:0;font-family:monospace}
+.rm-name{font-weight:700;font-size:12px;color:#e8f0ff;min-width:0;flex:1 1 auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-shadow:0 1px 0 #000}
+.rm-ip{display:none;font-size:9px;color:rgba(255,255,255,.6);flex-shrink:0;font-family:monospace}
 .rm-actions{display:flex;gap:4px;white-space:nowrap;flex-shrink:0}
-.rm-actions .btn{padding:2px 7px;font-size:11px}
+.rm-actions .btn{padding:1px 4px;font-size:9px}
 .rm-actions .btn{background:rgba(255,255,255,.06);border-color:rgba(255,255,255,.14);color:#cfd9ea}
 @media (max-width:560px){.rm-ip{display:none}}
 /* 卡片 + 清單整合 */
@@ -709,6 +760,7 @@ table.t{width:100%;border-collapse:collapse}
 .rack-card.mgx-cdu-card{border-left:3px solid #14b8a6}
 .rack-card.mgx-storage-card{border-left:3px solid #0ea5e9}
 .rack-card.mgx-network-card{border-left:3px solid #f97316}
+.rack-card.mgx-blanking-card{border-left:3px dashed #6b7280;background:repeating-linear-gradient(45deg,var(--bg-panel),var(--bg-panel) 6px,var(--bg-panel-2) 6px,var(--bg-panel-2) 12px)}
 .rack-mgx{font-size:11px;color:var(--text-faint);margin:6px 0 2px}
 .rm-modal .modal{width:560px;max-width:94vw}
 .rm-modal-body{font-size:13px}
@@ -736,13 +788,13 @@ table.t{width:100%;border-collapse:collapse}
 
 /* ===== 機櫃元件排版：平面圖(左)＋拓樸(右)；卡片/清單全寬 ===== */
 .rack-layout{display:grid;grid-template-columns:1fr;gap:16px;margin-top:12px;align-items:start}
-.rack-layout.plane{grid-template-columns:minmax(0,560px) minmax(0,1fr)}
-.rack-left{min-width:0;max-width:560px}
+.rack-layout.plane{grid-template-columns:minmax(0,400px) minmax(0,1fr)}
+.rack-left{min-width:0;max-width:400px}
 .rack-right{min-width:0;position:sticky;top:12px}
 .rack-main-pad{padding:4px 2px}
 .rack-main-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px}
 /* 清單檢視：讓上方分頁與「平面圖」的 560px 左欄對齊 */
-.rack-layout.alone .rack-main-head{max-width:560px;justify-content:flex-start}
+.rack-layout.alone .rack-main-head{max-width:340px;justify-content:flex-start}
 .rack-subtabs{display:flex;gap:6px}
 .rack-subtabs .btn{white-space:nowrap}
 .rack-subtabs .btn.active{background:var(--w-green);border-color:var(--w-green);color:#fff}
@@ -752,17 +804,19 @@ table.t{width:100%;border-collapse:collapse}
 .topo-card{background:var(--bg-panel);border:1px solid var(--border);border-radius:14px;padding:14px 16px;box-shadow:var(--shadow)}
 .topo-card-title{font-size:15px;font-weight:800;margin-bottom:10px}
 .topo-empty{font-size:12.5px;color:var(--text-faint);line-height:1.7;padding:8px 2px}
-.topo-svg-wrap{overflow:auto;max-height:72vh;border:1px solid var(--border);border-radius:10px;background:var(--bg-panel-2)}
-.topo-svg{display:block;width:100%;height:auto;min-width:860px}
+.topo-svg-wrap{overflow:visible;max-height:none;border:1px solid var(--border);border-radius:10px;background:var(--bg-panel-2)}
+.topo-svg{display:block;width:100%;height:auto;min-width:0;max-width:100%}
 .topo-node-box{stroke:var(--border);stroke-width:1}
-.topo-node-box.mgx-server{fill:#10261a;stroke:#22c55e}
+ .topo-node-box.mgx-server{fill:#10261a;stroke:#22c55e}
 .topo-node-box.mgx-switch{fill:#1d1633;stroke:#7c5cff}
 .topo-node-box.mgx-ps{fill:#241c05;stroke:#e0a800}
 .topo-node-box.mgx-cdu{fill:#0a211d;stroke:#14b8a6}
 .topo-node-box.mgx-storage{fill:#0b1d28;stroke:#0ea5e9}
 .topo-node-box.mgx-network{fill:#2a1608;stroke:#f97316}
-.topo-node-ico{font-size:15px}
-.topo-node-txt{fill:var(--text);font-size:11px;font-weight:700;transform:translateY(2px)}
+.topo-node-box.mgx-blanking{fill:#111314;stroke:#6b7280;stroke-dasharray:3 2}
+.topo-node-ico{font-size:13px;fill:#fff}
+/* 節點盒固定深色底，文字固定淺色 → 白底(light)主題下也不會變暗而看不見 */
+.topo-node-txt{fill:#eafaf5;font-size:10px;font-weight:700;transform:translateY(2px)}
 .topo-edge{pointer-events:none}
 .topo-edge-lbl{font-size:9px;font-weight:600;letter-spacing:.2px;background:var(--bg-panel-2);opacity:0;transition:opacity .15s;pointer-events:none}
 .topo-edge-group:hover .topo-edge-lbl,
