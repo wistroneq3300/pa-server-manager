@@ -734,6 +734,7 @@ function rackBlockRow(m, u, size, pinged) {
   const click = isPassive ? `rackMoveDialog('${esc(m.name)}')` : `openMachine('${esc(m.name)}')`;
   const ctrlBtn = `<button class="btn small" title="開機/關機/reboot/AUX" onclick="machControlDialog('${esc(m.name)}')">⚙</button>`;
   const termBtn = `<button class="btn small" title="終端機" onclick="openTermDialog('${esc(m.name)}')">▶</button>`;
+  const delBtn = `<button class="btn small btn-del" title="刪除（加錯可從機櫃移除）" onclick="deleteMachine('${esc(m.name)}')">✕</button>`;
   const nm = `${info.icon} ${esc(m.name)}`;
   const uRange = size > 1 ? `U${u}–${u - size + 1}` : `U${u}`;
   const uStack = size > 1
@@ -754,6 +755,7 @@ function rackBlockRow(m, u, size, pinged) {
           ${ctrlBtn}
           ${termBtn}
           <button class="btn small" title="換位/類型" onclick="rackMoveDialog('${esc(m.name)}')">⇅</button>
+          ${delBtn}
         </span>
       </div>
     </div>
