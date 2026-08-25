@@ -695,7 +695,7 @@ input#f-bmc-pass:autofill{
 .mgx-dot.mgx-storage{background:#0ea5e9}
 .mgx-dot.mgx-network{background:#f97316}
 .mgx-dot.mgx-blanking{background:#6b7280}
-.rm-rack{max-width:430px;border-radius:14px;margin-top:12px;--rack-row-h:26px;
+.rm-rack{max-width:470px;border-radius:14px;margin-top:12px;--rack-row-h:26px;
   padding:8px 34px; /* 左右留導軌空間 */
   background:linear-gradient(180deg,#1a1d24,#0e1013);
   box-shadow:0 10px 30px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.06);
@@ -712,8 +712,8 @@ input#f-bmc-pass:autofill{
 .rm-body{display:grid;grid-template-rows:repeat(48,var(--rack-row-h));grid-auto-rows:var(--rack-row-h);grid-auto-flow:row;
   background:radial-gradient(ellipse at 20% 0%, rgba(255,255,255,.03), transparent 60%),linear-gradient(180deg,#101318,#111418);
   border-radius:0 0 10px 10px;margin:8px -28px 0}
-.rm-row{display:grid;grid-template-columns:33px minmax(0,1fr);align-items:stretch}
-.rm-row.rm-block{grid-column:1 / -1;grid-template-columns:33px minmax(0,1fr);overflow:hidden}
+.rm-row{display:grid;grid-template-columns:44px minmax(0,1fr);align-items:stretch}
+.rm-row.rm-block{grid-column:1 / -1;grid-template-columns:44px minmax(0,1fr);overflow:hidden}
 .rm-u{display:flex;align-items:center;justify-content:center;min-width:0;overflow:hidden;font-size:13px;font-weight:700;color:rgba(255,255,255,.95);
   background:repeating-linear-gradient(180deg,transparent 0 9px,rgba(255,255,255,.04) 9px 14px);
   border-right:1px solid rgba(255,255,255,.07);text-shadow:0 1px 0 #000;padding:0 2px}
@@ -790,8 +790,8 @@ input#f-bmc-pass:autofill{
 
 /* ===== 機櫃元件排版：平面圖(左)＋拓樸(右)；卡片/清單全寬 ===== */
 .rack-layout{display:grid;grid-template-columns:1fr;gap:16px;margin-top:12px;align-items:start}
-.rack-layout.plane{grid-template-columns:minmax(0,400px) minmax(0,1fr)}
-.rack-left{min-width:0;max-width:400px}
+.rack-layout.plane{grid-template-columns:minmax(0,470px) minmax(0,1fr)}
+.rack-left{min-width:0;max-width:470px}
 .rack-right{min-width:0;position:sticky;top:12px}
 .rack-main-pad{padding:4px 2px}
 .rack-main-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px}
@@ -845,3 +845,7 @@ input#f-bmc-pass:autofill{
 .topo-legend.lk-ib{border-color:#7c5cff;color:#7c5cff}
 .topo-legend.lk-power{border-color:#e0a800;color:#e0a800}
 .topo-legend.lk-coolant{border-color:#14b8a6;color:#14b8a6}
+
+/* loading 轉圈（新增機櫃元件建立中） */
+.spinner{width:16px;height:16px;border:2px solid rgba(255,255,255,.25);border-top-color:#4aa8ff;border-radius:50%;display:inline-block;animation:sp-spin .7s linear infinite;flex-shrink:0}
+@keyframes sp-spin{to{transform:rotate(360deg)}}

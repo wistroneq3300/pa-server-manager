@@ -455,12 +455,13 @@ function rackMoveSetType(name, type) {
   rackMoveTargetType = type;
 }
 let rackMoveTargetType = null;
-async function rackAddPassive() {
+async function rackAddPassive() { rackAddPassiveWithU(); }
+function rackAddPassiveWithU(u) {
   const proj = rackView.project;
   rackAddOccupied(proj);
   showDialog("➕ 新增機櫃元件（無 OS/BMC 亦可）", `
     <div class="rm-modal-body">
-      <p style="margin-bottom:12px;font-size:12px;color:var(--text-faint)">用於加入 switch / power shelf / CDU / PDU / Storage 等<b>沒有 OS 或 BMC</b>的元件。只需名稱 + 類型 + U 槽即可，加入後可再指派專案。</p>
+      <p style="margin-bottom:12px;font-size:12px;color:var(--text-faint)">用於加入 switch / power shelf / CDU / PDU / Storage 等<b>沒有 OS 或 BMC</b>的元件。只需名稱 + 類型 + U 槽即可。</p>
       <label style="display:block;font-size:12px;color:var(--text-faint);margin-bottom:6px">元件名稱 *</label>
       <input class="input" id="rp-name" style="width:100%;padding:8px;margin-bottom:12px" placeholder="例如 SW-01 / CDU-1 / PS-3">
       <label style="display:block;font-size:12px;color:var(--text-faint);margin-bottom:6px">類型</label>
@@ -476,31 +477,42 @@ async function rackAddPassive() {
       <label style="display:block;font-size:12px;color:var(--text-faint);margin-bottom:6px">管理 IP <span class="hint">（選填，可 ping 用）</span></label>
       <input class="input" id="rp-ip" style="width:100%;padding:8px" placeholder="留空則無 IP">
       <p class="hint-msg" style="margin-top:8px" id="rp-ping-msg">有填管理 IP 時，會先 ping 確認主機在線才允許建立（IP 不通不會新增）。</p>
+      <div id="rp-loading" style="display:none;align-items:center;gap:8px;margin-top:12px;color:var(--text-dim)">
+        <span class="spinner"></span><span>建立中，請稍候…</span>
+      </div>
     </div>`,
     [
       { txt: "取消", cls: "", fn: () => closeDialog() },
       { txt: "建立並加入", cls: "primary", fn: () => {
         const name = $("rp-name").value.trim();
         if (!name) return alert("請填元件名稱");
+        const showLoading = (on) => {
+          const l = $("rp-loading"), b = document.querySelector("#rm-dialog-foot .primary");
+          if (l) l.style.display = on ? "flex" : "none";
+          if (b) b.disabled = on;
+        };
+        showLoading(true);
         rackCheckPingAdd($("rp-ip").value.trim(), () => {
           api("/api/rack/passive", { method: "POST", headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ name, mgx_type: $("rp-type").value, rack_u: +$("rp-u").value, rack_size: +$("rp-size").value || 1, manage_ip: $("rp-ip").value.trim(), project: proj }) })
             .then(() => loadMachines())
             .then(() => { closeDialog(); setView("rack"); })
-            .catch(e => alert("建立失敗：" + e.message));
+            .catch(e => { showLoading(false); alert("建立失敗：" + e.message); });
         });
       } },
     ]);
   rackAddRefreshU("rp-u", "rp-size");
+  if (u) { const sel = $("rp-u"); if (sel) sel.value = String(u); }
 }
 // 新增元件時：若填了管理 IP，先 ping，不通就擋下不新增
 function rackCheckPingAdd(ip, okCb) {
+  const hideLoading = () => { const l = $("rp-loading"); if (l) l.style.display = "none"; };
   if (!ip) { okCb(); return; }            // 無 IP 不擋
   const btnT = document.querySelector("#rm-dialog-foot .btn-primary, #rm-dialog-foot .primary");
   if (btnT) { btnT.disabled = true; btnT.textContent = "⏳ 確認中…"; }
   fetch(`/api/ping-ip?ip=${encodeURIComponent(ip)}`).then(r=>r.json())
-    .then(d => { const alive = !!d.alive; if (btnT){btnT.disabled=false;btnT.textContent="建立並加入";} if (!alive) { alert("⚠️ 無法 ping 到此管理 IP（" + ip + "），請確認主機在線後再新增。"); return; } okCb(); })
-    .catch(e => { if (btnT){btnT.disabled=false;btnT.textContent="建立並加入";} alert("Ping 檢查失敗：" + e.message); });
+    .then(d => { const alive = !!d.alive; if (btnT){btnT.disabled=false;btnT.textContent="建立並加入";} if (!alive) { hideLoading(); alert("⚠️ 無法 ping 到此管理 IP（" + ip + "），請確認主機在線後再新增。"); return; } okCb(); })
+    .catch(e => { if (btnT){btnT.disabled=false;btnT.textContent="建立並加入";} hideLoading(); alert("Ping 檢查失敗：" + e.message); });
 }
 // 已佔用 U 集合（含多 U 延伸槽）全域保留給 rackAddRefreshU 用
 let _rackAddOccupied = new Set();
@@ -536,7 +548,7 @@ function rackAddRefreshU(uSel, sizeSel) {
   }
   sel.innerHTML = opts;
 }
-function rackAddDialog() {
+function rackAddDialog(presetU) {
   const proj = rackView.project;
   const inRack = new Set(machines.filter(x => x.project === proj && x.level === "rack").map(x => x.name));
   // 需求：加入機櫃只能選「L11（rack）」系統。L10 若要變 L11，請先在 System Manager 升為 L11。
@@ -571,7 +583,11 @@ function rackAddDialog() {
       } },
     ]);
   rackAddRefreshU();
+  if (presetU) { const selSel = $("rm-add-u"); if (selSel) selSel.value = String(presetU); }
 }
+// 從機櫃「＋」加入既有 L11：先關閉選單再開加入對話框（帶預設 U）
+function rackAddDialogAt(u) { closeDialog(); rackAddDialog(u); }
+
 function dialogBackdrop() {
   let b = $("rm-dialog");
   if (b) return b;
@@ -633,8 +649,6 @@ function pageRack() {
       ${toolbar}
       ${anyRack ? `
       <button class="btn primary" id="rack-ping-btn" onclick="rackPing('${esc(rackView.project)}')">📡 Ping Rack</button>
-      <button class="btn" onclick="rackAddDialog()">➕ 加入機櫃</button>
-      <button class="btn" onclick="rackAddPassive()">➕ 新增元件</button>
       <button class="btn" onclick="linkAddDialog()">🗺 新增拓樸</button>
       <button class="btn" title="自動建立 server→switch、CDU→switch、Powershelf→switch 的模擬連線，看看拓樸圖長怎樣" onclick="rackDemoTopo()">🧪 模擬拓樸</button>
       <button class="btn" onclick="rackPowerAllDialog()">⏻ 開機整櫃</button>
@@ -730,8 +744,8 @@ function rackBlockRow(m, u, size, pinged) {
   const up = n ? n.os_alive : null;
   const info = mgxInfo(m);
   const cls = up === true ? "green" : up === false ? "red" : "none";
-  const isPassive = !!m.passive;
-  const click = isPassive ? `rackMoveDialog('${esc(m.name)}')` : `openMachine('${esc(m.name)}')`;
+  // 點機櫃元件本身一律進「單機詳情」；換位/類型請按右側「⇅」按鈕
+  const click = `openMachine('${esc(m.name)}')`;
   const ctrlBtn = `<button class="btn small" title="開機/關機/reboot/AUX" onclick="machControlDialog('${esc(m.name)}')">⚙</button>`;
   const termBtn = `<button class="btn small" title="終端機" onclick="openTermDialog('${esc(m.name)}')">▶</button>`;
   const delBtn = `<button class="btn small btn-del" title="從機櫃移除（不刪除 System Manager，怕放錯可拿掉）" onclick="rackUnmount('${esc(m.name)}')">✕</button>`;
@@ -762,29 +776,21 @@ function rackBlockRow(m, u, size, pinged) {
   </div>`;
 }
 function rackEmptyClick(u) {
-  const proj = rackView.project;
-  const members = machines.filter(x => x.project === proj && x.level === "rack");
-  const inRack = new Set(members.map(x => x.name));
-  const candidates = machines.filter(x => !inRack.has(x.name));
-  if (!candidates.length) { alert("沒有未放置的機台。請先「➕ 加入機櫃」新增，或把機台移入此專案。"); return; }
-  const opts = candidates.map(m => `<option value="${esc(m.name)}">${esc(m.name)} (${esc(m.os_ip)})</option>`).join("");
-  showDialog(`放置到 U${u}`, `
+  // 統一從機櫃「＋」進入：可「新增機櫃元件」或「加入同專案既有 L11 機台」
+  showDialog(`＋ 放進 U${u}`, `
     <div class="rm-modal-body">
-      <label style="display:block;font-size:12px;color:var(--text-faint);margin-bottom:6px">選擇要放到 U${u} 的機台</label>
-      <select class="input" id="rm-empty-m" style="width:100%;padding:8px;margin-bottom:12px">${opts}</select>
-      <label style="display:block;font-size:12px;color:var(--text-faint);margin-bottom:6px">占用高度（U 數）</label>
-      <select class="input" id="rm-empty-size" style="width:100%;padding:8px">
-        ${[1,2,3,4,6,8,12].map(s => `<option value="${s}" ${s===1?"selected":""}>${s}U</option>`).join("")}
-      </select>
+      <p style="margin-bottom:14px;font-size:12px;color:var(--text-faint)">要放什麼到 U${u}？</p>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <button class="btn primary" onclick="rackAddPassiveAt(${u})" style="padding:10px;text-align:left">➕ 新增機櫃元件<br><span style="font-weight:400;font-size:11px;color:var(--text-faint)">switch / power shelf / CDU / PDU / Blanking 擋板等無 OS/BMC 元件</span></button>
+        <button class="btn" onclick="rackAddDialogAt(${u})" style="padding:10px;text-align:left">🗄 加入同專案既有 L11 機台<br><span style="font-weight:400;font-size:11px;color:var(--text-faint)">把已存在的 L11 系統放到這裡</span></button>
+      </div>
     </div>`,
-    [
-      { txt: "取消", cls: "", fn: () => closeDialog() },
-      { txt: "放置", cls: "primary", fn: () => {
-        const nm = $("rm-empty-m").value;
-        const sz = +$("rm-empty-size").value || 1;
-        rackAssign(nm, { project: proj, level: "rack", rack_u: u, rack_size: sz }).then(() => { closeDialog(); setView("rack"); }).catch(e => alert("失敗：" + e.message));
-      } },
-    ]);
+    [ { txt: "取消", cls: "", fn: () => closeDialog() } ]);
+}
+// 新增機櫃元件：帶預設 U 槽 = 點到的空位 u
+function rackAddPassiveAt(u) {
+  closeDialog();
+  rackAddPassiveWithU(u);
 }
 let devicesView = "plane";   // "plane" | "cards" | "list"
 function devicesSetView(v) { devicesView = v; setView("rack"); }
