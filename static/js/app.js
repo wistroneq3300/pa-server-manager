@@ -2195,8 +2195,12 @@ async function saveMachine() {
 function deleteMachine(name) {
   if (!confirm("確定要刪除系統 " + name + " 嗎？")) return;
   fetch("/api/machines/" + encodeURIComponent(name), { method: "DELETE" })
-    .then(() => Promise.all([loadMachines(), loadProjects()]))
-    .then(() => setView(state.view));
+    .then(() => {
+      // 立即顯示：先本地移除，不整頁重整，只重繪目前視圖讓該格馬上消失
+      machines = machines.filter(x => x.name !== name);
+      setView(state.view);
+    })
+    .catch(e => alert("刪除失敗：" + e.message));
 }
 /* ---------- 重新掃描 ---------- */
 async function refreshStatus() {
