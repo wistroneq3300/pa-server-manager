@@ -747,7 +747,7 @@ input#f-bmc-pass:autofill{
 .rm-lamp{font-size:12px;width:16px;text-align:center;filter:drop-shadow(0 0 3px currentColor)}
 .rm-name{font-weight:700;font-size:12px;color:#e8f0ff;min-width:0;flex:1 1 auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-shadow:0 1px 0 #000}
 .rm-ip{display:none;font-size:9px;color:rgba(255,255,255,.6);flex-shrink:0;font-family:monospace}
-.rm-actions{display:flex;gap:4px;white-space:nowrap;flex-shrink:0}
+.rm-actions{display:flex;gap:4px;white-space:nowrap;flex-shrink:0;margin-right:20px}
 .rm-actions .btn{padding:1px 4px;font-size:9px}
 .rm-actions .btn{background:rgba(255,255,255,.06);border-color:rgba(255,255,255,.14);color:#cfd9ea}
 .rm-actions .btn-del{background:rgba(220,38,38,.18);border-color:rgba(248,113,113,.45);color:#fca5a5}

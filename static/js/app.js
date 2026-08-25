@@ -734,7 +734,7 @@ function rackBlockRow(m, u, size, pinged) {
   const click = isPassive ? `rackMoveDialog('${esc(m.name)}')` : `openMachine('${esc(m.name)}')`;
   const ctrlBtn = `<button class="btn small" title="開機/關機/reboot/AUX" onclick="machControlDialog('${esc(m.name)}')">⚙</button>`;
   const termBtn = `<button class="btn small" title="終端機" onclick="openTermDialog('${esc(m.name)}')">▶</button>`;
-  const delBtn = `<button class="btn small btn-del" title="刪除（加錯可從機櫃移除）" onclick="deleteMachine('${esc(m.name)}')">✕</button>`;
+  const delBtn = `<button class="btn small btn-del" title="從機櫃移除（不刪除 System Manager，怕放錯可拿掉）" onclick="rackUnmount('${esc(m.name)}')">✕</button>`;
   const nm = `${info.icon} ${esc(m.name)}`;
   const uRange = size > 1 ? `U${u}–${u - size + 1}` : `U${u}`;
   const uStack = size > 1
@@ -2201,6 +2201,21 @@ function deleteMachine(name) {
       setView(state.view);
     })
     .catch(e => alert("刪除失敗：" + e.message));
+}
+/* ---------- 機櫃移除（只拿下機櫃，保留 System Manager，即時顯示） ---------- */
+async function rackUnmount(name) {
+  if (!confirm("「" + name + "」要從機櫃拿掉嗎？\n（System Manager 的系統不會被刪除，只是不再顯示在機櫃上）")) return;
+  try {
+    await api("/api/machines/" + encodeURIComponent(name), {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ level: "system", rack_u: 0 })
+    });
+    // 即時顯示：本地同步 + 只重繪目前視圖（留在機櫃頁，不跳走、不整頁重整）
+    const m = machines.find(x => x.name === name);
+    if (m) { m.level = "system"; m.rack_u = 0; }
+    setView("rack");
+  } catch (e) { alert("移除失敗：" + e.message); }
 }
 /* ---------- 重新掃描 ---------- */
 async function refreshStatus() {
