@@ -369,6 +369,7 @@ const MGX_TYPES = {
   network:     { icon: "🌐", label: "Network 網路功能", cls: "mgx-network" },
 };
 function mgxTypeOf(m) {
+  if (!m) return "server"; // 防呆：若資料缺項（undefined/null）不崩潰，回退為 server
   if (m.mgx_type && MGX_TYPES[m.mgx_type]) return m.mgx_type;
   const n = (m.name || "").toLowerCase();
   if (n.includes("sw")) return "switch";
