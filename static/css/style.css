@@ -157,13 +157,26 @@ body {
 .dash-proj::before{content:"";position:absolute;left:0;right:0;top:0;height:2px;background:var(--logo-grad);opacity:0;transition:opacity .15s}
 .dash-proj:hover{transform:translateY(-3px);border-color:var(--w-green);box-shadow:var(--shadow-lg)}
 .dash-proj:hover::before{opacity:1}
-.dash-proj-head{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}
+.dash-proj-head{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;padding-right:54px}
 .dash-proj-name{font-size:14px;font-weight:700;color:var(--text)}
 .dash-proj-count{font-size:11px;color:var(--text-faint);white-space:nowrap}
 .dash-proj-desc{font-size:11px;color:var(--text-faint);margin-top:4px;line-height:1.4}
 .dash-proj-stats{margin-top:10px;display:flex;gap:12px;font-size:11.5px}
 .dash-proj-stats .green{color:var(--green)}
 .dash-proj-stats .red{color:var(--red)}
+
+/* ---- 專案卡片：規模分級 + 異常警示 ---- */
+.dash-proj{display:flex;flex-direction:column}
+.dash-proj.lg{border-left:3px solid var(--accent-blue)}
+.dash-proj.mid{border-left:3px solid color-mix(in srgb,var(--w-green) 55%, transparent)}
+.dash-proj.lg .dash-proj-count{color:var(--accent-blue);font-weight:700}
+.dash-proj-badge{position:absolute;top:12px;right:12px;font-size:10.5px;font-weight:700;padding:3px 8px;border-radius:20px;line-height:1}
+.dash-proj-badge.ok{background:var(--green-bg);color:var(--green)}
+.dash-proj-badge.bad{background:var(--red-bg);color:var(--red)}
+.dash-proj.ok{border-color:color-mix(in srgb,var(--green) 35%, var(--border))}
+.dash-proj.warn{border-color:var(--amber)}
+.dash-proj.bad{border-color:var(--red);box-shadow:0 0 0 1px var(--red-bg)}
+.dash-proj.bad::before{background:var(--red)}
 
 /* 專案管理頁：每專案一卡片 */
 .proj-sort-list{display:flex;flex-direction:column;gap:16px}

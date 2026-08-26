@@ -97,12 +97,23 @@ function pageDashboard() {
   const projCards = projects.map(p => {
     const members = projectMembers(p.name);
     const o = members.filter(m => m.os_alive === true).length;
+    const managed = members.filter(m => m.os_ip || m.bmc_ip).length;   // 有管理介面的台數
+    const abnormal = members.filter(m => (m.os_ip || m.bmc_ip) && m.os_alive !== true).length; // 有IP但離線/未知 = 異常
     const off = members.length - o;
+    const n = members.length;
+    const sizeCls = n >= 20 ? "lg" : n >= 5 ? "mid" : "sm";
+    const healthy = abnormal === 0;
+    const warnRatio = managed ? abnormal / managed : 0;
+    const statusCls = healthy ? "ok" : (warnRatio >= 0.5 ? "bad" : "warn");
+    const badge = healthy
+      ? `<span class="dash-proj-badge ok" title="無異常">✓ 正常</span>`
+      : `<span class="dash-proj-badge bad" title="${abnormal} 台異常">⚠ ${abnormal} 異常</span>`;
     return `
-      <div class="dash-proj" onclick="viewProject('${esc(p.name)}')" title="點我看此專案">
+      <div class="dash-proj ${statusCls} ${sizeCls}" onclick="viewProject(${JSON.stringify(p.name)})" title="點我看此專案">
+        ${badge}
         <div class="dash-proj-head">
           <span class="dash-proj-name">📁 ${esc(p.name)}</span>
-          <span class="dash-proj-count">${members.length} 台</span>
+          <span class="dash-proj-count">${n} 台</span>
         </div>
         ${p.desc ? `<div class="dash-proj-desc">${esc(p.desc)}</div>` : ""}
         <div class="dash-proj-bar"><div class="dash-proj-bar-in" style="width:${members.length? o/members.length*100:0}%"></div></div>
