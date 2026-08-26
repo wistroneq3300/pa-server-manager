@@ -224,10 +224,19 @@ async function rackPing(project) {
   setView("rack");
 }
 // 整櫃開/關機：彈出「廣播式多選」讓使用者勾選要同時控制哪些機台
-function rackPowerAllDialog(on) {
+// 通用「整櫃批量操作」多選對話框。kind: "on"|"off"|"reboot"|"aux"
+// 沿用勾選框 + 全選/全不選，只對勾選的機台送出動作。
+function rackBulkDialog(kind) {
   const project = rackView.project;
-  const racks = machines.filter(m => m.level === "rack" && m.project === project);
+  let racks = machines.filter(m => m.level === "rack" && m.project === project);
+  // reboot / aux 過濾掉空檔板(blanking)：這些沒有系統可控制。
+  // 其餘 server/switch/pdu 等全部列出供勾選（即使尚未填 IP，未來填入即可批次發送）。
+  if (kind === "reboot" || kind === "aux") {
+    racks = racks.filter(m => mgxTypeOf(m) !== "blanking");
+  }
   if (!racks.length) return alert("此專案沒有整櫃機台");
+  const mode = kind === "on" ? "開機" : kind === "off" ? "關機" : kind === "reboot" ? "Reboot" : "AUX / AC cycle";
+  const icon = kind === "on" || kind === "off" ? "⏻" : kind === "reboot" ? "⟳" : "⚡";
   const rows = racks.map(m => {
     const info = mgxInfo(m);
     const badge = m.os_ip || m.bmc_ip ? `<span class="mono" style="color:var(--text-dim)">${esc(m.os_ip || m.bmc_ip)}</span>` : `${info.icon} ${esc(info.label)}`;
@@ -236,8 +245,7 @@ function rackPowerAllDialog(on) {
       <b>${esc(m.name)}</b> ${badge}
     </label>`;
   }).join("");
-  const mode = on ? "開機" : "關機";
-  showDialog(`⏻ ${mode}整櫃 — 選擇要同時 ${mode} 的機台`, `
+  showDialog(`${icon} ${mode}整櫃 — 選擇要一起 ${mode} 的機台`, `
     <label style="display:block;font-size:12px;color:var(--text-faint);margin-bottom:10px">
       勾選要一起「${mode}」的機台，會同時送出控制指令（不勾的機台會保持現狀）。
     </label>
@@ -249,19 +257,47 @@ function rackPowerAllDialog(on) {
     </div>`,
     [
       { txt: "取消", cls: "", fn: () => closeDialog() },
-      { txt: `確認 ${mode}`, cls: on ? "primary" : "danger", fn: () => {
+      { txt: `確認 ${mode}`, cls: kind === "off" ? "btn-danger" : kind === "reboot" ? "btn-warn" : "primary", fn: () => {
         const sel = [...document.querySelectorAll(".rcp-chk:checked")].map(x => x.value);
         closeDialog();
         if (!sel.length) { alert("請至少勾選一台機台。"); return; }
-        rackPowerAllNames(sel, on);
+        rackBulkRun(kind, sel);
       } },
     ]);
 }
+function rackPowerAllDialog(on) { rackBulkDialog(on === false ? "off" : "on"); }
+function rackBulkReboot() { rackBulkDialog("reboot"); }
+function rackBulkAux() { rackBulkDialog("aux"); }
 function racpSetAll(v) {
   document.querySelectorAll(".rcp-chk").forEach(c => c.checked = v);
   const n = document.querySelectorAll(".rcp-chk:checked").length;
   const el = $("rcp-sel-count"); if (el) el.textContent = `已選 ${n} 台`;
 }
+// 依 kind 對多台依序送出控制指令
+async function rackBulkRun(kind, names) {
+  const label = kind === "on" ? "開機" : kind === "off" ? "關機" : kind === "reboot" ? "Reboot" : "AUX / AC cycle";
+  // reboot / aux 尚未接上真實指令，目前只做多選 UI 占位，不送出控制動作
+  if (kind === "reboot" || kind === "aux") {
+    const namesStr = names.map(n => "\u00b7 " + n).join("\n");
+    alert(`「${label}」尚未實作接上系統指令。\n\n已選取 ${names.length} 台：\n${namesStr}\n\n之後會批次送出 ${label} 指令。`);
+    return;
+  }
+  const okTag = kind === "on" ? "已開機 \ud83d\udfe2" : "已關機 \u26aa";
+  const done = [];
+  for (const name of names) {
+    let url, body;
+    url = `/api/machine/${encodeURIComponent(name)}/power`; body = JSON.stringify({ on: kind === "on" });
+    try {
+      const r = await api(url, { method: "POST", headers: { "Content-Type": "application/json" }, body });
+      done.push(`${name}: ${r.ok ? okTag : "失敗：" + (r.info || "")}`);
+    } catch (e) {
+      done.push(`${name}: 錯誤 ${e.message}`);
+    }
+  }
+  setView("rack");
+  setTimeout(() => alert(`正在執行 ${label} ${names.length} 台…\n\n` + done.join("\n")), 200);
+}
+
 async function rackPowerAllNames(names, on) {
   const okMsg = `正在${on ? "開機" : "關機"}${names.length} 台…`;
   const done = [];
@@ -672,6 +708,8 @@ function pageRack() {
       <button class="btn" title="自動建立 server→switch、CDU→switch、Powershelf→switch 的模擬連線，看看拓樸圖長怎樣" onclick="rackDemoTopo()">🧪 模擬拓樸</button>
       <button class="btn" onclick="rackPowerAllDialog()">⏻ 開機整櫃</button>
       <button class="btn btn-danger" onclick="rackPowerAllDialog(false)">⏻ 關機整櫃</button>
+      <button class="btn btn-warn" onclick="rackBulkReboot()">⟳ Reboot 整櫃</button>
+      <button class="btn" onclick="rackBulkAux()">⚡ AUX 整櫃</button>
       <button class="btn primary" onclick="rackBroadcastDialog('${esc(rackView.project)}')">📡 廣播終端</button>` : ""}
     </div>
     <div class="rack-status-legend">
