@@ -1495,12 +1495,15 @@ OLLAMA_MODEL = "qwen3.8:27b"
 
 class CopilotReq(BaseModel):
     message: str = Field(..., description="使用者輸入")
+    project: str = Field("", description="限定回答某個專案（機櫃）的 context；留空表示整個機隊")
 
 
-def _copilot_context():
-    """把目前機台/健康度整理成給 LLM 的文字 context。"""
+def _copilot_context(project: str = ""):
+    """把目前機台/健康度整理成給 LLM 的文字 context。
+    傳入 project（非空）時，只保留該專案（Rack）的機台，供 Rack Manager 的 Copilot 使用。"""
     lines = []
-    for name in sorted(machines, key=lambda k: machines[k].get("order", 0)):
+    names = [k for k in machines if machines[k].get("project") == project] if project else list(machines)
+    for name in sorted(names, key=lambda k: machines[k].get("order", 0)):
         m = machines[name]
         h = _health_cache.get(name, ("unknown", 0))[0]
         lines.append(
@@ -1514,6 +1517,9 @@ def _copilot_context():
 @app.post("/api/copilot")
 def copilot_chat(body: CopilotReq):
     _refresh_status()   # 確保 context 用的是最新掃描/健康資料
+    scope = body.project.strip()
+    scope_note = (f"你正在回答「{scope}」這個機櫃專案的問題。"
+                  if scope else "你正在回答整個機隊的問題。")
     sys = (
         "You are the AI assistant (Copilot) for a Wistron GPU server management system. "
         "Answer the user in Traditional Chinese (zh-TW), concise and practical. "
@@ -1521,8 +1527,9 @@ def copilot_chat(body: CopilotReq):
         "CRITICAL RULE: you MUST answer ONLY from the CURRENT FLEET below. "
         "Never invent or assume machine names, projects, temperatures, or issues that are "
         "not listed. If a machine has health=unknown, say it is unreachable/offline. "
-        "If only one machine is green, say exactly that one.\n\n"
-        "CURRENT FLEET:\n" + _copilot_context()
+        "If only one machine is green, say exactly that one.\n"
+        f"{scope_note}\n\n"
+        "CURRENT FLEET:\n" + _copilot_context(scope)
     )
     payload = {
         "model": OLLAMA_MODEL,

@@ -190,6 +190,61 @@ function bindCopilot() {
   if (inp) inp.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); copSend(); } });
 }
 
+// ===== Rack Manager 的 AI Copilot：只回答目前選中的機櫃專案 =====
+let _rackCopBusy = false;
+function rackCopilotHtml() {
+  const proj = rackView.project || "";
+  return `
+    <div class="copilot-panel rack-copilot-panel" style="margin-top:16px">
+      <div class="card-title">AI Copilot <span class="hint">Ollama · qwen3.8 · ${esc(proj) || "未選專案"}</span></div>
+      <div class="copilot-body" id="rackcop-box" style="max-height:340px;overflow:auto">
+        <div class="copilot-msg ai">🖘 這裡的 Copilot 只會回答目前選中的機櫃專案：<b>${esc(proj) || "（尚未選擇）"}</b>。<br>可問「這櫃有幾台？哪些離線？溫度異常？」等（需要本機 Ollama qwen3.8 在運作）。</div>
+      </div>
+      <div class="copilot-input">
+        <input class="input" id="rackcop-input" placeholder="輸入指令給本機櫃 Copilot…" autocomplete="off">
+        <button class="btn primary" id="rackcop-send">送出</button>
+      </div>
+    </div>`;
+}
+function rackCopAppend(role, html) {
+  const box = document.getElementById("rackcop-box");
+  if (!box) return;
+  box.insertAdjacentHTML("beforeend", `<div class="copilot-msg ${role}">${html}</div>`);
+  box.scrollTop = box.scrollHeight;
+}
+async function rackCopSend() {
+  const inp = document.getElementById("rackcop-input");
+  const send = document.getElementById("rackcop-send");
+  const text = (inp ? inp.value : "").trim();
+  if (!text || _rackCopBusy) return;
+  const proj = rackView.project || "";
+  rackCopAppend("user", esc(text));
+  if (inp) inp.value = "";
+  _rackCopBusy = true;
+  if (send) { send.disabled = true; send.textContent = "…"; }
+  try {
+    const r = await fetch("/api/copilot", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message: text, project: proj }),
+    });
+    const j = await r.json();
+    if (j.ok) rackCopAppend("ai", esc(j.reply).replace(/\n/g, "<br>"));
+    else rackCopAppend("ai", `⨠ ${esc(j.error || "呼叫失敗")}`);
+  } catch (e) {
+    rackCopAppend("ai", `⨠ ${esc("無法連線到後端： " + e.message)}`);
+  } finally {
+    _rackCopBusy = false;
+    if (send) { send.disabled = false; send.textContent = "送出"; }
+  }
+}
+function bindRackCopilot() {
+  const inp = document.getElementById("rackcop-input");
+  const send = document.getElementById("rackcop-send");
+  if (send) send.addEventListener("click", rackCopSend);
+  if (inp) inp.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); rackCopSend(); } });
+}
+
 function viewProject(pname) {
   projectLevelFilter.val = "all";
   state.view = "projects";
@@ -231,10 +286,9 @@ function rackBulkDialog(kind) {
   let racks = machines.filter(m => m.level === "rack" && m.project === project);
   // reboot / aux 過濾掉空檔板(blanking)：這些沒有系統可控制。
   // 其餘 server/switch/pdu 等全部列出供勾選（即使尚未填 IP，未來填入即可批次發送）。
-  if (kind === "reboot" || kind === "aux") {
-    racks = racks.filter(m => mgxTypeOf(m) !== "blanking");
-  }
-  if (!racks.length) return alert("此專案沒有整櫃機台");
+  // 整櫃操作需要能控制（具 OS 或 BMC IP）：過濾掉空檔板(blanking)與「沒有 IP」的元件。
+  racks = racks.filter(m => (m.os_ip || m.bmc_ip) && mgxTypeOf(m) !== "blanking");
+  if (!racks.length) return alert("此專案沒有可控制（具 OS/BMC IP）的整櫃機台");
   const mode = kind === "on" ? "開機" : kind === "off" ? "關機" : kind === "reboot" ? "Reboot" : "AUX / AC cycle";
   const icon = kind === "on" || kind === "off" ? "⏻" : kind === "reboot" ? "⟳" : "⚡";
   const rows = racks.map(m => {
@@ -510,8 +564,9 @@ function rackMoveSetType(name, type) {
 }
 let rackMoveTargetType = null;
 async function rackAddPassive() { rackAddPassiveWithU(); }
-function rackAddPassiveWithU(u) {
-  const proj = rackView.project;
+function rackAddPassiveWithU(u, projOverride) {
+  // projOverride：從 System Manager 的 L11 分頁呼叫時指定目標專案；Rack Manager 內則沿用目前機櫃專案
+  const proj = projOverride || rackView.project;
   rackAddOccupied(proj);
   showDialog("➕ 新增機櫃元件（無 OS/BMC 亦可）", `
     <div class="rm-modal-body">
@@ -727,7 +782,10 @@ function rackLayoutHtml(members, pinged) {
       </div>`;
     return `<div class="rack-layout plane">
       <div class="rack-left">${left}</div>
-      <div class="rack-right">${rackTopoHtml(members)}</div>
+      <div class="rack-right">
+        ${rackTopoHtml(members)}
+        ${rackView.project ? rackCopilotHtml() : ""}
+      </div>
     </div>`;
   }
   // 卡片 / 清單：全寬顯示，無拓樸
@@ -848,6 +906,30 @@ function rackAddPassiveAt(u) {
   closeDialog();
   rackAddPassiveWithU(u);
 }
+// System Manager 的 L11 分頁「＋ 新增元件」：先選目標專案，再進新增機櫃元件 dialog
+function addRackComponentDialog() {
+  const rackProjects = [...new Set(machines.filter(m => isRackItem(m) && m.project).map(m => m.project))];
+  if (!rackProjects.length) return alert("目前沒有 L11（整櫃）專案，請先建立專案或把機台設為 L11。");
+  const opts = rackProjects.map(p => `<option value="${esc(p)}">${esc(p)}</option>`).join("");
+  showDialog("➕ 新增元件 — 選擇要加入的專案", `
+    <div class="rm-modal-body">
+      <p style="margin-bottom:12px;font-size:12px;color:var(--text-faint)">
+        新增的機櫃元件（switch / power shelf / CDU / PDU 等）會加入你選擇的整櫃專案，之後可在 Rack Manager 放上機櫃。
+      </p>
+      <label style="display:block;font-size:12px;color:var(--text-faint);margin-bottom:6px">目標專案 *</label>
+      <select class="input" id="rcp-proj" style="width:100%;padding:8px">${opts}</select>
+    </div>`,
+    [
+      { txt: "取消", cls: "", fn: () => closeDialog() },
+      { txt: "下一步：新增元件", cls: "primary", fn: () => {
+        const proj = $("rcp-proj").value;
+        closeDialog();
+        if (!proj) return alert("請先選擇目標專案。");
+        rackAddPassiveWithU(undefined, proj);
+      } },
+    ]);
+}
+
 let devicesView = "plane";   // "plane" | "cards" | "list"
 function devicesSetView(v) { devicesView = v; setView("rack"); }
 
@@ -1215,6 +1297,7 @@ function pageProjects() {
       <button class="btn" onclick="openProjectModal()">📁 專案管理</button>
       <button class="btn" onclick="refreshStatus()" id="refresh-btn">⟳ 重新掃描</button>
       <button class="btn primary" onclick="openAdd()">＋ 新增系統</button>
+      <button class="btn" onclick="addRackComponentDialog()" title="新增可放入機櫃的元件（switch / power shelf / CDU / PDU 等），會加入選定的整櫃專案">＋ 新增元件</button>
     </div>
     ${renderProjectsList()}
   `;
@@ -1474,6 +1557,7 @@ function _renderMachine(view) {
   if (view === "projects") { initProjectDrag(); }
   if (view === "dashboard") bindCopilot();
   if (view === "machine") initTelemetry();
+  if (view === "rack") { setTimeout(() => bindRackCopilot(), 0); }
   syncHash();
 }
 
