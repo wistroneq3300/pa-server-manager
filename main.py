@@ -1666,61 +1666,39 @@ def machine_telemetry(name: str, minutes: int = 60, kind: str = "all"):
 
 @app.get("/api/rack/{project}/telemetry")
 def rack_telemetry(project: str, minutes: int = 60):
-    """整櫃（Rack Level）Telemetry：彙總指定專案內所有有收集資料的機台，
-    回傳每台最新狀態與歷史總和（供前端畫聚合折線）。
+    """整櫃（Rack Level）Telemetry：依「元件類型」彙總指定專案的機台。
+    回傳各類型（server/switch/powershelf/pdu/cdu/…）各自的指標定義、
+    每台最新值與歷史聚合，供前端依類型區塊呈現。
     """
     telemetry_core.init_db()
     proj = project
-    names = [n for n, m in machines.items() if m.get("project") == proj]
-    latest = []        # 每台最新採樣摘要
-    hist = {"ts": [], "cpu_avg": [], "mem_avg": [], "gpu_temp_avg": [], "gpu_pow_total": []}
-    # 收集所有時間點（以 os 或 gpu 任一的資料為準），取整數分併集
-    all_ts = set()
-    per = {}
-    for n in names:
-        osd = telemetry_core.get_os_series(n, int(minutes))
-        gpu = telemetry_core.get_gpu_series(n, int(minutes))
-        per[n] = {"os": osd, "gpu": gpu}
-        os_arr = osd.get("os") or []
-        os_ts = {row["ts"] // 60 * 60 for row in os_arr}
-        all_ts |= os_ts
-        # 每台最新值
-        cpu = None; mem = None; gpu_ts = []; gpu_temp = None; gpu_pow = None
-        if os_arr:
-            last = os_arr[-1]
-            cpu = last.get("cpu_used"); mem = last.get("mem_used_pct")
-        for s in (gpu.get("series") or []):
-            gpu_ts += s["ts"]
-            if s.get("temp"): gpu_temp = (gpu_temp or 0.0) or 0
-            if s.get("power"): gpu_pow = (gpu_pow or 0.0) or 0
-        latest.append({
-            "name": n,
-            "cpu_pct": round(cpu, 1) if cpu is not None else None,
-            "mem_pct": round(mem, 1) if mem is not None else None,
-            "gpu_temp": round(gpu_temp, 1) if gpu_temp is not None else None,
-            "gpu_power": round(gpu_pow, 1) if gpu_pow is not None else None,
-            "has_data": bool(os_arr or (gpu.get("series") or [])),
-        })
-    hist_ts = sorted(all_ts)
-    for t in hist_ts:
-        cpus, mems, temps, pows = [], [], [], []
-        for n in names:
-            os_arr = (per[n]["os"].get("os") or [])
-            cand = [r for r in os_arr if r["ts"] // 60 * 60 == t]
-            if cand:
-                if cand[-1].get("cpu_used") is not None: cpus.append(cand[-1]["cpu_used"])
-                if cand[-1].get("mem_used_pct") is not None: mems.append(cand[-1]["mem_used_pct"])
-            for s in (per[n]["gpu"].get("series") or []):
-                pts = [p for p in zip(s["ts"], s["temp"], s["power"]) if p[0] // 60 * 60 == t]
-                if pts:
-                    if any(x is not None for x in [p[1] for p in pts]): temps.append(max(p[1] or 0 for p in pts))
-                    if any(x is not None for x in [p[2] for p in pts]): pows.append(sum(p[2] or 0 for p in pts))
-        hist["ts"].append(t)
-        hist["cpu_avg"].append(round(sum(cpus)/len(cpus), 1) if cpus else None)
-        hist["mem_avg"].append(round(sum(mems)/len(mems), 1) if mems else None)
-        hist["gpu_temp_avg"].append(round(sum(temps)/len(temps), 1) if temps else None)
-        hist["gpu_pow_total"].append(round(sum(pows), 1) if pows else None)
-    return {"project": proj, "window_min": int(minutes), "machines": latest, "history": hist}
+    # 依專案列出所有元件（含類型），讓前端能顯示「每種類型有幾台」即使尚無資料
+    members = [m for m in machines.values() if m.get("project") == proj]
+    # 排除 blanking 擋板（passive 且無監控指標），不列入監控類型
+    components = sorted([
+        {"name": m.get("name", ""), "kind": telemetry_core.kind_of(m)}
+        for m in members if telemetry_core.kind_of(m) != "blanking"
+    ], key=lambda x: x["name"])
+    # 每種類型的台數（供佔位提示）
+    from collections import Counter
+    kinds_count = dict(Counter(c["kind"] for c in components))
+    data = telemetry_core.get_rack_series(proj, int(minutes))
+    # 即使目前無採樣資料，也回傳「該專案擁有的類型+指標定義」讓前端畫出對應區塊
+    for kind in kinds_count:
+        if kind not in data:
+            data[kind] = {
+                "defs": {k: {"label": v.get("label", k), "unit": v.get("unit", ""), "color": v.get("color", "#2563eb")}
+                         for k, v in telemetry_core.RACK_METRIC_DEF.get(kind, {}).items()},
+                "machines": [], "history": {},
+            }
+    return {
+        "project": proj,
+        "window_min": int(minutes),
+        "kinds": list(kinds_count),
+        "kinds_count": kinds_count,
+        "components": components,
+        "data": data,
+    }
 
 
 

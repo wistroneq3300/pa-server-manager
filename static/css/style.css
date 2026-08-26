@@ -670,15 +670,19 @@ input#f-bmc-pass:autofill{
 .tel-block .chart-box > canvas{flex:1 1 auto;min-height:0;width:100%!important}
 .footer-hint{font-size:12px;color:var(--text-faint);line-height:1.65;background:var(--bg-panel-2);border:1px dashed var(--border-soft);border-radius:10px;padding:10px 14px;margin-top:14px}
 
-/* ---- Rack Telemetry（整櫃） ---- */
+/* ---- Rack Telemetry（整櫃，依類型） ---- */
 .racktel-status{font-size:12px;margin-bottom:12px}
-.racktel-bars{display:flex;flex-direction:column;gap:5px;max-height:560px;overflow-y:auto;margin-top:4px}
-.racktel-bar-row{display:flex;align-items:center;height:20px}
-.racktel-bar-bg{position:relative;flex:1;height:16px;background:var(--bg);border:1px solid var(--border-soft);border-radius:4px;overflow:hidden;display:flex}
-.racktel-bar{position:absolute;left:0;top:0;bottom:0;border-radius:3px;min-width:2px}
-.racktel-ip{position:absolute;left:8px;top:0;bottom:0;display:flex;align-items:center;font-size:10.5px;font-style:normal;color:var(--text);white-space:nowrap;z-index:2;text-shadow:0 1px 2px rgba(0,0,0,.8)}
-.racktel-val{position:absolute;right:6px;top:0;bottom:0;display:flex;align-items:center;font-size:10.5px;color:#fff;font-weight:700;z-index:2;text-shadow:0 1px 2px rgba(0,0,0,.8)}
-/* 整櫃面板用單欄（含長條清單較適合全寬） */
+.rt-kind-empty{font-size:12px;color:var(--text-faint);padding:8px;border:1px dashed var(--border-soft);border-radius:8px;background:var(--bg-panel-2)}
+.rt-kind-charts{display:flex;flex-direction:column;gap:2px}
+.rt-kind-bars{max-height:420px;overflow-y:auto;margin-top:8px;font-size:11px}
+.rt-bars-head{display:grid;grid-template-columns:120px repeat(var(--rt-cols,1),1fr);gap:4px;color:var(--text-faint);font-weight:700;border-bottom:1px solid var(--border-soft);padding-bottom:4px;margin-bottom:2px}
+.rt-bar-row{display:grid;grid-template-columns:120px repeat(var(--rt-cols,1),1fr);gap:4px;align-items:center;padding:2px 0;border-bottom:1px dashed rgba(128,128,128,.12)}
+.rt-bars-h{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rt-bar-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text)}
+.rt-bar-cell{display:flex;align-items:center;font-family:var(--mono);color:var(--text)}
+.rt-bar-num{background:var(--bg);border:1px solid var(--border-soft);border-radius:4px;padding:1px 6px;white-space:nowrap}
+.rt-bar-na{color:var(--text-faint)}
+/* 每個 rt-kind 依其指標數設定欄位數（由 JS 設定 --rt-cols） */
 #racktel-grid{grid-template-columns:1fr}
 
 @media (max-width:760px){.tel-grid{grid-template-columns:1fr}}

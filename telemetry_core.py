@@ -63,6 +63,15 @@ def init_db():
         if "mem_used_pct" not in cols:
             c.execute("ALTER TABLE os_metrics ADD COLUMN mem_used_pct REAL")
 
+        # Rack 元件類型 telemetry：EAV 泛型表（依 kind/metric 存各類型指標）
+        # server/switch/powershelf/pdu/cdu 各自收集器寫入不同的 metric
+        c.executescript("""
+            CREATE TABLE IF NOT EXISTS rack_metrics(
+                id INTEGER PRIMARY KEY AUTOINCREMENT, ts REAL, machine TEXT,
+                kind TEXT, metric TEXT, value REAL);
+            CREATE INDEX IF NOT EXISTS idx_rack ON rack_metrics(machine, kind, metric, ts);
+        """)
+
 
 def _load_machines():
     try:
@@ -71,6 +80,75 @@ def _load_machines():
     except Exception as e:
         print("telemetry: 讀取 data.json 失敗", e)
         return {}
+
+
+# ================== 依元件類型（Rack Level）的 telemetry 指標模型 ==================
+# 不同類型機台撈法不同，各自定義指標、單位與收集器。
+# kind 對應 rack 元件的 mgx_type：server / switch / powershelf / pdu / cdu / storage / network
+# 每種 kind 定義要收集的 metric，收集器依此派發（目前 switch/powershelf/pdu/cdu/storage/network
+# 尚未有真實系統與憑證，收集器為占位：有 os_ip+os_user+os_pass 才嘗試，否則回空並記錄）。
+RACK_METRIC_DEF = {
+    "server": {
+        # Linux OS (CPU/DIMM/SSD/NIC) + GPU → 沿用現有 os_metrics/gpu_metrics/rack_os 彙總
+        "cpu_used":       {"label": "CPU 使用率",   "unit": "%",  "color": "#2563eb"},
+        "mem_used_pct":   {"label": "記憶體使用率", "unit": "%",  "color": "#22c55e"},
+        "gpu_power":      {"label": "GPU 功耗",     "unit": "W",  "color": "#e0a800"},
+    },
+    "switch": {
+        # 交換器：port 收/送流量、溫度、風扇
+        "port_rx":        {"label": "Port 收流量",  "unit": "Mbps", "color": "#2563eb"},
+        "port_tx":        {"label": "Port 送流量",  "unit": "Mbps", "color": "#7c5cff"},
+        "temp":           {"label": "溫度",         "unit": "°C",  "color": "#f97316"},
+        "fan_rpm":        {"label": "風扇轉速",     "unit": "rpm", "color": "#0ea5e9"},
+    },
+    "powershelf": {
+        # 電源 shelf：功耗、電壓、電流、溫度
+        "power_w":        {"label": "功耗",         "unit": "W",  "color": "#e0a800"},
+        "voltage":        {"label": "電壓",         "unit": "V",  "color": "#22c55e"},
+        "current_a":      {"label": "電流",         "unit": "A",  "color": "#2563eb"},
+        "temp":           {"label": "溫度",         "unit": "°C",  "color": "#f97316"},
+    },
+    "pdu": {
+        # PDU：功耗、電壓、電流
+        "power_w":        {"label": "功耗",         "unit": "W",  "color": "#e0a800"},
+        "voltage":        {"label": "電壓",         "unit": "V",  "color": "#22c55e"},
+        "current_a":      {"label": "電流",         "unit": "A",  "color": "#2563eb"},
+    },
+    "cdu": {
+        # 冷卻分配單元：水流量、入/出水溫、水壓
+        "flow_lpm":       {"label": "水流量",       "unit": "L/min", "color": "#14b8a6"},
+        "inlet_temp":     {"label": "入水溫",       "unit": "°C",   "color": "#22c55e"},
+        "outlet_temp":    {"label": "出水溫",       "unit": "°C",   "color": "#f97316"},
+        "pressure":       {"label": "水壓",         "unit": "kPa",  "color": "#2563eb"},
+    },
+    "storage": {
+        "io_read":        {"label": "讀取 IO",      "unit": "MB/s", "color": "#2563eb"},
+        "io_write":       {"label": "寫入 IO",      "unit": "MB/s", "color": "#22c55e"},
+        "temp":           {"label": "溫度",         "unit": "°C",   "color": "#f97316"},
+    },
+    "network": {
+        "port_rx":        {"label": "Port 收流量",  "unit": "Mbps", "color": "#2563eb"},
+        "port_tx":        {"label": "Port 送流量",  "unit": "Mbps", "color": "#7c5cff"},
+        "temp":           {"label": "溫度",         "unit": "°C",   "color": "#f97316"},
+    },
+}
+# 由 mgx_type（或由名稱回退）判斷 kind，與前端 mgxTypeOf 同步
+# blanking 為擋板（passive，無監控指標），回傳 "blanking" 且不會被收集/顯示
+def kind_of(m, name=None):
+    t = m.get("mgx_type") if isinstance(m, dict) else None
+    n = (name or (m.get("name") if isinstance(m, dict) else "") or "").lower()
+    if t == "blanking":
+        return "blanking"
+    if t in RACK_METRIC_DEF:
+        return t
+    if "blank" in n or "blk" in n or "擋" in n:
+        return "blanking"
+    if n.startswith("sw") or n.startswith("switch"): return "switch"
+    if n.startswith("ps") or "power" in n or n.startswith("pdu"): return "powershelf"
+    if n.startswith("cdu"): return "cdu"
+    if n.startswith("stor") or "nas" in n: return "storage"
+    if "gw" in n or "fw" in n or "router" in n: return "network"
+    return "server"
 
 
 def targets():
@@ -348,18 +426,57 @@ def prune(ts):
 # ---- worker ----
 def _job(item):
     name, m = item
-    try:
-        ts, rows = collect_gpu(m)
-        store_gpu(ts, name, rows)
-    except Exception as e:
-        print("telemetry GPU 錯誤", name, e)
-    try:
-        ts, os_row, net_rows, disk_rows = collect_os(m)
-        store_os(ts, name, os_row)
-        store_net(ts, name, net_rows)
-        store_disk(ts, name, disk_rows)
-    except Exception as e:
-        print("telemetry OS 錯誤", name, e)
+    kind = kind_of(m, name)
+    if kind == "server":
+        # server：沿用現有 Linux OS(CPU/DIMM/SSD/NIC) + GPU 收集
+        try:
+            ts, rows = collect_gpu(m)
+            store_gpu(ts, name, rows)
+        except Exception as e:
+            print("telemetry GPU 錯誤", name, e)
+        try:
+            ts, os_row, net_rows, disk_rows = collect_os(m)
+            store_os(ts, name, os_row)
+            store_net(ts, name, net_rows)
+            store_disk(ts, name, disk_rows)
+        except Exception as e:
+            print("telemetry OS 錯誤", name, e)
+    else:
+        # 其它 rack 元件類型（switch/powershelf/pdu/cdu/storage/network）：
+        # 先走預留的收集接口，未來接上真實系統/憑證後實作；目前為占位（回空）。
+        try:
+            ts, rows = collect_rack(m, kind)
+            if rows:
+                store_rack(ts, name, kind, rows)
+        except Exception as e:
+            print(f"telemetry Rack({kind}) 錯誤", name, e)
+
+
+def store_rack(ts, name, kind, rows):
+    """把某台 rack 元件的 type 型指標寫入 rack_metrics（rows = {metric: value}）。"""
+    if not rows:
+        return 0
+    with _conn() as c:
+        c.executemany("INSERT INTO rack_metrics(ts,machine,kind,metric,value) VALUES(?,?,?,?,?)",
+                      [(ts, name, kind, k, v) for k, v in rows.items() if v is not None])
+    return len(rows)
+
+
+def collect_rack(m, kind):
+    """依元件類型收集 rack 指標。回傳 (ts, {metric:value})。
+    目前 switch/powershelf/pdu/cdu/storage/network 尚未有真實系統與憑證：
+    - 若該元件有 os_ip+os_user+os_pass（例如某些 switch 可直接 SSH），可在此依 vendor/型號實作；
+    - 目前一律回空（占位），由前端顯示「此類型目前無資料/待接真實系統」。
+    """
+    # TODO(collet): 依 kind + m["vendor"]/m["model"] 實作對應 CLI（例如：
+    #   switch:  `show interfaces counters`、`show temperature`
+    #   powershelf/pdu: SNMP 或 vendor CLI 抓 power_w/voltage/current_a
+    #   cdu:     抓 flow_lpm / inlet_temp / outlet_temp / pressure
+    # 並把結果用 store_rack 寫入。）
+    # 目前占位：一律不採集，避免對未就緒設備送出 SSH。
+    if not all([m.get("os_ip"), m.get("os_user"), m.get("os_pass")]):
+        return time.time(), {}
+    return time.time(), {}
 
 
 def worker_loop(stop=None):
@@ -435,3 +552,91 @@ def get_os_series(name, minutes):
     disk_series = [{"mount": mnt, "ts": [r["ts"] for r in rs], "pct": [r["pct"] for r in rs],
                     "used_gb": [r["used_gb"] for r in rs]} for mnt, rs in disk_by_mount.items()]
     return {"os": [dict(r) for r in os_rows], "net": net_series, "disk": disk_series}
+
+
+def get_rack_series(project, minutes):
+    """依專案拉取「類型化」rack telemetry。
+    回傳按 kind 分組：{kind: {metrics 定義, machines: 每台最新值, history: 每 metric 聚合}}，
+    供 /api/rack/{project}/telemetry 直接回傳（前端依 kind 區塊呈現）。
+    """
+    since = time.time() - min(minutes or 60, int(os.environ.get("TELEMETRY_MAX_MIN", "43200"))) * 60
+    all_m = _load_machines()
+    members = {n: m for n, m in all_m.items() if m.get("project") == project}
+    if not members:
+        return {}
+
+    # 收集每一台機台每種 metric 的歷史
+    per_kind_series = {}   # kind -> { metric -> { machine -> [(ts,val)] } }
+    with _conn() as c:
+        rows = c.execute("SELECT ts,machine,kind,metric,value FROM rack_metrics"
+                         " WHERE machine IN (%s) AND ts>=? ORDER BY ts"
+                         % ",".join("?" * len(members)), tuple(members) + (since,)).fetchall()
+    # server 類型沿用 os_metrics/gpu_metrics 彙總
+    server_members = {n: m for n, m in members.items() if kind_of(m, n) == "server"}
+    for n in server_members:
+        osd = get_os_series(n, minutes)
+        gpu = get_gpu_series(n, minutes)
+        # cpu_used / mem_used_pct 取 os_metrics
+        per_kind_series.setdefault("server", {})
+        for metric in ("cpu_used", "mem_used_pct"):
+            per_kind_series["server"].setdefault(metric, {})[n] = [(r["ts"], r[metric]) for r in (osd["os"] or []) if r.get(metric) is not None]
+        # gpu_power 取每 GPU 的 power 加總
+        gpows = []
+        for s in (gpu.get("series") or []):
+            if s.get("power"):
+                gpows.append([(t, p) for t, p in zip(s["ts"], s["power"]) if p is not None])
+        if gpows:
+            import collections as _c
+            agg = _c.defaultdict(list)
+            for series in gpows:
+                for t, p in series:
+                    agg[t].append(p)
+            per_kind_series["server"].setdefault("gpu_power", {})[n] = [(t, round(sum(v),1)) for t, v in sorted(agg.items())]
+
+    # 其它類型（switch/powershelf/pdu/cdu/storage/network）從 rack_metrics
+    for r in rows:
+        k, metric, nm = r["kind"], r["metric"], r["machine"]
+        if k == "server":
+            continue
+        if r["value"] is None:
+            continue
+        per_kind_series.setdefault(k, {}).setdefault(metric, {}).setdefault(nm, []).append((r["ts"], r["value"]))
+
+    # 組輸出
+    out = {}
+    for kind, metrics in per_kind_series.items():
+        defs = RACK_METRIC_DEF.get(kind, {})
+        machines = {}
+        history = {}
+        # 每台最新值
+        for metric, by_m in metrics.items():
+            for nm, pts in by_m.items():
+                machines.setdefault(nm, {"name": nm, "kind": kind})
+                if pts:
+                    machines[nm][metric] = round(pts[-1][1], 2)
+        # 歷史聚合：每 metric 一個時間點的「整櫃平均/總和」折線
+        for metric, by_m in metrics.items():
+            all_pts = {}
+            for nm, pts in by_m.items():
+                for t, v in pts:
+                    all_pts.setdefault(int(t // 60 * 60), []).append(v)
+            ts = sorted(all_pts)
+            if not ts:
+                continue
+            mdef = defs.get(metric, {})
+            agg = "sum" if metric in ("gpu_power", "power_w", "current_a", "flow_lpm", "port_rx", "port_tx", "io_read", "io_write") else "avg"
+            history[metric] = {
+                "label": mdef.get("label", metric),
+                "unit": mdef.get("unit", ""),
+                "color": mdef.get("color", "#2563eb"),
+                "agg": agg,
+                "ts": ts,
+                "values": [round(sum(all_pts[t]) / len(all_pts[t]), 2) if agg == "avg" else round(sum(all_pts[t]), 2) for t in ts],
+            }
+        out[kind] = {
+            "defs": {k: {"label": v.get("label", k), "unit": v.get("unit", ""), "color": v.get("color", "#2563eb")} for k, v in defs.items()},
+            "machines": sorted(machines.values(), key=lambda x: x["name"]),
+            "history": history,
+        }
+    return out
+

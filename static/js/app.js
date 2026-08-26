@@ -1079,6 +1079,19 @@ function devicesHtml(members, pinged) {
 let _rackTelMinutes = 60;
 let rackTelCharts = {};
 let _rackTelLoading = false;
+// 元件類型資訊（與後端 RACK_METRIC_DEF.kind 對應）
+const RACK_KIND_INFO = {
+  server:     { icon: "🖥", label: "Server 伺服器" },
+  switch:     { icon: "🔀", label: "Switch 交換器" },
+  powershelf: { icon: "⚡", label: "Power Shelf 電源" },
+  pdu:        { icon: "🔌", label: "PDU 電源分配" },
+  cdu:        { icon: "💧", label: "CDU 冷卻分配" },
+  storage:    { icon: "💾", label: "Storage 儲存" },
+  network:    { icon: "🌐", label: "Network 網路" },
+  blanking:   { icon: "⬛", label: "Blank Panel" },
+};
+function rackKindInfo(kind) { return RACK_KIND_INFO[kind] || { icon: "▧", label: kind }; }
+
 function rackTelemetryHtml() {
   const proj = rackView.project || "";
   return `<div class="rack-main-pad">
@@ -1101,36 +1114,8 @@ function rackTelemetryHtml() {
         </label>
       </div>
       <div class="racktel-status" id="racktel-status"></div>
-      <div class="tel-grid" id="racktel-grid">
-        <div class="tel-block" data-open="1">
-          <div class="tel-block-head"><span class="tel-label">Overview <em>（整櫃總覽）</em></span></div>
-          <div class="tel-block-body">
-            <div class="chart-box"><div class="chart-title">整櫃平均 CPU 使用率 <span class="unit">＝ 有資料機台的平均</span></div><canvas id="racktel-cpu"></canvas></div>
-            <div class="chart-box"><div class="chart-title">整櫃平均記憶體使用率 <span class="unit">＝ 有資料機台的平均</span></div><canvas id="racktel-mem"></canvas></div>
-          </div>
-        </div>
-        <div class="tel-block" data-open="1">
-          <div class="tel-block-head"><span class="tel-label">GPU <em>（整櫃顯示卡聚合）</em></span></div>
-          <div class="tel-block-body">
-            <div class="chart-box"><div class="chart-title">整櫃 GPU 總功耗 <span class="unit">＝ 所有 GPU 功耗加總（W）</span></div><canvas id="racktel-gpupow"></canvas></div>
-            <div class="chart-box"><div class="chart-title">整櫃平均 GPU 溫度 <span class="unit">＝ 最熱 GPU 之平均（°C）</span></div><canvas id="racktel-gputemp"></canvas></div>
-          </div>
-        </div>
-        <div class="tel-block" data-open="1">
-          <div class="tel-block-head"><span class="tel-label">Per-Node <em>（各機台目前數值）</em></span></div>
-          <div class="tel-block-body">
-            <div class="chart-box">
-              <div class="chart-title">各機台目前 CPU 使用率 <span class="unit">＝ 最新採樣</span></div>
-              <div class="racktel-bars" id="racktel-bars-cpu"></div>
-            </div>
-            <div class="chart-box">
-              <div class="chart-title">各機台目前 GPU 溫度 <span class="unit">＝ 最新採樣（°C，灰＝無資料）</span></div>
-              <div class="racktel-bars" id="racktel-bars-temp"></div>
-            </div>
-          </div>
-        </div>
-      </div>
-      <div class="footer-hint">Rack Telemetry 彙總此專案各機台的單機 telemetry（後端定時透過 SSH 收集），不需在被監控機器安裝 agent。</div>
+      <div class="tel-grid" id="racktel-grid"><!-- 依類型動態填入 --></div>
+      <div class="footer-hint">Rack Telemetry 依元件類型分開監控（Server＝CPU/記憶體/GPU、Switch＝Port流量/溫度、Power Shelf/PDU＝功耗/電壓/電流、CDU＝水流量/水溫/水壓），後端定時透過 SSH 收集。</div>
     </div>
   </div>`;
 }
@@ -1141,45 +1126,98 @@ function toggleRackTelAll() {
   box.querySelectorAll("div[data-open]").forEach(d => d.dataset.open = open ? "1" : "0");
   $("racktel-collapse-all").textContent = open ? "▲ 全部收合" : "▼ 全部展開";
 }
-function rackTelAppendBars(container, items, fmt, maxVal) {
-  if (!container) return;
-  if (!items.length) { container.innerHTML = `<span class="hint">此專案目前沒有該機台資料。</span>`; return; }
-  container.innerHTML = items.map((it, i) => {
-    const v = it.val == null ? -1 : it.val;
-    const pct = v < 0 ? 0 : Math.min(100, (v / Math.max(maxVal, 1)) * 100);
-    const color = v < 0 ? "rgba(128,128,128,.18)"
-      : v > (maxVal * 0.9) ? "var(--red)"
-      : v > (maxVal * 0.6) ? "var(--amber)" : "var(--green)";
-    const bar = `<span class="racktel-bar" style="width:${pct}%"><i class="racktel-ip">${esc(it.name)}</i><b class="racktel-val">${v < 0 ? "—" : fmt(v)}</b></span>`;
-    return `<div class="racktel-bar-row"><span class="racktel-bar-bg">${bar}</span></div>`;
-  }).join("");
+// 產生某一類型（kind）的 tel-block HTML；canvas id 用 racktel-{kind}-{metric} 避免碰撞
+function rackTelKindBlock(kind, count) {
+  const info = rackKindInfo(kind);
+  return `<div class="tel-block rt-kind" data-kind="${esc(kind)}" data-open="1">
+    <div class="tel-block-head"><span class="tel-label">${info.icon} ${info.label} <em>（${count} 台）</em></span></div>
+    <div class="tel-block-body">
+      <div class="rt-kind-empty" style="display:none">${info.icon} ${esc(info.label)} 目前無 telemetry 資料 — 等待接上真實系統後自動開始收集。</div>
+      <div class="rt-kind-charts" style="display:block"></div>
+      <div class="rt-kind-bars"></div>
+    </div>
+  </div>`;
+}
+// 產生某類型內一組指標的 bars（每台最新值，可多指標並排）
+function rackTelAppendBars(container, machines, defs) {
+  if (!container || !machines.length) return;
+  // 找出有資料的指標作為「主要 bars」；每台每個指標一格
+  const metricKeys = Object.keys(defs || {});
+  if (!metricKeys.length) return;
+  // 依指標數設定 CSS 欄位數（第 1 欄＝名稱，其後每指標一欄）
+  container.style.setProperty("--rt-cols", String(metricKeys.length));
+  // 用第一列標題，後面每台一列，每列內每個指標一個小格
+  container.innerHTML = `
+    <div class="rt-bars-head">${metricKeys.map(k => `<span class="rt-bars-h">${esc((defs[k]||{}).label||k)}</span>`).join("")}</div>
+    ${machines.map(m => `
+      <div class="rt-bar-row">
+        <span class="rt-bar-name">${esc(m.name)}</span>
+        ${metricKeys.map(k => {
+          const v = m[k] == null ? null : m[k];
+          const def = defs[k] || { unit: "" };
+          if (v == null) return `<span class="rt-bar-cell rt-bar-na">—</span>`;
+          const unit = def.unit || "";
+          return `<span class="rt-bar-cell"><span class="rt-bar-num">${v}${esc(unit)}</span></span>`;
+        }).join("")}
+      </div>`).join("")}`;
 }
 async function loadRackTelemetry() {
   const proj = rackView.project || "";
   if (!proj || _rackTelLoading) return;
   _rackTelLoading = true;
   const win = $("racktel-window"); if (win) win.textContent = telWindowLabel(_rackTelMinutes);
+  const grid = $("racktel-grid");
+  if (!grid) { _rackTelLoading = false; return; }
   const st = $("racktel-status"); if (st) st.innerHTML = "⏳ 正在彙總整櫃 telemetry…";
   let d;
   try {
     d = await api(`/api/rack/${encodeURIComponent(proj)}/telemetry?minutes=${_rackTelMinutes}`);
   } catch (e) { if (st) st.innerHTML = `⚠ 無法載入：${esc(e.message)}`; _rackTelLoading = false; return; }
-  if (!d || !d.machines) { if (st) st.innerHTML = "⚠ 此專案尚無 telemetry 資料（後端尚未採樣到機台）。"; _rackTelLoading = false; return; }
+  if (!d || !d.data) { if (st) st.innerHTML = "⚠ 此專案尚無 telemetry 資料（後端尚未採樣到機台）。"; _rackTelLoading = false; return; }
+  // 依 kinds（後端已回傳此專案擁有的類型）建立各類型的 tel-block
+  const kinds = d.kinds && d.kinds.length ? d.kinds : ["server"];
+  const kindsCount = d.kinds_count || {};
+  grid.innerHTML = kinds.map(k => rackTelKindBlock(k, kindsCount[k] || 0)).join("");
+  // 重新生成 canvas 後，舊 Chart 執行個體綁的是舊節點，需清空 cache 避免疊加/失效
+  rackTelCharts = {};
+  // 狀態列
   if (st) {
-    const withData = d.machines.filter(m => m.has_data).length;
-    st.innerHTML = `<span class="hint">✅ ${withData} / ${d.machines.length} 台有 telemetry 資料（${esc(proj)}）</span>`;
+    const total = d.components ? d.components.length : 0;
+    st.innerHTML = `<span class="hint">✅ 依類型分組：${kinds.map(k => `${rackKindInfo(k).label} ${kindsCount[k]||0} 台`).join("、")}（${esc(proj)}）</span>`;
   }
-  // 歷史折線
-  const hist = d.history || { ts: [], cpu_avg: [], mem_avg: [], gpu_temp_avg: [], gpu_pow_total: [] };
-  const labels = (hist.ts || []).map(telT);
-  rackTelSet("racktel-cpu", labels, [{ key: "cpu", data: hist.cpu_avg }], { cpu: { label: "平均 CPU %", color: "#2563eb" } });
-  rackTelSet("racktel-mem", labels, [{ key: "mem", data: hist.mem_avg }], { mem: { label: "平均記憶體 %", color: "#22c55e" } });
-  rackTelSet("racktel-gpupow", labels, [{ key: "pow", data: hist.gpu_pow_total }], { pow: { label: "GPU 總功耗 W", color: "#e0a800" } });
-  rackTelSet("racktel-gputemp", labels, [{ key: "temp", data: hist.gpu_temp_avg }], { temp: { label: "平均 GPU 溫度 °C", color: "#f97316" } });
-  // 每台最新
-  const byU = d.machines.slice().sort((a,b) => (b.u || 0) - (a.u || 0));
-  rackTelAppendBars($("racktel-bars-cpu"), byU.map(m => ({ name: m.name, val: m.cpu_pct })), v => v + "%", 100);
-  rackTelAppendBars($("racktel-bars-temp"), byU.map(m => ({ name: m.name, val: m.gpu_temp })), v => v + "°", 95);
+  // 每個類型填入 charts + bars
+  kinds.forEach(kind => {
+    const kindData = d.data[kind];
+    if (!kindData) return;
+    const block = grid.querySelector(`.rt-kind[data-kind="${CSS.escape ? CSS.escape(kind) : kind}"]`);
+    if (!block) return;
+    const chartsBox = block.querySelector(".rt-kind-charts");
+    const emptyBox = block.querySelector(".rt-kind-empty");
+    const barsBox = block.querySelector(".rt-kind-bars");
+    const defs = kindData.defs || {};
+    const history = kindData.history || {};
+    const machines = kindData.machines || [];
+    const hasData = machines.length > 0 && Object.keys(history).length > 0;
+    if (!hasData && emptyBox) { emptyBox.style.display = "block"; if (chartsBox) chartsBox.style.display = "none"; }
+    // 先依 history 建好每個 metric 的 canvas
+    Object.keys(history).forEach(metric => {
+      const h = history[metric] || {};
+      const box = document.createElement("div");
+      box.className = "chart-box";
+      box.innerHTML = `<div class="chart-title">${esc(h.label||metric)} <span class="unit">＝${h.agg === "sum" ? "整櫃總和" : "整櫃平均"}（${esc(h.unit||"")}）</span></div><canvas id="racktel-${kind}-${metric}"></canvas>`;
+      if (chartsBox) chartsBox.appendChild(box);
+    });
+    // 每個 metric 一個折線圖
+    Object.keys(history).forEach(metric => {
+      const h = history[metric];
+      if (!h) return;
+      const labels = (h.ts || []).map(telT);
+      rackTelSet(`racktel-${kind}-${metric}`, labels, [{ key: metric, data: h.values }],
+        { [metric]: { label: `${h.label}（${h.agg === "sum" ? "總和" : "平均"}）`, color: h.color || "#2563eb" } });
+    });
+    // bars：每台所有指標值
+    if (machines.length) rackTelAppendBars(barsBox, machines, defs);
+  });
   _rackTelLoading = false;
 }
 function rackTelChart(id) {
@@ -1813,6 +1851,12 @@ function parseHash() {
   if (view === "machine" && parts[1]) {
     state.view = "machine";
     _activeMachine = decodeURIComponent(parts[1]).trim();
+  } else if (view === "rack" && parts[1]) {
+    // 支援 rack 子檢視 deep-link：#/rack/telemetry、#/rack/list、#/rack/plane、#/rack/{subview}/{project}
+    state.view = "rack";
+    if (parts[1] === "telemetry") { devicesView = "telemetry"; if (parts[2]) rackSetProject(decodeURIComponent(parts[2])); }
+    else if (parts[1] === "list") { devicesView = "list"; if (parts[2]) rackSetProject(decodeURIComponent(parts[2])); }
+    else if (parts[1] === "plane") { devicesView = "plane"; if (parts[2]) rackSetProject(decodeURIComponent(parts[2])); }
   } else {
     state.view = ["dashboard", "projects", "rack"].includes(view) ? view : "dashboard";
   }
