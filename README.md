@@ -1,119 +1,119 @@
 # Wistron PA Server Manager
 
-一套**集中管理 AI GPU 伺服器（與機櫃）**的 Web 管理主控台。把 **L10 單機層級**（單台 Node）與 **L11 機櫃層級**（整櫃 rack）的監控與控制整合在單一介面。
+A centralized **web management console** for **AI GPU servers** (and racks). It unifies **L10 (System Level / single node)** and **L11 (Rack Level / whole rack)** monitoring and control in a single view.
 
-- 後端：**FastAPI (Python 3.12)**；前端：**原生 JavaScript**（無框架、無 build 步驟）。
-- 被管理的主機不需安裝任何 agent——透過 **SSH**（OS）與 **IPMI / BMC** 收集與控制。
-- 歷史 telemetry（感測器/硬體健康）寫入 **SQLite**。
-- 網頁終端（xterm.js）透過獨立的 **node/ssh2 橋接服務**提供 SSH 連線。
+- Backend: **FastAPI (Python 3.12)**; Frontend: **vanilla JavaScript** (no framework, no build step).
+- No agent required on managed hosts — everything works over **SSH** (OS) and **IPMI / BMC**.
+- Historical telemetry (sensors / hardware health) is persisted in **SQLite**.
+- In-browser terminal (xterm.js) is provided by a separate **node/ssh2 bridge** service.
 
-> 本 README 同時作為「**部署指引**」與「**給 OpenHands 等 AI 的接續文件**」。
-> 若你拿到的是乾淨 clone，請依「部署指南」即可把整站跑起來。
-
----
-
-## 一、功能總覽
-
-### 1. 統一總覽儀表板
-- 所有被管理系統的彙整：上線/離線狀態、分專案、GPU 伺服器健康速覽、Ping 燈號。
-
-### 2. L10 System Level（單機）
-- 新增/管理單台伺服器：OS SSH（IP/user/password/port）；新增時自動探測 hostname。
-- BMC：可由 OS 內 `ipmitool` 自動探測 BMC IP（`use_c17` 對應新版 OpenBMC 的 cipher 17）。
-- 檢視 OS 資訊、硬體庫存（CPU/DIMM/SSD/GPU/NIC）、感測器、BMC 開關機。
-- **Telemetry 檢視器**：SQLite 歷史指標 + 圖表 + 趨勢分析。
-- **BMC power badge**：即時機殼電源開關、顏色區分。
-
-### 3. L11 Rack Level（機櫃）
-- 機櫃平面圖（U 槽，**由下往上**編號），可放置伺服器 / switch / power shelf / PDU / CDU / storage。
-- 空槽「＋」新增系統（**只能選同專案、且固定在架外的既有 L11 系統**，U 數由該系統的 rack_size 鎖定，不可改）。
-- 佔用檢查：避開已佔用的 U 槽區間、多 U 元件需連續空位。
-- **機櫃拓撲圖**：把 node↔switch/PDU/CDU 的連線畫成 SVG 實體連線圖。
-  - 「新增拓樸 / 模擬拓樸」按鈕**目前暫停**，點擊跳出「功能待開發」。（原始實作 `linkAddDialog()` / `rackDemoTopo()` 仍完整保留在 `app.js`，日後把按鈕 onclick 指回去即可恢復。）
-- 拓樸工具列：「↕」收合/展開（`.topo-compact`）、「🗑 刪除全部」（清除本專案連線）、SVG 限高捲動。
-
-### 4. 專案（Projects）
-- 依專案分組機器（例如 NCP / H100 / Miramar），L10/L11 分頁各自獨立。
-- 每個專案有各自狀態；系統卡片可收合/展開。
-
-### 5. Web 終端機（xterm）
-- 瀏覽器內直接操作 **OS / BMC** 的 SSH 終端。
-- 走獨立的 **pa-terminal-bridge**（node + `ssh2`，port 6968），事件驅動避免 paramiko 併發 SSH 崩潰。
-- 密碼不信任前端傳遞：bridge 一律以 `name + kind` 直接從 `data.json` 取真實帳密。
-
-### 6. 系統廣播（System Broadcast，L10 分頁）
-- 依專案把帶 OS 的 L10 系統分組列出，一次把同一指令送到多台主機的 OS shell。
-- 指令歷史 `bcLog` 只記錄「時間 + 指令」，**不含目標主機列表**。
-
-### 7. AI Copilot
-- 自然語言助手，接本機 Ollama（qwen3.8:27b）。診斷/趨勢分析也可由 AI 輔助。
+> This README is both the **deployment guide** and the **handover doc for OpenHands / AI agents**.
+> If you have a clean clone, follow "Deployment Guide" to bring the whole site up.
 
 ---
 
-## 二、系統架構（部署前先懂這張圖）
+## 1. Feature Overview
+
+### 1.1 Unified Overview Dashboard
+- Aggregate view of all managed systems: online/offline status, grouped by project, GPU server health at a glance, ping status lights.
+
+### 1.2 L10 System Level (single node)
+- Add / manage individual servers over OS SSH (IP / user / password / port); hostname auto-probed on add.
+- BMC support: BMC IP can be auto-probed from the OS via `ipmitool` (`use_c17` maps to newer OpenBMC cipher 17).
+- View OS info, hardware inventory (CPU/DIMM/SSD/GPU/NIC), sensors, BMC power on/off.
+- **Telemetry viewer**: SQLite history + charts + trend analysis.
+- **BMC power badge**: live chassis power state with color coding.
+
+### 1.3 L11 Rack Level (rack view)
+- Rack floor plan (U slots, **numbered bottom-up**) for servers / switches / power shelves / PDUs / CDUs / storage.
+- Empty-slot **"+"** adds a system (only shows **existing L11 systems of the same project, placed outside the rack**; U count is locked to that system's `rack_size`, not editable).
+- Occupancy checks: avoids occupied U ranges; multi-U devices need contiguous free slots.
+- **Rack topology map**: draws node ↔ switch/PDU/CDU links as an SVG connection diagram.
+  - The **"New Topology / Simulate Topology" buttons are currently paused** — they show a "feature under development" popup. (Original implementations `linkAddDialog()` / `rackDemoTopo()` are still fully preserved in `app.js`; point the button `onclick` back to them to re-enable.)
+- Topology toolbar: "expand/collapse" (`.topo-compact`), "delete all" (clear this project's links), SVG height-limited scrolling.
+
+### 1.4 Projects
+- Group machines by project (e.g. NCP / H100 / Miramar); L10 and L11 tabs are independent.
+- Each project has its own status; system cards can be collapsed/expanded.
+
+### 1.5 Web Terminal (xterm)
+- Operate the **OS / BMC** SSH terminal directly in the browser.
+- Runs via the separate **pa-terminal-bridge** (node + `ssh2`, port 6968), event-driven to avoid paramiko concurrency crashes.
+- Passwords are not trusted from the frontend: the bridge always reads real credentials from `data.json` using `name + kind`.
+
+### 1.6 System Broadcast (L10 tab)
+- List L10 systems with OS grouped by project, and send one command to many hosts' OS shells at once.
+- Command history `bcLog` records only **time + command**, **not** the target host list.
+
+### 1.7 AI Copilot
+- Natural-language assistant wired to a local Ollama (qwen3.8:27b). Also assists diagnostics / trend analysis.
+
+---
+
+## 2. System Architecture (read before deploying)
 
 ```
-瀏覽器 (index.html + app.js + xterm.js)
-   │
-   │ HTTP (REST)   /api/*
-   │ WebSocket     /ws/*
-   ▼
-pa-manager  ──(FastAPI, uvicorn)──  port 6969 (正式) / 8788 (試用)
-   │  * 處理 REST API、WebSocket 代理、讀寫 data.json、telemetry.db
-   │  * /ws/terminal/* 與 /ws/rack-broadcast 是「雙向代理」到 node bridge
-   ▼
-pa-terminal-bridge  ──(node + ssh2)──  port 6968
-   │  * 真正建立 SSH 連線到各機台 OS / BMC
-   ▼
-各被管理主機  (OS via SSH, BMC via IPMI/Redfish)
+Browser (index.html + app.js + xterm.js)
+   |
+   | HTTP (REST)    /api/*
+   | WebSocket      /ws/*
+   v
+pa-manager  ----(FastAPI, uvicorn)----  port 6969 (prod) / 8788 (trial)
+   |  * handles REST API, WebSocket proxy, reads/writes data.json & telemetry.db
+   |  * /ws/terminal/* and /ws/rack-broadcast are two-way proxies to the node bridge
+   v
+pa-terminal-bridge  ----(node + ssh2)----  port 6968
+   |  * actually opens SSH connections to each host (OS / BMC)
+   v
+Managed hosts  (OS over SSH, BMC over IPMI/Redfish)
 ```
 
-- `pa-manager`：Python 後端，負責資料、REST、把 terminal WS 代理給 bridge。
-- `pa-terminal-bridge`：Node 服務，真正開 SSH 通道；**沒有它則網頁終端無法使用**（其餘功能不受影響）。
-- 資料：機台清單在 `data.json`，telemetry 歷史在 SQLite `telemetry.db`。
+- `pa-manager`: Python backend — data, REST, and proxies terminal WebSockets to the bridge.
+- `pa-terminal-bridge`: Node service that opens the real SSH channels; **without it the web terminal is unavailable** (everything else still works).
+- Data: the machine list lives in `data.json`, telemetry history in SQLite `telemetry.db`.
 
 ---
 
-## 三、目錄結構
+## 3. Directory Layout
 
 ```
 pa_server_manager/
-├── main.py                 # FastAPI 後端（主程式）
-├── telemetry_core.py       # telemetry 收集核心
-├── requirements.txt        # Python 依賴
-├── run.sh                  # 開發/試用啟動腳本
-├── pa-manager.service      # systemd 服務（正式，port 6969）
-├── backup_prod.sh          # 每日備份腳本
+├── main.py                 # FastAPI backend (main program)
+├── telemetry_core.py       # telemetry collection core
+├── requirements.txt        # Python dependencies
+├── run.sh                  # dev / trial launch script
+├── pa-manager.service      # systemd unit (production, port 6969)
+├── backup_prod.sh          # daily backup script
 ├── scripts/
 │   └── seed_simulated_telemetry.py
 ├── static/
-│   ├── index.html          # 前端入口
+│   ├── index.html          # frontend entry
 │   ├── css/style.css
-│   ├── js/app.js           # 前端邏輯（所有功能在此）
+│   ├── js/app.js           # frontend logic (all features live here)
 │   ├── img/
 │   └── vendor/             # chartjs / xterm
-├── terminal_bridge/        # Node 終端橋接（ssh2 + ws）
+├── terminal_bridge/        # Node terminal bridge (ssh2 + ws)
 │   ├── server.js
 │   ├── package.json
-│   └── package-lock.json    # clone 後需 npm ci
-└── AGENTS.md               # 給 OpenHands 的專案知識（開發用）
+│   └── package-lock.json    # run `npm ci` after clone
+└── AGENTS.md               # project knowledge for OpenHands (development)
 ```
 
 ---
 
-## 四、部署指南（給「拿到乾淨 clone」的人）
+## 4. Deployment Guide (for anyone with a clean clone)
 
-> 環境需求：**Linux**，`Python 3.12`，`Node.js 18+`（npm）。
-> 以下全部以「新機器、全新 clone」為前提，一步一步可完成。
+> Environment requirements: **Linux**, **Python 3.12**, **Node.js 18+** (npm).
+> The steps below assume a fresh machine and fresh clone — follow them top to bottom.
 
-### 第 1 步：取得程式碼
+### Step 1 — Get the code
 
 ```bash
 git clone https://github.com/wistroneq3300/pa-server-manager.git
 cd pa-server-manager
 ```
 
-### 第 2 步：Python 環境 + 依賴
+### Step 2 — Python environment + dependencies
 
 ```bash
 python3 -m venv .venv
@@ -121,35 +121,37 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-> 建議 Python 3.12。若系統預設版本不同，用 `python3.12` 明確指定。
+> Use Python 3.12 if possible. If the system default differs, call it out explicitly with `python3.12`.
 
-### 第 3 步：Node 終端橋接的依賴
+### Step 3 — Node terminal bridge dependencies
 
 ```bash
 cd terminal_bridge
-npm ci            # 依 package-lock.json 安裝（ssh2 + ws）
+npm ci            # installs from package-lock.json (ssh2 + ws)
 cd ..
 ```
 
-> 若沒有 `npm ci`，用 `npm install` 亦可。
+> If `npm ci` is not available, `npm install` works too.
 
-### 第 4 步：準備資料目錄
+### Step 4 — Prepare a data directory
 
-程式會依環境變數 `PA_DATA_DIR` 決定資料放哪（未設 = 程式所在目錄）。
+The program picks its data location from the environment variable `PA_DATA_DIR`
+(if unset, it uses the directory the program lives in).
 
-正式版建議獨立資料夾（與「試用版」隔離）：
+For production, keep data in a dedicated folder (separate from any trial instance):
 
 ```bash
 export PA_DATA_DIR=/srv/pa-server-manager-data
 mkdir -p "$PA_DATA_DIR"
 ```
 
-**首次啟動**：資料目錄可為空——上線後你在 Web UI 直接「新增系統」就有機台。
-（若你要把舊站資料搬過來，把舊機的 `data.json` 與 `telemetry.db` 複製進 `$PA_DATA_DIR/` 即可。）
+**First launch**: the data directory may be empty — after it is online you simply
+use "Add System" on the web UI to create machines.
+(If migrating an existing site, copy the old `data.json` and `telemetry.db` into `$PA_DATA_DIR/`.)
 
-### 第 5 步：啟動（試用 vs 正式）
+### Step 5 — Launch (trial vs production)
 
-**試用模式（預設 port 8788，方便測試）：**
+**Trial mode (default port 8788, handy for testing):**
 
 ```bash
 source .venv/bin/activate
@@ -157,124 +159,130 @@ PORT=8788 bash run.sh
 # http://localhost:8788/
 ```
 
-**正式模式（推薦用 systemd 常駐 + 開機自啟）：**
+**Production mode (recommended: systemd, persistent + boot-enabled):**
 
-範例服務檔已附：`pa-manager.service` / `pa-terminal-bridge.service`：
+Sample unit files are provided: `pa-manager.service` and `pa-terminal-bridge.service`:
 
 ```bash
-# 把服務檔放到 systemd
+# Install the units
 sudo cp pa-manager.service pa-terminal-bridge.service /etc/systemd/system/
-#   ⚠️ 編輯兩檔：WorkingDirectory、ExecStart 的 python path、Environment 的 PA_DATA_DIR，
-#      改成這台機器的實際路徑。
+#   WARNING: edit BOTH files — WorkingDirectory, the ExecStart python path, and
+#   Environment PA_DATA_DIR — to this machine's actual paths.
 
 sudo systemctl daemon-reload
-sudo systemctl enable --now pa-terminal-bridge   # node bridge 先起
-sudo systemctl enable --now pa-manager           # python 後端
+sudo systemctl enable --now pa-terminal-bridge   # start the node bridge first
+sudo systemctl enable --now pa-manager           # then the python backend
 sudo systemctl status pa-manager pa-terminal-bridge
 ```
 
-> 兩個服務都要開，且 **pa-terminal-bridge 需能讀到同一份 `$PA_DATA_DIR/data.json`**（它從同一檔案取帳密）。
+> Both services must run, and **pa-terminal-bridge must be able to read the same
+> `$PA_DATA_DIR/data.json`** (it reads credentials from that same file).
 
-### 第 6 步：確認
+### Step 6 — Verify
 
-- 開 http://<主機>:6969/ 應看到介面。
-- 在「System Manager」加一台系統（填 OS IP/帳密），開其網頁終端確認 SSH 可用。
+- Open http://<host>:6969/ — the UI should load.
+- In "System Manager", add a system (OS IP/user/password), then open its web
+  terminal to confirm SSH works.
 
 ---
 
-## 五、系統管理運維
+## 5. Operations
 
-### 備份
-- 每日自動備份：`backup_prod.sh`（保留 14 份）。設定 cron 即可啟用：
+### Backup
+- Daily auto-backup: `backup_prod.sh` (keeps 14 copies). Enable via cron:
   ```bash
   crontab -e
-  # 每天 02:00 備份正式資料
+  # daily 02:00, backup production data
   0 2 * * * /srv/.../backup_prod.sh >> /tmp/pa_backup.log 2>&1
   ```
-- 手動備份：直接複製 `$PA_DATA_DIR/`（含 `data.json` + `telemetry.db`）。
+- Manual backup: copy `$PA_DATA_DIR/` (contains `data.json` + `telemetry.db`).
 
-### 更新
+### Update
 ```bash
 cd pa-server-manager
 git pull
-# 若 Python 依賴有變：pip install -r requirements.txt
-# 若 node 依賴有變：cd terminal_bridge && npm ci
+# if python deps changed : pip install -r requirements.txt
+# if node deps changed :   cd terminal_bridge && npm ci
 sudo systemctl restart pa-manager pa-terminal-bridge
 ```
 
-### 回滾
+### Roll back
 ```bash
 git log --oneline
-git checkout <想回滾的 commit hash>
+git checkout <commit you want to roll back to>
 sudo systemctl restart pa-manager pa-terminal-bridge
 ```
 
 ---
 
-## 六、環境變數
+## 6. Environment Variables
 
-| 變數 | 預設 | 用途 |
+| Variable | Default | Purpose |
 |---|---|---|
-| `PA_DATA_DIR` | 程式所在目錄 | `data.json` 與 `telemetry.db` 的存放資料夾（試用/正式隔離） |
-| `PORT` | 8788 | run.sh 的 uvicorn 埠；正式用 service 固定 6969 |
-| `TELEMETRY_INTERVAL` | - | telemetry 收集間隔（秒） |
-| `MONITOR_MACHINES` | 掃描 data.json 所有有 OS 機台 | 只監控指定的機台 |
-| `TERM_BRIDGE_PORT` | 6968 | node 終端橋接埠 |
-| `TERM_BRIDGE_HOST` | 0.0.0.0 | node 終端橋接監聽位址 |
-| `IPMI_CIPHER` | 17 | ipmitool cipher（新 OpenBMC 用 17） |
+| `PA_DATA_DIR` | program directory | folder that holds `data.json` & `telemetry.db` (trial/prod isolation) |
+| `PORT` | 8788 | uvicorn port for run.sh; production uses service (6969) |
+| `TELEMETRY_INTERVAL` | - | telemetry collection interval (seconds) |
+| `MONITOR_MACHINES` | all with OS in data.json | restrict which machines are monitored |
+| `TERM_BRIDGE_PORT` | 6968 | node terminal bridge port |
+| `TERM_BRIDGE_HOST` | 0.0.0.0 | node terminal bridge bind address |
+| `IPMI_CIPHER` | 17 | ipmitool cipher (use 17 for newer OpenBMC) |
 
 ---
 
-## 七、REST API 概覽
+## 7. REST API Overview
 
-| Method | Path | 說明 |
+| Method | Path | Description |
 |---|---|---|
-| POST | `/api/machines` | 新增機器（SSH 驗證、自動 hostname、level、rack_size） |
-| POST | `/api/machines/probe-bmc` | 經 ipmitool 探測 BMC IP |
-| GET | `/api/machines` | 列出機台（**密碼遮蔽**） |
-| DELETE | `/api/machines/{name}` | 移除機台 |
-| GET | `/api/machine/{name}` | 機台細節 |
-| GET | `/api/machine/{name}/detail` | OS 資訊 + 硬體庫存 |
-| GET | `/api/machine/{name}/sensors` | 感測器讀值 |
-| GET/POST | `/api/machine/{name}/power` | 讀取 / 控制 BMC 電源 |
-| GET | `/api/machine/{name}/telemetry` | telemetry 歷史（SQLite） |
-| GET | `/api/machine/{name}/telemetry/analyze` | 趨勢分析 |
-| GET/POST | `/api/machine/{name}/diagnose` | 診斷 / AI 分析 |
-| GET | `/api/rack/ping` | 機櫃級 ping 掃描 |
-| POST/GET/DELETE | `/api/rack/passive`、`/api/links` | 機櫃元件與連線 |
-| GET/POST/DELETE | `/api/projects` | 專案管理 |
+| POST | `/api/machines` | Add machine (SSH-validated, auto hostname, level, rack_size) |
+| POST | `/api/machines/probe-bmc` | Probe BMC IP via ipmitool |
+| GET | `/api/machines` | List machines (passwords masked) |
+| DELETE | `/api/machines/{name}` | Remove machine |
+| GET | `/api/machine/{name}` | Machine detail |
+| GET | `/api/machine/{name}/detail` | OS info + hardware inventory |
+| GET | `/api/machine/{name}/sensors` | Sensor readings |
+| GET/POST | `/api/machine/{name}/power` | Read / control BMC power |
+| GET | `/api/machine/{name}/telemetry` | Telemetry history (SQLite) |
+| GET | `/api/machine/{name}/telemetry/analyze` | Trend analysis |
+| GET/POST | `/api/machine/{name}/diagnose` | Diagnostics / AI analysis |
+| GET | `/api/rack/ping` | Rack-level ping sweep |
+| POST/GET/DELETE | `/api/rack/passive`, `/api/links` | Rack elements & links |
+| GET/POST/DELETE | `/api/projects` | Project management |
 | POST | `/api/copilot` | AI Copilot |
 
-WebSocket：
-- `/ws/terminal/{name}/{kind}` — OS/BMC 終端（kind=os|bmc），雙向代理到 bridge。
-- `/ws/rack-broadcast` — 機櫃廣播終端（同專案多主機）。
+WebSocket:
+- `/ws/terminal/{name}/{kind}` — OS/BMC terminal (kind = `os` | `bmc`), proxied two-way to the bridge.
+- `/ws/rack-broadcast` — rack broadcast terminal (same-project multi-host).
 
 ---
 
-## 八、資料與安全注意事項
+## 8. Data & Security Notes
 
-- 機台清單存於 `data.json`；telemetry 存於 SQLite `telemetry.db`；彼此以 `PA_DATA_DIR` 隔離。
-- **帳密以明文存於 `data.json`**。目前無登入/RBAC。**要對外部開放前請先加認證**，並考慮把密碼加密存放（`ADMIN_PERMISSION_BLUEPRINT.md` 是未實作的認證藍圖）。
-- `prod-data.json`（含實機明碼帳密的舊快照）已從版本控制移除並加入 `.gitignore`，不會隨 clone 外洩。
-- 被管理主機不需 agent；但需要該主機的 SSH 與 IPMI 帳密才能被這套系統管控。
+- Machine list is stored in `data.json`; telemetry in SQLite `telemetry.db`; isolated per instance by `PA_DATA_DIR`.
+- **Credentials are stored in plaintext in `data.json`.** There is no login / RBAC yet.
+  **Add authentication before exposing to a broader audience**, and consider
+  encrypting passwords at rest (`ADMIN_PERMISSION_BLUEPRINT.md` is an unimplemented auth blueprint).
+- `prod-data.json` (an old snapshot that contained plaintext real-machine credentials)
+  has been **removed from version control and added to `.gitignore`** — it will not leak with a clone.
+- Managed hosts need no agent, but you do need their SSH and IPMI credentials to be managed by this system.
 
 ---
 
-## 九、常見問題（Troubleshooting）
+## 9. Troubleshooting
 
-| 症狀 | 原因 / 解法 |
+| Symptom | Cause / Fix |
 |---|---|
-| 網頁終端連不上 | pa-terminal-bridge 沒起來或埠不符：`sudo systemctl status pa-terminal-bridge`；確認它能讀到 `$PA_DATA_DIR/data.json` 的帳密 |
-| `python: command not found` | 未建 venv 或未 activate：`source .venv/bin/activate` |
-| 開關機失敗 | BMC 帳密錯誤或 cipher 不匹配；設 `IPMI_CIPHER`（OpenBMC 用 17） |
-| 頁面 403 / 連不上 | 服務未開：`sudo systemctl status pa-manager` |
-| telemetry 沒有資料 | 主機離線或沒接上；等下一次收集（可調 `TELEMETRY_INTERVAL`） |
+| Web terminal won't connect | pa-terminal-bridge is down or wrong port: `sudo systemctl status pa-terminal-bridge`; make sure it can read `$PA_DATA_DIR/data.json` credentials |
+| `python: command not found` | venv not built or not activated: `source .venv/bin/activate` |
+| Power on/off fails | wrong BMC credentials, or cipher mismatch; set `IPMI_CIPHER` (17 for OpenBMC) |
+| Page 403 / unreachable | service not running: `sudo systemctl status pa-manager` |
+| No telemetry data | host offline or not connected; wait for next collection (tune `TELEMETRY_INTERVAL`) |
 
 ---
 
-## 十、給 OpenHands / 開發者
+## 10. For OpenHands / Developers
 
-- 本專案已有 `AGENTS.md` 記錄專案知識與開發注意事項，接續開發前先讀。
-- 前端所有邏輯集中在 `static/js/app.js`（約 170KB，無框架、無 build）。
-- `index.html` 的 modal/DOM 與 `style.css` 樣式皆在版本控制內。
-- **編輯含 emoji 的字串時建議用 Python 腳本取代**，避免編輯器 surrogate 對問題把整檔清空（歷史教訓，詳見 AGENTS.md §十一）。
+- The repo has an `AGENTS.md` with project knowledge and development caveats — read it before continuing work.
+- Frontend logic is all in `static/js/app.js` (~170KB, no framework, no build).
+- The `index.html` modals/DOM and `style.css` styling are under version control.
+- **When editing strings that contain emoji, prefer doing the edit with a Python script**,
+  to avoid an editor surrogate-pair issue that can wipe the whole file (historical lesson; see AGENTS.md for details).
