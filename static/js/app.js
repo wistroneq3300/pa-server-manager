@@ -195,21 +195,45 @@ let _rackCopBusy = false;
 function rackCopilotHtml() {
   const proj = rackView.project || "";
   return `
-    <div class="copilot-panel rack-copilot-panel" style="margin-top:16px">
-      <div class="card-title">AI Copilot <span class="hint">Ollama · qwen3.8 · ${esc(proj) || "未選專案"}</span></div>
-      <div class="copilot-body" id="rackcop-box" style="max-height:340px;overflow:auto">
-        <div class="copilot-msg ai">🖘 這裡的 Copilot 只會回答目前選中的機櫃專案：<b>${esc(proj) || "（尚未選擇）"}</b>。<br>可問「這櫃有幾台？哪些離線？溫度異常？」等（需要本機 Ollama qwen3.8 在運作）。</div>
+    <div class="rack-cop-panel">
+      <div class="rack-cop-head">
+        <span class="cop-avatar ai">🤖</span>
+        <div class="cop-title">AI Copilot <span class="hint">Ollama · qwen3.8 · ${esc(proj) || "未選專案"}</span></div>
+        <button class="btn small rack-cop-clear" id="rackcop-clear" title="清除對話紀錄">🗑</button>
       </div>
-      <div class="copilot-input">
-        <input class="input" id="rackcop-input" placeholder="輸入指令給本機櫃 Copilot…" autocomplete="off">
-        <button class="btn primary" id="rackcop-send">送出</button>
+      <div class="rack-cop-body" id="rackcop-box">
+        <div class="cop-msg ai">
+          <span class="cop-avatar ai">🤖</span>
+          <div class="cop-bubble ai">🖧 這裡的 Copilot 只會回答目前選中的機櫃專案：<b>${esc(proj) || "（尚未選擇）"}</b>。<br>可問「這櫃有幾台？哪些離線？溫度異常？」等（需要本機 Ollama qwen3.8 在運作）。</div>
+        </div>
+      </div>
+      <div class="rack-cop-input">
+        <textarea id="rackcop-input" rows="1" placeholder="輸入訊息，Enter 送出…" autocomplete="off"></textarea>
+        <button class="btn primary" id="rackcop-send">➤</button>
       </div>
     </div>`;
 }
-function rackCopAppend(role, html) {
+function rackCopAppend(role, html, raw) {
   const box = document.getElementById("rackcop-box");
   if (!box) return;
-  box.insertAdjacentHTML("beforeend", `<div class="copilot-msg ${role}">${html}</div>`);
+  const av = role === "user" ? "🧑" : "🤖";
+  box.insertAdjacentHTML("beforeend", `<div class="cop-msg ${role}">
+    <span class="cop-avatar ${role}">${av}</span>
+    <div class="cop-bubble ${role}">${raw ? html : esc(html)}</div>
+  </div>`);
+  box.scrollTop = box.scrollHeight;
+}
+function rackCopTyping(on) {
+  const box = document.getElementById("rackcop-box");
+  if (!box) return;
+  let t = document.getElementById("rackcop-typing");
+  if (on) {
+    if (t) return;
+    box.insertAdjacentHTML("beforeend", `<div class="cop-msg ai" id="rackcop-typing">
+      <span class="cop-avatar ai">🤖</span><div class="cop-bubble ai typing">正在思考…</div></div>`);
+  } else if (t) {
+    t.remove();
+  }
   box.scrollTop = box.scrollHeight;
 }
 async function rackCopSend() {
@@ -218,10 +242,11 @@ async function rackCopSend() {
   const text = (inp ? inp.value : "").trim();
   if (!text || _rackCopBusy) return;
   const proj = rackView.project || "";
-  rackCopAppend("user", esc(text));
-  if (inp) inp.value = "";
+  rackCopAppend("user", text);
+  if (inp) inp.value = autoGrow(inp);
   _rackCopBusy = true;
   if (send) { send.disabled = true; send.textContent = "…"; }
+  rackCopTyping(true);
   try {
     const r = await fetch("/api/copilot", {
       method: "POST",
@@ -229,20 +254,36 @@ async function rackCopSend() {
       body: JSON.stringify({ message: text, project: proj }),
     });
     const j = await r.json();
-    if (j.ok) rackCopAppend("ai", esc(j.reply).replace(/\n/g, "<br>"));
-    else rackCopAppend("ai", `⨠ ${esc(j.error || "呼叫失敗")}`);
+    rackCopTyping(false);
+    if (j.ok) rackCopAppend("ai", j.reply, true);
+    else rackCopAppend("ai", `⨠ ${j.error || "呼叫失敗"}`);
   } catch (e) {
-    rackCopAppend("ai", `⨠ ${esc("無法連線到後端： " + e.message)}`);
+    rackCopTyping(false);
+    rackCopAppend("ai", `⨠ 無法連線到後端： ${e.message}`);
   } finally {
     _rackCopBusy = false;
-    if (send) { send.disabled = false; send.textContent = "送出"; }
+    if (send) { send.disabled = false; send.textContent = "➤"; }
   }
+}
+function autoGrow(el) {
+  if (el && el.style) { el.style.height = "auto"; el.style.height = Math.min(el.scrollHeight, 120) + "px"; }
+  return "";
 }
 function bindRackCopilot() {
   const inp = document.getElementById("rackcop-input");
   const send = document.getElementById("rackcop-send");
+  const clr = document.getElementById("rackcop-clear");
   if (send) send.addEventListener("click", rackCopSend);
-  if (inp) inp.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); rackCopSend(); } });
+  if (inp) inp.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); rackCopSend(); }
+  });
+  if (inp) inp.addEventListener("input", () => autoGrow(inp));
+  if (clr) clr.addEventListener("click", () => {
+    const box = document.getElementById("rackcop-box");
+    if (box) box.innerHTML = "";
+    const proj = rackView.project || "";
+    rackCopAppend("ai", `🖧 對話已清除。仍只回答機櫃專案：<b>${proj || "（尚未選擇）"}</b>。`);
+  });
 }
 
 function viewProject(pname) {

@@ -516,6 +516,23 @@ input#f-bmc-pass:autofill{
 .copilot-msg.user{background:var(--accent-blue-bg);color:var(--accent-blue);align-self:flex-end;border:1px solid color-mix(in srgb,var(--accent-blue) 30%, transparent)}
 .copilot-input{display:flex;gap:8px}
 
+/* ---- Rack Copilot 對話視窗 ---- */
+.rack-cop-panel{margin-top:16px;background:var(--bg-panel, rgba(18,20,28,.9));border:1px solid var(--border-soft);border-radius:14px;overflow:hidden;display:flex;flex-direction:column}
+.rack-cop-head{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--border-soft);background:color-mix(in srgb,var(--bg-panel-2, #12141c) 60%, transparent)}
+.cop-title{flex:1;font-weight:600}
+.rack-cop-clear{font-size:12px;padding:2px 8px;opacity:.7}
+.rack-cop-body{display:flex;flex-direction:column;gap:10px;padding:12px;height:320px;min-height:200px;overflow-y:auto}
+.rack-cop-input{display:flex;gap:8px;padding:10px 12px;border-top:1px solid var(--border-soft);align-items:flex-end}
+.rack-cop-input textarea{flex:1;resize:none;min-height:38px;max-height:120px;border:1px solid var(--border-soft);border-radius:10px;background:var(--input-bg, rgba(0,0,0,.25));color:var(--text);padding:9px 12px;font-family:inherit;font-size:13px;outline:none}
+.rack-cop-input button{height:38px;width:44px;border-radius:10px;font-size:16px}
+.cop-msg{display:flex;gap:8px;align-items:flex-start}
+.cop-msg.user{justify-content:flex-end}
+.cop-avatar{font-size:16px;line-height:1;padding-top:4px;flex-shrink:0}
+.cop-bubble{font-size:12.5px;line-height:1.6;padding:9px 12px;border-radius:12px;max-width:82%;word-break:break-word}
+.cop-bubble.ai{background:var(--bg-panel-2);color:var(--text-dim);border:1px solid var(--border-soft)}
+.cop-bubble.user{background:var(--accent-blue-bg);color:var(--accent-blue);border:1px solid color-mix(in srgb,var(--accent-blue) 30%, transparent)}
+.cop-bubble.typing{opacity:.65;font-style:italic}
+
 .empty-small{color:var(--text-faint);font-size:12.5px;padding:20px 0;text-align:center}
 
 /* ============ Rack Manager（L11 整櫃） ============ */
