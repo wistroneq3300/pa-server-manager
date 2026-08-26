@@ -1091,7 +1091,7 @@ async function deleteLink(a, b) {
 
 
 /* ---------- System manager頁：L10/L11 層級 + 專案分組 ---------- */
-const projectLevelFilter = { val: "all" };
+const projectLevelFilter = { val: "system" };
 function setProjectLevelFilter(v) {
   projectLevelFilter.val = v;
   document.querySelectorAll(".lvl-tab").forEach(b => b.classList.toggle("active", b.dataset.lvl === v));
@@ -1167,7 +1167,6 @@ function pageProjects() {
       <span class="t" style="font-size:18px">System Manager</span>
       <span class="hint">專案分組 · 拖曳卡片調整順序</span>
       <div class="lvl-tabs">
-        <button class="btn small lvl-tab ${projectLevelFilter.val==="all"?"active":""}" data-lvl="all" onclick="setProjectLevelFilter('all')">全部 ${machines.length}</button>
         <button class="btn small lvl-tab ${projectLevelFilter.val==="system"?"active":""}" data-lvl="system" onclick="setProjectLevelFilter('system')">🖘 L10 系統 ${nSys}</button>
         <button class="btn small lvl-tab ${projectLevelFilter.val==="rack"?"active":""}" data-lvl="rack" onclick="setProjectLevelFilter('rack')">🗄 L11 整櫃 ${nRack}</button>
       </div>
@@ -1202,8 +1201,8 @@ function machineRowSortable(m, pi, mi, total) {
     <tr>
       <td class="mono mach-drag" draggable="true" title="按左鍵拖曳以調整排序"><a href="#" class="mach-link mach-linkbox" onclick="event.preventDefault();openMachine('${esc(m.name)}')"><b>${esc(m.name)}</b></a>${typeTag}</td>
       <td>${lvlBadge}</td>
-      <td class="mono">${esc(m.os_ip)}${m.os_user ? `<span style="color:var(--text-faint)"> (${esc(m.os_user)})</span>` : ""}</td>
-      <td class="mono">${esc(m.bmc_ip || "—")}</td>
+      <td class="mono os-ip-cell">${esc(m.os_ip)}${m.os_user ? `<span class="ip-user">@${esc(m.os_user)}</span>` : ""}</td>
+      <td class="mono bmc-ip-cell">${esc(m.bmc_ip || "—")}</td>
       <td>${statusBadge(m.os_alive)}</td>
       <td>${m.bmc_ip ? statusBadge(m.bmc_alive) : `<span style="color:var(--text-faint)">—</span>`}</td>
       <td>
