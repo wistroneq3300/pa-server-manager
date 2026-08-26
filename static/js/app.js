@@ -1140,6 +1140,7 @@ function renderProjectsList() {
           <button class="btn small proj-collapse-btn" onclick="event.stopPropagation();toggleProject('${esc(p.name)}')" title="${collapsed ? "展開此專案" : "收合此專案（隱藏機台清單）"}">${collapsed ? "▼ 展開" : "▲ 收合"}</button>
         </div>
         ${!collapsed && members.length ? `<div class="proj-table-scroll"><table class="t">
+            <colgroup><col class="cw-name"><col class="cw-lvl"><col class="cw-ip"><col class="cw-ip"><col class="cw-st"><col class="cw-st"><col class="cw-move"><col class="cw-act"></colgroup>
             <thead><tr><th>系統名稱</th><th>層級</th><th>OS IP</th><th>BMC IP</th><th>OS 狀態</th><th>BMC 狀態</th><th>移動</th><th>操作</th></tr></thead>
             <tbody>${rows.join("")}</tbody></table></div>`
           : `${!collapsed ? `<div style="padding:10px 14px;color:var(--text-faint)">此專案在此層級內沒有機台</div>` : ""}`}
@@ -1152,7 +1153,7 @@ function renderProjectsList() {
           <div class="proj-card-grip" style="opacity:.35">⠿</div>
           <div class="proj-card-info"><span class="proj-card-name">未分類</span><span class="proj-card-count">${un.length} 台</span></div>
         </div>
-        <div class="proj-table-scroll"><table class="t"><thead><tr><th>系統名稱</th><th>層級</th><th>OS IP</th><th>BMC IP</th><th>移動</th><th>操作</th></tr></thead>
+        <div class="proj-table-scroll"><table class="t"><colgroup><col class="cw-name"><col class="cw-lvl"><col class="cw-ip"><col class="cw-ip"><col class="cw-st"><col class="cw-st"><col class="cw-move"><col class="cw-act"></colgroup><thead><tr><th>系統名稱</th><th>層級</th><th>OS IP</th><th>BMC IP</th><th>OS 狀態</th><th>BMC 狀態</th><th>移動</th><th>操作</th></tr></thead>
         <tbody>${un.map(m => machineRowUnassigned(m)).join("")}</tbody></table></div>
       </div>`;
   }
@@ -1239,8 +1240,10 @@ function machineRowUnassigned(m) {
     <tr>
       <td class="mono mach-drag" draggable="true" title="按左鍵拖曳以調整排序"><a href="#" class="mach-link mach-linkbox" onclick="event.preventDefault();openMachine('${esc(m.name)}')"><b>${esc(m.name)}</b></a>${typeTag}</td>
       <td>${lvlBadge}</td>
-      <td class="mono">${esc(m.os_ip)}</td>
-      <td class="mono">${esc(m.bmc_ip || "—")}</td>
+      <td class="mono os-ip-cell">${esc(m.os_ip)}</td>
+      <td class="mono bmc-ip-cell">${esc(m.bmc_ip || "—")}</td>
+      <td>${statusBadge(m.os_alive)}</td>
+      <td>${m.bmc_ip ? statusBadge(m.bmc_alive) : `<span style="color:var(--text-faint)">—</span>`}</td>
       <td>
         <select class="input move-sel" onchange="moveMachineTo('${esc(m.name)}', this.value)">
           <option value="">移至…</option>

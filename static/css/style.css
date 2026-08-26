@@ -210,26 +210,27 @@ body {
 
 table.t{width:100%;border-collapse:collapse}
 .proj-table-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;width:100%}
-.proj-table-scroll table.t{min-width:760px;width:100%}
+.proj-table-scroll table.t{min-width:1110px;width:100%;table-layout:fixed}
 .proj-table-scroll table.t th,.proj-table-scroll table.t td{white-space:nowrap}
+/* 系統管理表格：固定各欄寬度，讓每個專案卡片(含 L10/L11/未分類)的欄位 X 位置完全一致 */
+.proj-table-scroll table.t col.cw-name{width:250px}
+.proj-table-scroll table.t col.cw-lvl{width:88px}
+.proj-table-scroll table.t col.cw-ip{width:126px}
+.proj-table-scroll table.t col.cw-st{width:82px}
+.proj-table-scroll table.t col.cw-move{width:136px}
+.proj-table-scroll table.t col.cw-act{width:220px}
+.proj-card .t td.os-ip-cell,.proj-card .t td.bmc-ip-cell{white-space:nowrap;min-width:110px}
 .t th{text-align:left;font-size:11px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.4px;border-bottom:1px solid var(--border);padding:8px;white-space:nowrap}
 .t td{border-bottom:1px solid var(--border-soft);padding:8px;font-size:12px}
-/* 系統管理專案表格：放進 .proj-table-scroll（overflow-x:auto + min-width），
-   改用 auto 表格布局 → 每欄依內容自適應，操作欄按鈕保持自然寬度，不再被 table-layout:fixed
-   均分壓扁而向右溢出。卡片太窄時整個表格可水平捲動，不會把「刪除」擠到畫面外。 */
-.proj-card .t{min-width:760px}
-.proj-card .t th:nth-child(1),.proj-card .t td:nth-child(1){width:60px;text-align:left}
-/* 各專案表格用一致的固定欄寬 → 不同專案卡片的「名稱/層級/IP」欄位水平對齊一致 */
-.proj-card .t th:nth-child(2),.proj-card .t td:nth-child(2){width:210px;max-width:210px;text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.proj-card .t th:nth-child(3),.proj-card .t td:nth-child(3){width:100px;white-space:nowrap}
-.proj-card .t th:nth-child(4),.proj-card .t td:nth-child(4){width:170px;white-space:nowrap}
-.proj-card .t th:nth-child(5),.proj-card .t td:nth-child(5){width:150px;white-space:nowrap}
+/* 系統管理專案表格（L10/L11/未分類共用同 8 欄 + colgroup 固定欄寬，
+   確保每個專案卡片的欄位 X 位置完全一致；卡片太窄時整個表格可水平捲動）。 */
+.proj-card .t{width:100%}
+/* 系統名稱欄：內容可折行截斷，避免撐寬 */
+.proj-card .t th:nth-child(1),.proj-card .t td:nth-child(1){text-align:left;overflow:hidden;text-overflow:ellipsis}
+/* OS IP / BMC IP（第3/4欄）：fixed 欄寬下超長內容截斷，避免破版 */
+.proj-card .t th:nth-child(3),.proj-card .t td:nth-child(3),
+.proj-card .t th:nth-child(4),.proj-card .t td:nth-child(4){overflow:hidden;text-overflow:ellipsis}
 .proj-card .t td:nth-child(2) .mono{display:inline-block;max-width:100%;overflow:hidden;text-overflow:ellipsis;vertical-align:bottom}
-/* 未分類表格（少兩欄）也對齊層級欄起點：第2欄為系統名稱、第3欄為層級 */
-.proj-card .t th:nth-child(8),.proj-card .t td:nth-child(8){white-space:nowrap}
-.proj-card .t th:nth-child(9),.proj-card .t td:nth-child(9){white-space:nowrap}
-/* OS IP / BMC IP 欄：單行純 IP、等寬字型，各列垂直一致，避免帳號長度差異造成參差 */
-.proj-card .t td.os-ip-cell,.proj-card .t td.bmc-ip-cell{white-space:nowrap;min-width:110px}
 .t tr:last-child td{border-bottom:none}
 .t tbody tr:hover{background:var(--bg-hover)}
 .mono{font-family:Consolas,Menlo,monospace;font-size:11.5px}
