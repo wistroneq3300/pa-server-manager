@@ -665,12 +665,32 @@ def _refresh_status(force=False):
     _STATUS_TIME = now
 
 
+_STATUS_LOCK = threading.Lock()
+
+def _kick_status_scan(force=False):
+    """若快取過期，在背景 thread 刷新狀態，立即回傳舊快取（避免阻塞 API 回應）。
+    force=True 時同步執行。"""
+    if force:
+        _refresh_status(force=True)
+        return
+    now = time.time()
+    if _STATUS_TIME and (now - _STATUS_TIME) < _STATUS_TTL:
+        return
+    if not _STATUS_LOCK.acquire(blocking=False):
+        return  # 已有一個掃描在背景跑
+    def _run():
+        try:
+            _refresh_status()
+        except Exception as e:
+            print("背景狀態掃描失敗：", e)
+        finally:
+            _STATUS_LOCK.release()
+    threading.Thread(target=_run, daemon=True).start()
+
+
 @app.get("/api/machines")
 def list_machines(force_scan: bool = False):
-    if force_scan:
-        _refresh_status(force=True)
-    else:
-        _refresh_status()
+    _kick_status_scan(force=force_scan)
     safe = []
     for name in sorted(machines, key=lambda k: machines[k].get("order", 0)):
         m = machines[name]
@@ -1247,6 +1267,20 @@ def list_projects():
         count = sum(1 for m in machines.values() if m.get("project") == p["name"])
         result.append({**p, "machine_count": count, "index": list(projects.keys()).index(name)})
     return {"projects": result}
+
+
+@app.post("/api/machines/reorder")
+def reorder_machines(body: dict):
+    """批次設定機台順序：{names: [hostname...]} 依序寫入 order，只存檔一次。
+    用於 System Manager 拖曳換位，避免逐台 PATCH 多次寫檔。"""
+    names = body.get("names", [])
+    if not names:
+        raise HTTPException(400, "names 不能為空")
+    for i, n in enumerate(names):
+        if n in machines:
+            machines[n]["order"] = i
+    _save_data()
+    return {"ok": True}
 
 
 @app.post("/api/projects/reorder")

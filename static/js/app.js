@@ -45,6 +45,7 @@ async function loadMachines(assignMissingU) {
       const ms = byProj[p].sort((a,b)=>(a.order||0)-(b.order||0));
       let u = RACK_U;
       for (const m of ms) {
+        if (m.rack_u === 0) continue; // 已「✕ 從機櫃移除」：只是維持 L11、取消 U 位置，不要自動補 U（避免重整後又出現）
         if (typeof m.rack_u !== "number" || m.rack_u < 1) {
           m.rack_u = u;
           // 同步寫回後端（非等待，失敗也不影響顯示）
@@ -75,14 +76,14 @@ const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<
 function projectMembers(pname) {
   return machines.filter(m => m.project === pname).sort((a, b) => (a.order||0) - (b.order||0));
 }
-function unassignedMachines() { return machines.filter(m => !m.project); }
+function unassignedMachines() { return machines.filter(m => !m.project).sort((a,b)=>(a.order||0)-(b.order||0)); }
 function pageDashboard() {
   const total = machines.length;
   const online = machines.filter(m => m.os_alive === true).length;
   const offline = machines.filter(m => m.os_alive === false).length;
   const unknown = total - online - offline;
-  const racks = machines.filter(m => m.level === "rack").length;
-  const systems = machines.filter(m => m.level !== "rack").length;
+  const racks = machines.filter(m => isRackItem(m)).length;
+  const systems = machines.filter(m => !isRackItem(m)).length;
   const ring = total ? `
     <svg viewBox="0 0 120 120" class="donut">
       <circle class="donut-track" cx="60" cy="60" r="48"/>
@@ -358,8 +359,25 @@ const MGX_TYPES = {
   cdu:         { icon: "💧", label: "CDU 冷卻分配單元", cls: "mgx-cdu" },
   storage:     { icon: "💾", label: "Storage 儲存",     cls: "mgx-storage" },
   network:     { icon: "🌐", label: "Network 網路功能", cls: "mgx-network" },
-  blanking:    { icon: "⬛", label: "Blanking Panel 擋板", cls: "mgx-blanking", passive: true },
+  blanking:    { icon: "⬛", label: "Blank Panel", cls: "mgx-blanking", passive: true },
 };
+
+function mgxTypeLabel(m) {
+  const t = mgxTypeOf(m);
+  const info = MGX_TYPES[t] || MGX_TYPES.server;
+  return info.label;
+}
+function mgxTypeShort(m) {
+  const t = mgxTypeOf(m);
+  return MGX_TYPES[t] ? t : "server";
+}
+function isRackItem(m) { return m.level === "rack" || !!m.passive; }
+// 判斷機台是否屬於某個層級分頁（L10/L11），與 isRackItem 顯示一致，避免 L10 分頁混入顯示為 L11 的 passive 機台
+function inLevelFilter(m, f) {
+  if (f === "all") return true;
+  return f === "rack" ? isRackItem(m) : !isRackItem(m);
+}
+
 function mgxTypeOf(m) {
   if (!m) return "server"; // 防呆：若資料缺項（undefined/null）不崩潰，回退為 server
   if (m.mgx_type && MGX_TYPES[m.mgx_type]) return m.mgx_type;
@@ -550,7 +568,7 @@ function rackAddRefreshU(uSel, sizeSel) {
 }
 function rackAddDialog(presetU) {
   const proj = rackView.project;
-  const inRack = new Set(machines.filter(x => x.project === proj && x.level === "rack").map(x => x.name));
+  const inRack = new Set(machines.filter(x => x.project === proj && x.level === "rack" && (x.rack_u||0) > 0).map(x => x.name));
   // 需求：加入機櫃只能選「L11（rack）」系統。L10 若要變 L11，請先在 System Manager 升為 L11。
   const candidates = machines.filter(x => x.level === "rack" && !inRack.has(x.name));
   if (!candidates.length) { alert("沒有可加入的 L11（Rack）機台（所有 L11 都已在此機櫃；L10 請先在 System Manager 升為 L11）。"); return; }
@@ -614,7 +632,8 @@ function showDialog(title, bodyHtml, actions) {
 function closeDialog() { const b = $("rm-dialog"); if (b) b.style.display = "none"; rackMoveTargetType = null; }
 
 function pageRack() {
-  const racksAll = machines.filter(m => m.level === "rack");
+  // 已從機櫃移除(rack_u<=0)的 L11 只留在 System Manager，不繪製在機櫃上
+  const racksAll = machines.filter(m => m.level === "rack" && (m.rack_u||0) > 0);
   const projSet = [...new Set(racksAll.map(m => m.project).filter(Boolean))];
   if (!projSet.includes(rackView.project)) rackView.project = projSet[0] || "";
   const proj = rackView.project;
@@ -748,7 +767,7 @@ function rackBlockRow(m, u, size, pinged) {
   const click = `openMachine('${esc(m.name)}')`;
   const ctrlBtn = `<button class="btn small" title="開機/關機/reboot/AUX" onclick="machControlDialog('${esc(m.name)}')">⚙</button>`;
   const termBtn = `<button class="btn small" title="終端機" onclick="openTermDialog('${esc(m.name)}')">▶</button>`;
-  const delBtn = `<button class="btn small btn-del" title="從機櫃移除（不刪除 System Manager，怕放錯可拿掉）" onclick="rackUnmount('${esc(m.name)}')">✕</button>`;
+  const delBtn = `<button class="btn small btn-del" title="從機櫃移除" onclick="rackUnmount('${esc(m.name)}')">✕</button>`;
   const nm = `${info.icon} ${esc(m.name)}`;
   const uStack = size > 1
     ? Array.from({ length: size }, (_, i) => `<span class="mono">U${u - i}</span>`).join("")
@@ -1095,15 +1114,15 @@ function collapseAllProjects(collapse) {
 }
 function renderProjectsList() {
   const f = projectLevelFilter.val;
-  const un = unassignedMachines().filter(m => f === "all" || m.level === f);
+  const un = unassignedMachines().filter(m => inLevelFilter(m, f));
   let html = `<div id="proj-sort-list" class="proj-sort-list">`;
-  const visibleProjects = projects.filter(p => projectMembers(p.name).some(m => f === "all" || m.level === f));
+  const visibleProjects = projects.filter(p => projectMembers(p.name).some(m => inLevelFilter(m, f)));
   if (!visibleProjects.length && !un.length) {
     html += `<div class="card"><div class="empty">目前這個層級還沒有機台，先新增一台。</div></div>`;
     return html + `</div>`;
   }
   visibleProjects.forEach((p, pi) => {
-    const members = projectMembers(p.name).filter(m => f === "all" || m.level === f);
+    const members = projectMembers(p.name).filter(m => inLevelFilter(m, f));
     const rows = members.map((m, mi) => machineRowSortable(m, pi, mi, members.length));
     const rackN = members.filter(m=>m.level==="rack").length;
     const sysN = members.length - rackN;
@@ -1121,7 +1140,7 @@ function renderProjectsList() {
           <button class="btn small proj-collapse-btn" onclick="event.stopPropagation();toggleProject('${esc(p.name)}')" title="${collapsed ? "展開此專案" : "收合此專案（隱藏機台清單）"}">${collapsed ? "▼ 展開" : "▲ 收合"}</button>
         </div>
         ${!collapsed && members.length ? `<div class="proj-table-scroll"><table class="t">
-            <thead><tr><th></th><th>系統名稱</th><th>層級</th><th>OS IP</th><th>BMC IP</th><th>OS 狀態</th><th>BMC 狀態</th><th>移動</th><th>操作</th></tr></thead>
+            <thead><tr><th>系統名稱</th><th>層級</th><th>OS IP</th><th>BMC IP</th><th>OS 狀態</th><th>BMC 狀態</th><th>移動</th><th>操作</th></tr></thead>
             <tbody>${rows.join("")}</tbody></table></div>`
           : `${!collapsed ? `<div style="padding:10px 14px;color:var(--text-faint)">此專案在此層級內沒有機台</div>` : ""}`}
       </div>`;
@@ -1133,7 +1152,7 @@ function renderProjectsList() {
           <div class="proj-card-grip" style="opacity:.35">⠿</div>
           <div class="proj-card-info"><span class="proj-card-name">未分類</span><span class="proj-card-count">${un.length} 台</span></div>
         </div>
-        <div class="proj-table-scroll"><table class="t"><thead><tr><th></th><th>系統名稱</th><th>層級</th><th>OS IP</th><th>BMC IP</th><th>移動</th><th>操作</th></tr></thead>
+        <div class="proj-table-scroll"><table class="t"><thead><tr><th>系統名稱</th><th>層級</th><th>OS IP</th><th>BMC IP</th><th>移動</th><th>操作</th></tr></thead>
         <tbody>${un.map(m => machineRowUnassigned(m)).join("")}</tbody></table></div>
       </div>`;
   }
@@ -1141,8 +1160,8 @@ function renderProjectsList() {
   return html;
 }
 function pageProjects() {
-  const nSys = machines.filter(m => m.level !== "rack").length;
-  const nRack = machines.filter(m => m.level === "rack").length;
+  const nSys = machines.filter(m => !isRackItem(m)).length;
+  const nRack = machines.filter(m => isRackItem(m)).length;
   return `
     <div class="section-h flex-wrap">
       <span class="t" style="font-size:18px">System Manager</span>
@@ -1165,16 +1184,23 @@ function pageProjects() {
 function machineRowSortable(m, pi, mi, total) {
   const targetOpts = projects.filter(p => p.name !== m.project).map(p =>
     `<option value="${esc(p.name)}">${esc(p.name)}</option>`).join("");
-  const lvlBadge = m.level === "rack"
+  const lvlBadge = isRackItem(m)
     ? `<span class="badge badge-rack">L11 · Rack</span>`
     : `<span class="badge badge-system">L10 · Sys</span>`;
+  const typeTag = mgxTypeOf(m) === "server"
+    ? ""
+    : `<span class="badge" style="font-size:9px;padding:1px 6px;margin-left:6px">${MGX_TYPES[mgxTypeOf(m)].icon} ${esc(mgxTypeLabel(m))}</span>`;
+  const srv = mgxTypeOf(m) === "server";
+  const lvlBtn = srv
+    ? (m.level !== "rack"
+        ? `<button class="btn small" onclick="rackPromote('${esc(m.name)}','${esc(m.project||"")}')" title="把這台 L10 系統升為 L11，並加入該專案的 Rack。">🗄 升 L11</button>`
+        : `<button class="btn small" onclick="rackDemote('${esc(m.name)}')" title="把這台 L11 降回 L10。">📉 降 L10</button>`)
+    : "";
+  // 除擋板(blanking)外，switch/pdu/cdu/powershelf/storage/network/server 都有 Terminal
+  const canTerm = mgxTypeOf(m) !== "blanking";
   return `
     <tr>
-      <td style="white-space:nowrap">
-        <button class="btn small" onclick="moveMachine('${esc(m.name)}',-1)" ${mi===0?"disabled":""} title="嫀線">▲</button>
-        <button class="btn small" onclick="moveMachine('${esc(m.name)}',1)" ${mi===total-1?"disabled":""} title="下移">▼</button>
-      </td>
-      <td class="mono"><a href="#" class="mach-link" onclick="event.preventDefault();openMachine('${esc(m.name)}')"><b>${esc(m.name)}</b></a></td>
+      <td class="mono mach-drag" draggable="true" title="按左鍵拖曳以調整排序"><a href="#" class="mach-link mach-linkbox" onclick="event.preventDefault();openMachine('${esc(m.name)}')"><b>${esc(m.name)}</b></a>${typeTag}</td>
       <td>${lvlBadge}</td>
       <td class="mono">${esc(m.os_ip)}${m.os_user ? `<span style="color:var(--text-faint)"> (${esc(m.os_user)})</span>` : ""}</td>
       <td class="mono">${esc(m.bmc_ip || "—")}</td>
@@ -1188,23 +1214,31 @@ function machineRowSortable(m, pi, mi, total) {
         </select>
       </td>
       <td style="white-space:nowrap">
-        ${m.level !== "rack" && !m.passive
-          ? `<button class="btn small" onclick="rackPromote('${esc(m.name)}','${esc(m.project||"")}')" title="把這台 L10 系統升為 L11，並加入該專案的 Rack。升完後就能在 Rack Manager 的「加入機櫃」挑到它。">🗄 升 L11</button>`
-          : `${m.level === "rack" ? `<button class="btn small" onclick="rackDemote('${esc(m.name)}')" title="把這台 L11 降回 L10。">📉 降 L10</button>` : ``}`}
-        <button class="btn small" onclick="openTerm('${esc(m.name)}')">▶ Terminal</button>
+        ${lvlBtn}
+        ${canTerm ? `<button class="btn small" onclick="openTerm('${esc(m.name)}')">▶ Terminal</button>` : ""}
         <button class="btn small" onclick="deleteMachine('${esc(m.name)}')">刪除</button>
       </td>
     </tr>`;
 }
 function machineRowUnassigned(m) {
   const opts = projects.map(p => `<option value="${esc(p.name)}">${esc(p.name)}</option>`).join("");
-  const lvlBadge = m.level === "rack"
+  const lvlBadge = isRackItem(m)
     ? `<span class="badge badge-rack">L11 · Rack</span>`
     : `<span class="badge badge-system">L10 · Sys</span>`;
+  const typeTag = mgxTypeOf(m) === "server"
+    ? ""
+    : `<span class="badge" style="font-size:9px;padding:1px 6px;margin-left:6px">${MGX_TYPES[mgxTypeOf(m)].icon} ${esc(mgxTypeLabel(m))}</span>`;
+  const srv = mgxTypeOf(m) === "server";
+  const lvlBtn = srv
+    ? (m.level !== "rack"
+        ? `<button class="btn small" onclick="rackPromote('${esc(m.name)}','')" title="把這台 L10 系統升為 L11（加入未分類的 Rack）。">🗄 升 L11</button>`
+        : `<button class="btn small" onclick="rackDemote('${esc(m.name)}')" title="把這台 L11 降回 L10。">📉 降 L10</button>`)
+    : "";
+  // 除擋板(blanking)外，switch/pdu/cdu/powershelf/storage/network/server 都有 Terminal
+  const canTerm = mgxTypeOf(m) !== "blanking";
   return `
     <tr>
-      <td></td>
-      <td class="mono"><a href="#" class="mach-link" onclick="event.preventDefault();openMachine('${esc(m.name)}')"><b>${esc(m.name)}</b></a></td>
+      <td class="mono mach-drag" draggable="true" title="按左鍵拖曳以調整排序"><a href="#" class="mach-link mach-linkbox" onclick="event.preventDefault();openMachine('${esc(m.name)}')"><b>${esc(m.name)}</b></a>${typeTag}</td>
       <td>${lvlBadge}</td>
       <td class="mono">${esc(m.os_ip)}</td>
       <td class="mono">${esc(m.bmc_ip || "—")}</td>
@@ -1215,10 +1249,8 @@ function machineRowUnassigned(m) {
         </select>
       </td>
       <td style="white-space:nowrap">
-        ${m.level !== "rack" && !m.passive
-          ? `<button class="btn small" onclick="rackPromote('${esc(m.name)}','')" title="把這台 L10 系統升為 L11（加入未分類的 Rack）。">🗄 升 L11</button>`
-          : `${m.level === "rack" ? `<button class="btn small" onclick="rackDemote('${esc(m.name)}')" title="把這台 L11 降回 L10。">📉 降 L10</button>` : ``}`}
-        <button class="btn small" onclick="openTerm('${esc(m.name)}')">▶ Terminal</button>
+        ${lvlBtn}
+        ${canTerm ? `<button class="btn small" onclick="openTerm('${esc(m.name)}')">▶ Terminal</button>` : ""}
         <button class="btn small" onclick="deleteMachine('${esc(m.name)}')">刪除</button>
       </td>
     </tr>`;
@@ -1267,6 +1299,59 @@ async function reorderProjects(a, b) {
   await Promise.all([loadProjects(), loadMachines()]);
   setView("projects");
 }
+
+/* ---------- 系統名稱拖曳排序（跟專案卡片一樣，按住左鍵拖曳） ---------- */
+let _machDrag = { src: null, proj: null };
+function rowNameOf(tr) { const a = tr && tr.querySelector(".mach-link"); return a ? a.textContent.trim() : null; }
+function machScopeOf(tr) { return tr && tr.closest(".proj-card") ? (tr.closest(".proj-card").dataset.pname || null) : null; }
+function reorderMachineRow(srcName, proj, targetName, after) {
+  const list = (proj ? projectMembers(proj) : unassignedMachines()).map(x => x.name);
+  const si = list.indexOf(srcName), ti = list.indexOf(targetName);
+  if (si < 0 || ti < 0 || si === ti) return;
+  list.splice(si, 1);
+  const ti2 = list.indexOf(targetName);
+  list.splice(after ? ti2 + 1 : ti2, 0, srcName);
+  // 批次單一請求寫整個順序（避免逐台 PATCH），後端只存檔一次 → 快速
+  return api("/api/machines/reorder", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ names: list }) })
+    .then(async () => { await Promise.all([loadMachines(), loadProjects()]); setView("projects"); })
+    .catch(e => alert("調整排序失敗：" + e.message));
+}
+document.addEventListener("dragstart", (e) => {
+  const tr = e.target.closest("tr");
+  if (!tr || !tr.querySelector(".mach-link")) return;
+  if (e.target.closest("button, select, input, a")) return; // 不攔截名稱以外的控件（點連結開機台不拖曳）
+  _machDrag = { src: rowNameOf(tr), proj: machScopeOf(tr) };
+  tr.classList.add("mach-drag-src");
+  e.dataTransfer.effectAllowed = "move";
+  try { e.dataTransfer.setData("text/plain", _machDrag.src); } catch (_) {}
+});
+document.addEventListener("dragend", (e) => {
+  document.querySelectorAll(".mach-drag-src, tr.mach-over").forEach(el => el.classList.remove("mach-drag-src", "mach-over"));
+  _machDrag = { src: null, proj: null };
+});
+document.addEventListener("dragover", (e) => {
+  const tr = e.target.closest("tr");
+  if (!tr || !tr.querySelector(".mach-link") || !_machDrag.src) return;
+  e.preventDefault();
+  e.dataTransfer.dropEffect = "move";
+  document.querySelectorAll("tr.mach-over").forEach(el => el.classList.remove("mach-over"));
+  tr.classList.add("mach-over");
+});
+document.addEventListener("drop", (e) => {
+  const tr = e.target.closest("tr");
+  document.querySelectorAll("tr.mach-over").forEach(el => el.classList.remove("mach-over"));
+  if (!tr || !_machDrag.src) return;
+  e.preventDefault();
+  const targetName = rowNameOf(tr);
+  const srcProj = _machDrag.proj, tgtProj = machScopeOf(tr);
+  if (!targetName || !srcProj || srcProj !== tgtProj) { return; } // 只在同一專案(或同為未分類)內排序
+  const r = tr.getBoundingClientRect();
+  const after = (e.clientY - r.top) > (r.height / 2);
+  const src = _machDrag.src;
+  _machDrag = { src: null, proj: null };
+  tr.classList.remove("mach-over");
+  reorderMachineRow(src, srcProj, targetName, after);
+});
 async function moveMachine(name, dir) {
   const m = machines.find(x => x.name === name);
   if (!m) return;
@@ -1307,18 +1392,22 @@ async function rackPromote(name, project) {
   let u = RACK_U;
   while (u >= 1 && used.has(u)) u--;
   if (u < 1) u = RACK_U;
-  await api("/api/machines/" + encodeURIComponent(name), { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ level: "rack", mgx_type: "server", rack_u: u, rack_size: 1 }) });
-  await Promise.all([loadMachines(), loadProjects()]);
-  setView("projects");
-  alert("✅ 「" + name + "」已升為 L11（Rack）。\n已放到 " + (proj ? "專案「" + proj + "」" : "未分類") + "的 U" + u + "。\n可在 Rack Manager 選此專案，或「加入機櫃」挑到它。");
+  try {
+    await api("/api/machines/" + encodeURIComponent(name), { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ level: "rack", mgx_type: "server", rack_u: u, rack_size: 1 }) });
+    await Promise.all([loadMachines(), loadProjects()]);
+    setView("projects");
+    alert("✅ 「" + name + "」已升為 L11（Rack）。\n已放到 " + (proj ? "專案「" + proj + "」" : "未分類") + "的 U" + u + "。\n可在 Rack Manager 選此專案，或「加入機櫃」挑到它。");
+  } catch (e) { alert("❌ 升 L11 失敗：" + (e && e.message || e)); }
 }
 
 // 把 L11 降回 L10（單機）：清除機櫃位置欄位
 async function rackDemote(name) {
   if (!confirm("確定要把「" + name + "」降回 L10（退出 Rack Manager）嗎？")) return;
-  await api("/api/machines/" + encodeURIComponent(name), { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ level: "system", rack_size: 1 }) });
-  await Promise.all([loadMachines(), loadProjects()]);
-  setView("projects");
+  try {
+    await api("/api/machines/" + encodeURIComponent(name), { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ level: "system", rack_size: 1 }) });
+    await Promise.all([loadMachines(), loadProjects()]);
+    setView("projects");
+  } catch (e) { alert("❌ 降 L10 失敗：" + (e && e.message || e)); }
 }
 
 // 機器詳情頁去抖：多個非同步載入（感測器 poll / detail / refresh）完成時各自要求重繪，
@@ -2209,16 +2298,16 @@ function deleteMachine(name) {
 }
 /* ---------- 機櫃移除（只拿下機櫃，保留 System Manager，即時顯示） ---------- */
 async function rackUnmount(name) {
-  if (!confirm("「" + name + "」要從機櫃拿掉嗎？\n（System Manager 的系統不會被刪除，只是不再顯示在機櫃上）")) return;
+  if (!confirm("「" + name + "」要從機櫃拿掉嗎？\n（System Manager 的系統不會被刪除，只是取消機櫃 U 位置、仍維持 L11）")) return;
   try {
     await api("/api/machines/" + encodeURIComponent(name), {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ level: "system", rack_u: 0 })
+      body: JSON.stringify({ rack_u: 0, rack_size: 1 })
     });
     // 即時顯示：本地同步 + 只重繪目前視圖（留在機櫃頁，不跳走、不整頁重整）
     const m = machines.find(x => x.name === name);
-    if (m) { m.level = "system"; m.rack_u = 0; }
+    if (m) { m.rack_u = 0; m.rack_size = 1; }
     setView("rack");
   } catch (e) { alert("移除失敗：" + e.message); }
 }
@@ -2248,8 +2337,8 @@ const LEVELS = { system: "L10 · System", rack: "L11 · Rack" };
 function renderProjectList() {
   $("project-list-body").innerHTML = projects.map(p => {
     const canDelete = p.machine_count === 0;
-    const racks = machines.filter(m => m.project === p.name && m.level === "rack").length;
-    const systems = machines.filter(m => m.project === p.name && m.level !== "rack").length;
+    const racks = machines.filter(m => m.project === p.name && isRackItem(m)).length;
+    const systems = machines.filter(m => m.project === p.name && !isRackItem(m)).length;
     return `<tr><td><b>${esc(p.name)}</b></td><td>${esc(p.desc || "")}</td><td>${p.machine_count}（R${racks}/S${systems}）</td>
       <td style="white-space:nowrap">
         <button class="btn small" onclick="editProjectStart('${esc(p.name)}')">翮改</button>
