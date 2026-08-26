@@ -1,6 +1,7 @@
 # 執行期資料（不進版本控制）
 telemetry.db
 data.json
+prod-data.json
 server.log
 server.pid
 backup/
