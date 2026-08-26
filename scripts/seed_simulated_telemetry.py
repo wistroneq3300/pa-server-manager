@@ -5,7 +5,10 @@
 - switch（Switch-*）        → port_rx/port_tx/temp/fan_rpm
 - powershelf（power-shelf-*）→ power_w/voltage/current_a/temp
 - cdu（CDU-*）              → flow_lpm/inlet_temp/outlet_temp/pressure
-- server L10（有 os_ip）      → cpu_used/mem_used_pct（寫 rack_metrics kind=server）
+- server（L11/project rack） → cpu_used/mem_used_pct/gpu_power（寫 rack_metrics kind=server）
+
+資料範圍：預設從 NOW-4h 一路到 NOW+FUTURE_DAYS（可設環境變數 FUTURE_DAYS 調整，預設 5 天後），
+方便直接把時間軸調到未來做 debug。
 
 安全：INSERT OR REPLACE 同 (ts,machine,kind,metric) 資料，可重複執行。
 用法：PA_DATA_DIR=/srv/pa-manager-prod/data python3 scripts/seed_simulated_telemetry.py
@@ -20,18 +23,22 @@ DATA_DIR = os.environ.get("PA_DATA_DIR") or os.path.join(os.path.dirname(os.path
 DB = os.path.join(DATA_DIR, "telemetry.db")
 DATA_FILE = os.path.join(DATA_DIR, "data.json")
 
-HOURS = 4          # 往後產 4 小時歷史
-STEP = 60          # 每 60 秒一筆
+STEP = 60               # 每 60 秒一筆
 NOW = time.time()
+PAST_HOURS = float(os.environ.get("PAST_HOURS", "4"))          # 從現在往前產幾小時
+FUTURE_DAYS = float(os.environ.get("FUTURE_DAYS", "5"))         # 往未來產到 5 天後
+START_TS = NOW - PAST_HOURS * 3600
+END_TS = NOW + FUTURE_DAYS * 86400
 
 random.seed(20260826)
 
 
 def smooth_walk(base, amp, low=None, high=None, drift=1.0):
-    """以隨機遊走平滑波動產生時間序列。"""
+    """以隨機遊走平滑波動產生一段時間序列（從 START_TS 到 END_TS）。"""
+    n = int(round((END_TS - START_TS) // STEP))
     v = base
     out = []
-    for _ in range(HOURS * 3600 // STEP):
+    for _ in range(n):
         v += random.uniform(-amp, amp) * drift
         v += (base - v) * 0.02          # 緩慢回到基準
         if low is not None and v < low:
@@ -102,7 +109,7 @@ def main():
                 continue
             for metric, seq in metrics.items():
                 for i, val in enumerate(seq):
-                    all_rows.append((NOW - (HOURS * 3600 - i * STEP), n, kind, metric, val))
+                    all_rows.append((START_TS + i * STEP, n, kind, metric, val))
             print(f"[{kind}] {n}: { ', '.join(f'{k}={len(v)}pts' for k,v in metrics.items()) }")
 
     # Rack 專案內的 server（納入 rack telemetry 的 kind=server）→ 寫入 rack_metrics kind=server
@@ -122,7 +129,7 @@ def main():
             continue
         for metric, seq in metrics.items():
             for i, val in enumerate(seq):
-                all_rows.append((NOW - (HOURS * 3600 - i * STEP), n, "server", metric, val))
+                all_rows.append((START_TS + i * STEP, n, "server", metric, val))
         print(f"[server/RACK] {n}: " + ", ".join(f"{k}={len(v)}pts" for k, v in metrics.items()))
 
     if not all_rows:
@@ -133,7 +140,7 @@ def main():
         "INSERT OR REPLACE INTO rack_metrics(ts,machine,kind,metric,value) VALUES(?,?,?,?,?)",
         all_rows)
     conn.commit()
-    print(f"\n完成：共寫入 {len(all_rows):,} 筆模擬 telemetry（{HOURS} 小時，每 {STEP}s）。")
+    print(f"\n完成：共寫入 {len(all_rows):,} 筆模擬 telemetry（從 START_TS+{START_TS:.0f} 到 END_TS+{END_TS:.0f}，每 {STEP}s）。")
     conn.close()
 
 

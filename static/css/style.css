@@ -261,6 +261,8 @@ table.t{width:100%;border-collapse:collapse}
 .btn.btn-good{color:var(--green);border-color:transparent;background:color-mix(in srgb,var(--green) 14%,transparent)}
 .btn.btn-good:hover{background:var(--green);color:#fff}
 .btn.btn-warn{color:#d97706;border-color:transparent;background:color-mix(in srgb,#d97706 14%,transparent)}
+.btn-del{color:#fca5a5;border-color:rgba(248,113,113,.45);background:color-mix(in srgb,#ef4444 14%,transparent)}
+.btn-del:hover{background:rgba(239,68,68,.5);color:#fff}
 .btn.btn-warn:hover{background:#d97706;color:#fff}
 
 .icon-btn{
@@ -446,7 +448,7 @@ input#f-bmc-pass:autofill{
 .bc-hlog-item{padding:5px 8px;border-bottom:1px solid var(--border);font-size:10.5px;line-height:1.5;color:var(--text)}
 .bc-hlog-time{color:var(--text-faint);font-size:9.5px;display:block}
 .bc-hlog-cmd{color:#22c55e;font-weight:700;word-break:break-all;display:block}
-.bc-hlog-tgt{color:var(--text-dim);display:block}
+/* .bc-hlog-tgt 已移除：指令歷史不再顯示目標主機列表 */
 .bc-hlog-empty{color:var(--text-faint);padding:12px;font-size:10.5px;line-height:1.6}
 .bc-pane-label{
   font-size:11px;font-weight:700;padding:5px 10px;letter-spacing:.3px;color:var(--text-faint);
@@ -692,9 +694,10 @@ input#f-bmc-pass:autofill{
 .rt-bar-num{background:var(--bg);border:1px solid var(--border-soft);border-radius:4px;padding:1px 6px;white-space:nowrap}
 .rt-bar-na{color:var(--text-faint)}
 /* 每個 rt-kind 依其指標數設定欄位數（由 JS 設定 --rt-cols） */
-#racktel-grid{grid-template-columns:1fr}
+/* 整櫃 telemetry 比照單機詳情：左右左右兩欄（server 上面靠左、switch 上面靠右，其後依序往下） */
+#racktel-grid{grid-template-columns:1fr 1fr;gap:14px}
 
-@media (max-width:760px){.tel-grid{grid-template-columns:1fr}}
+@media (max-width:760px){.tel-grid{grid-template-columns:1fr}#racktel-grid{grid-template-columns:1fr}}
 
 /* ===== 硬體資訊卡片（CPU/DIMM/SSD/NIC/GPU） ===== */
 .hw-grid{display:grid;grid-template-columns:1fr;gap:10px;align-items:start;align-content:start}
@@ -811,6 +814,9 @@ input#f-bmc-pass:autofill{
 .rm-actions .btn{background:rgba(255,255,255,.06);border-color:rgba(255,255,255,.14);color:#cfd9ea}
 .rm-actions .btn-del{background:rgba(220,38,38,.18);border-color:rgba(248,113,113,.45);color:#fca5a5}
 .rm-actions .btn-del:hover{background:rgba(220,38,38,.4)}
+/* 非連線型元件（blanking 擋板等）的「無法使用」按鈕：保留位置維持美觀，但淡化且不可點 */
+.rm-actions .rm-btn-na{background:rgba(255,255,255,.03);border-color:rgba(255,255,255,.08);color:var(--text-faint);opacity:.45;cursor:not-allowed;filter:grayscale(1)}
+.rm-actions .rm-btn-na:hover{background:rgba(255,255,255,.03);box-shadow:none}
 @media (max-width:560px){.rm-ip{display:none}}
 /* 卡片 + 清單整合 */
 .dview-tabs{display:flex;gap:6px}

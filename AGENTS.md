@@ -109,3 +109,44 @@ Wistron PA Server Manager：Web 管理介面（FastAPI 後端 + 原生 JS 前端
 
 - 完整對話紀錄與本 AGENTS.md 的備份位置，由最近一次工作階段告知使用者實際路徑。
 - 建議新對話開啟後：`cat AGENTS.md` 或請 agent 讀本檔，即可接續 §八 的待辦。
+
+## 十、BMC / KVM 廣播系統研究備忘（暫停中，勿忘）
+
+> 使用者要求「先記著，先處理別的問題」。此為已完成的探索與評估，KVM 實作尚未動工。
+
+- **現況**：pa_manager 沒有 KVM，BMC 只有「文字 terminal」= node bridge `/ws/terminal/{name}/bmc` 直接 SSH 進 BMC shell（ssh2 `client.shell()`）；開關機走 backend `ipmi_power()`（OS 內 ipmitool `-I open` 優先 → OOB lanplus `-C 17`，fleet_l OpenBMC 專用）。
+- **OneTree = AMI MegaRAC OneTree，是 OpenBMC-based**。兩者共用 bmcweb（Redfish+KVM WebSocket+GUI+DBus）、obmc-ikvm（VNC/RFB server, libvncserver）、obmc-console（SOL, multi-sol）。
+- **活體偵測（已驗證）**：host_a（INTERNAL_IP_11, bmc_user=root）就是 AMI OneTree——TLS 憑證 O=AMI, OU=MEGARAC；Redfish 1.17.0，ServiceRoot=AMI Service Root；登入 POST /redfish/v1/SessionService/Sessions→X-Auth-Token(201)；/redfish/v1/Managers/bmc/VirtualMedia、/Systems/system 皆 200。
+- **KVM 路徑**：OpenBMC 標準 = wss://{bmc}/kvm/0/（bmcweb proxy 到 BMC 本機 127.0.0.1:5900 的 VNC/obmc-ikvm，RFB 協定）。但 fleet_l 這台 OneTree 回 404 → AMI 商業版把 KVM websocket 放客製 OEM 路徑，需挖 Web UI JS bundle 或特定 session/cookie 格式。
+- **SOL**：wss://{bmc}/console0 或 ssh -p 2200 user@bmc。
+- **廣播可行性**：可做。OpenBMC/OneTree 本質是 VNC(RFB)，適合「單點抓畫面→伺服端 fan-out 複製給 N 觀眾」；多路直連會爆 BMC（obmc-ikvm 多 client 支援有限）。輸入要單寫者鎖。
+- **多偵測方向**：偵測 TLS 憑證廠牌 / ServiceRoot.Product / Redfish Oem / MAC OUI → 選對 adapter。Dell iDRAC / HPE iLO / Supermicro / Lenovo XCC 協議各異，需分 adapter。
+- **技術筆記**：BMC 全自簽，node ws 連 must rejectUnauthorized:false；VNC 5900 直連常被封，走 wss 或 SSH tunnel。
+
+
+## 十一、本 session 進度與意外（重要）
+
+### 意外事件：app.js / AGENTS.md 曾被整檔清空
+- 用 file_editor 對含 UTF-8 emoji surrogate 對（如 🗺 🗑 📡）的檔案做 str_replace 時，曾整檔被覆寫成空檔（app.js 0-byte）。原因推測是工具處理 surrogate pair 時出錯。
+- 教訓：涉及含 emoji 或範本字串（backtick + ${}）的改動，改用 python 腳本取代；純 ASCII 無 emoji 的才用 file_editor。每次改完立刻 node --check。
+- 已用 `git checkout HEAD -- static/js/app.js` 還原。
+
+### 本次完成（未 commit/push）
+1. 系統廣播重建：systemBroadcastDialog() 依專案分組列出帶 OS 的 L10、每組可整組勾/取消（systemBroadcastSetGroup）、bcSetAll 全選；「📡 系統廣播」按鈕只在 L10 分頁顯示（sys-btn-broadcast）。
+2. bc-hlog 指令歷史：bcInitLog()（開啟廣播清空）+ bcLog(cmd)（記錄時間+指令，不含目標主機列表）；openBroadcast 呼叫 bcInitLog、bcSendInput 呼叫 bcLog。已移除 .bc-hlog-tgt CSS。index.html 的 bc-hlog DOM 原本就在 commit 中。
+3. rack 平面圖 + 只能加同專案 L11：rackAddDialog 的 candidates 加 x.project === proj；新增 rackAddPickMachine() 選中 L11 後自動帶出 rack_size（固定 U 數）並顯示「已固定 N U」。
+4. 新增系統 L10/L11 分開：openAdd(lockedLevel) 依目前分頁（projectLevelFilter.val）鎖定 f-level——L10 分頁只能加 L10、L11 分頁只能加 L11（L11 鎖 rack 並顯示 U 數必選）；saveMachine 加「L11 必選幾 U」驗證；後端 /api/machines 已支援 level+rack_size（main.py:125-126、434-435）。
+5. 拓樸圖優化（需求1）：rackTopoHtml return 改為 工具列加「↕收合/展開」（topoCompactToggle 切 .topo-compact）+「🗑 刪除全部」（rackClearTopo，逐條刪本專案 links 後 reload）+ 連線/機台數量提示；.topo-svg-wrap 加 overflow:auto;max-height:70vh 限高捲動。全域新增 .btn-del 紅色樣式。
+
+### 驗證
+- node --check static/js/app.js 通過。
+- headless chrome --dump-dom http://127.0.0.1:6969/#/rack：拓樸工具列「🗺 機櫃拓樸 / ↕ / 🗑 刪除全部（rackClearTopo()）」實際渲染；#/systems「＋ 新增系統」按鈕存在。
+- bcLog/bcInitLog 已用 node vm harness 實測：時間+指令、無目標列表。
+
+### 尚未處理
+- 上述工作尚未 commit / push（工作區另有先前 session 的 main.py/telemetry_core.py 等未提交修改，見 git diff --stat）。
+- KVM 可行性評估報告（§十 研究已完成）尚未產出。
+
+### 追加調整（同 session，未 commit）
+- rack 平面圖空槽「＋」只保留「新增系統」一個入口：`rackEmptyClick` 改為直接呼叫 `rackAddDialogAt(u)`（不再跳出「新增機櫃元件 / 加入同專案 L11」兩個按鈕的選單）。機櫃元件改由 System Manager 的 L11 分頁「＋ 新增元件」（addRackComponentDialog）加入。
+- rack 加入既有 L11 時 U 數固定：`rm-add-size` select 設 `disabled`，`rackAddPickMachine` 依該 L11 系統自身的 rack_size 鎖定選項（只能選那一個），且「加入」時 `rack_size` 直接取該機台的 rack_size（不再讀下拉）。`rackAddPassiveAt(u)` 已無入口呼叫（保留函式）。

@@ -748,8 +748,15 @@ function rackAddDialog(presetU) {
   const proj = rackView.project;
   const inRack = new Set(machines.filter(x => x.project === proj && x.level === "rack" && (x.rack_u||0) > 0).map(x => x.name));
   // 需求：加入機櫃只能選「L11（rack）」系統。L10 若要變 L11，請先在 System Manager 升為 L11。
-  const candidates = machines.filter(x => x.level === "rack" && !inRack.has(x.name));
-  if (!candidates.length) { alert("沒有可加入的 L11（Rack）機台（所有 L11 都已在此機櫃；L10 請先在 System Manager 升為 L11）。"); return; }
+  // 需求：+ 號只能加「System Manager 同專案」的 L11 系統（不同專案的 L11 不得跨專案加入）
+  const candidates = machines.filter(x => x.project === proj && x.level === "rack" && !inRack.has(x.name));
+  if (!candidates.length) {
+    const otherProjects = machines.filter(x => x.level === "rack" && x.project !== proj);
+    alert(otherProjects.length
+      ? `這個機櫃專案「${proj}」沒有其他可加入的 L11 機台。\n其他專案的 L11 不能跨專案加進來（${esc([...new Set(otherProjects.map(m=>m.project))].join("、"))}）。請在 System Manager 把該系統設為本專案的 L11。`
+      : "此機櫃目前沒有其他可加入的 L11 機台（所有同專案 L11 都已在此機櫃；L10 請先在 System Manager 升為本專案的 L11）。");
+    return;
+  }
   const selOpts = candidates.map(m => `<option value="${esc(m.name)}">${esc(m.name)} (${esc(m.os_ip||"—")})</option>`).join("");
   // 依「已佔用 U 集合」與「元件高度」計算可用起始 U：多 U 元件須連同其延伸佔用的槽一起排除
   rackAddOccupied(proj);
@@ -757,9 +764,9 @@ function rackAddDialog(presetU) {
     <div class="rm-modal-body">
       <p style="margin-bottom:12px;font-size:12px;color:var(--text-faint)">把既有 L11 機台加入機櫃專案「${esc(proj)}」並指派 U 槽。</p>
       <label style="display:block;font-size:12px;color:var(--text-faint);margin-bottom:6px">選擇機台</label>
-      <select class="input" id="rm-add-m" style="width:100%;padding:8px;margin-bottom:12px">${selOpts}</select>
-      <label style="display:block;font-size:12px;color:var(--text-faint);margin-bottom:6px">占用高度（U 數）</label>
-      <select class="input" id="rm-add-size" style="width:100%;padding:8px;margin-bottom:12px" onchange="rackAddRefreshU()">
+      <select class="input" id="rm-add-m" style="width:100%;padding:8px;margin-bottom:12px" onchange="rackAddPickMachine()">${selOpts}</select>
+      <label style="display:block;font-size:12px;color:var(--text-faint);margin-bottom:6px">占用高度（U 數）<span class="hint" id="rm-add-size-hint"></span></label>
+      <select class="input" id="rm-add-size" style="width:100%;padding:8px;margin-bottom:12px" disabled onchange="rackAddRefreshU()">
         ${RACK_SIZES.map(s => `<option value="${s}" ${s===1?"selected":""}>${s}U${s>1 ? "（需連續空位）" : ""}</option>`).join("")}
       </select>
       <label style="display:block;font-size:12px;color:var(--text-faint);margin-bottom:6px">選擇起始 U 槽</label>
@@ -772,16 +779,36 @@ function rackAddDialog(presetU) {
     [
       { txt: "取消", cls: "", fn: () => closeDialog() },
       { txt: "加入", cls: "primary", fn: () => {
-        const nm = $("rm-add-m").value, u = +$("rm-add-u").value, ty = $("rm-add-type").value, sz = +$("rm-add-size").value || 1;
-        rackAssign(nm, { project: proj, level: "rack", rack_u: u, rack_size: sz, mgx_type: ty })
+        const nm = $("rm-add-m").value, u = +$("rm-add-u").value, ty = $("rm-add-type").value;
+        const __m = machines.find(x=>x.name===nm);
+        rackAssign(nm, { project: proj, level: "rack", rack_u: u, rack_size: (__m && __m.rack_size > 0 ? __m.rack_size : 1), mgx_type: ty })
           .then(() => { closeDialog(); setView("rack"); })
           .catch(e => alert("加入失敗：" + e.message));
       } },
     ]);
   rackAddRefreshU();
   if (presetU) { const selSel = $("rm-add-u"); if (selSel) selSel.value = String(presetU); }
+  // 依目前預設選中的機台帶出「固定 U 數」
+  rackAddPickMachine();
 }
-// 從機櫃「＋」加入既有 L11：先關閉選單再開加入對話框（帶預設 U）
+// 從機櫃「＋」加入既有 L11：選中機台後，自動帶出其固有的 rack_size（固定 U 數，不改動）
+function rackAddPickMachine() {
+  const sel = $("rm-add-m"); if (!sel) return;
+  const nm = sel.value;
+  const m = machines.find(x => x.name === nm);
+  const sizeSel = $("rm-add-size"), hintEl = $("rm-add-size-hint");
+  if (!sizeSel) return;
+  const fixed = m && m.rack_size && m.rack_size > 0;
+  // U 數固定：只顯示該 L11 系統自身的 rack_size，不讓使用者調整
+  for (const opt of sizeSel.options) opt.disabled = (opt.value !== String(m.rack_size || 1));
+  if (fixed) {
+    sizeSel.value = String(m.rack_size);
+    if (hintEl) hintEl.textContent = `（已固定 ${m.rack_size}U）`;
+  } else if (hintEl) {
+    hintEl.textContent = "";
+  }
+  rackAddRefreshU();
+}
 function rackAddDialogAt(u) { closeDialog(); rackAddDialog(u); }
 
 function dialogBackdrop() {
@@ -846,8 +873,8 @@ function pageRack() {
       ${toolbar}
       ${anyRack ? `
       <button class="btn primary" id="rack-ping-btn" onclick="rackPing('${esc(rackView.project)}')">📡 Ping Rack</button>
-      <button class="btn" onclick="linkAddDialog()">🗺 新增拓樸</button>
-      <button class="btn" title="自動建立 server→switch、CDU→switch、Powershelf→switch 的模擬連線，看看拓樸圖長怎樣" onclick="rackDemoTopo()">🧪 模擬拓樸</button>
+      <button class="btn" onclick="topoTodo()">🗺 新增拓樸</button>
+      <button class="btn" title="自動建立 server→switch、CDU→switch、Powershelf→switch 的模擬連線，看看拓樸圖長怎樣" onclick="topoTodo()">🧪 模擬拓樸</button>
       <button class="btn" onclick="rackPowerAllDialog()">⏻ 開機整櫃</button>
       <button class="btn btn-danger" onclick="rackPowerAllDialog(false)">⏻ 關機整櫃</button>
       <button class="btn btn-warn" onclick="rackBulkReboot()">⟳ Reboot 整櫃</button>
@@ -980,16 +1007,9 @@ function rackBlockRow(m, u, size, pinged) {
   </div>`;
 }
 function rackEmptyClick(u) {
-  // 統一從機櫃「＋」進入：可「新增機櫃元件」或「加入同專案既有 L11 機台」
-  showDialog(`＋ 放進 U${u}`, `
-    <div class="rm-modal-body">
-      <p style="margin-bottom:14px;font-size:12px;color:var(--text-faint)">要放什麼到 U${u}？</p>
-      <div style="display:flex;flex-direction:column;gap:8px">
-        <button class="btn primary" onclick="rackAddPassiveAt(${u})" style="padding:10px;text-align:left">➕ 新增機櫃元件<br><span style="font-weight:400;font-size:11px;color:var(--text-faint)">switch / power shelf / CDU / PDU / Blanking 擋板等無 OS/BMC 元件</span></button>
-        <button class="btn" onclick="rackAddDialogAt(${u})" style="padding:10px;text-align:left">🗄 加入同專案既有 L11 機台<br><span style="font-weight:400;font-size:11px;color:var(--text-faint)">把已存在的 L11 系統放到這裡</span></button>
-      </div>
-    </div>`,
-    [ { txt: "取消", cls: "", fn: () => closeDialog() } ]);
+  // rack 平面圖「＋」只保留「新增系統」：加入同專案既有 L11 機台（U 數固定）。
+  // 機櫃元件改從 System Manager 的 L11 分頁「＋ 新增元件」加入。
+  rackAddDialogAt(u);
 }
 // 新增機櫃元件：帶預設 U 槽 = 點到的空位 u
 function rackAddPassiveAt(u) {
@@ -1383,8 +1403,12 @@ function rackTopoHtml(members) {
     `<span class="topo-legend lk-${k}"><i style="background:${LINK_COLOR[k]}"></i>${esc(v)}</span>`).join("");
 
   return `<div class="topo-card">
-    <div class="topo-card-title">🗺 機櫃拓樸</div>
-    <div class="topo-svg-wrap">
+    <div class="topo-card-title" style="display:flex;align-items:center;gap:8px">🗺 機櫃拓樸
+      <button class="btn small" onclick="topoCompactToggle(this)" title="收合/展開圖形">↕</button>
+      <button class="btn small btn-del" onclick="rackClearTopo()" title="刪除整個機櫃拓樸圖的所有連線">🗑 刪除全部</button>
+      <span class="hint" style="margin-left:auto">${rel.length} 條連線 · ${leaves.length} 台 / ${hubs.length} 台基座</span>
+    </div>
+    <div class="topo-svg-wrap" style="overflow:auto;max-height:70vh">
       <svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" class="topo-svg">${defs}${edgeSvg}${nodesSvg}</svg>
     </div>
     <div class="topo-legends">${legendSvg}
@@ -1392,7 +1416,34 @@ function rackTopoHtml(members) {
     </div>
   </div>`;
 }
-// 機櫃狀態摘要：依 ping 結果加總 Up / Down / 未 Ping
+// 拓樸圖收合/展開：切換 svg wrap 的 compact 樣式，避免圖太長把整頁撐高
+function topoCompactToggle(btn) {
+  const wrap = document.querySelector(".topo-svg-wrap");
+  if (!wrap) return;
+  wrap.classList.toggle("topo-compact");
+  btn.textContent = wrap.classList.contains("topo-compact") ? "↔" : "↕";
+}
+
+// 刪除整個機櫃拓樸圖（本專案內的所有連線）
+async function rackClearTopo() {
+  if (!rackView.project) return;
+  const proj = rackView.project;
+  const names = new Set(machines.filter(m => m.project === proj).map(m => m.name));
+  const rel = linksCache.filter(lk => names.has(lk.a) && names.has(lk.b));
+  if (!rel.length) { alert("此機櫃目前沒有連線可刪除。"); return; }
+  if (!confirm(`確定刪除整個「${proj}」機櫃拓樸圖嗎？\n此動作會移除本機櫃內全部 ${rel.length} 條連線。`)) return;
+  let done = 0;
+  for (const lk of rel) {
+    try {
+      const d = await api("/api/links", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ a: lk.a, b: lk.b }) });
+      linksCache = d.links || linksCache; done++;
+    } catch (e) {}
+  }
+  await loadLinks();
+  setView("rack");
+  alert(`已刪除 ${done} 條連線，機櫃拓樸圖已清空。`);
+}
+
 function rackStatusCounts(members, pinged) {
   let up = 0, down = 0, none = 0;
   members.forEach(m => {
@@ -1407,6 +1458,7 @@ function rackStatusCounts(members, pinged) {
 }
 // 模擬拓樸：自動把 server→sw1/sw2（eth/ib），cdu→sw1（coolant），powershelf→sw2（power）接起來。
 // 依元件類型挑前兩個 switch、第一個 cdu、第一個 powershelf、前面幾台 server/storage。
+// [暂停|功能待開發] 此按鈕暫指 topoTodo()，模擬拓樸待日後啟用。原始實作保留。
 async function rackDemoTopo() {
   const proj = rackView.project;
   const members = machines.filter(x => x.project === proj && x.level === "rack");
@@ -1433,6 +1485,10 @@ async function rackDemoTopo() {
   setView("rack");
   setTimeout(() => alert(`已建立模擬拓樸 ${created.length ? "（" + created.length + " 條）" : "（重複則已跳過）"}，請看右側連線圖。`), 200);
 }
+function topoTodo() {
+  showDialog("拓樸功能", `<div class="empty">此功能待開發。</div>`, [ { txt: "知道了", cls: "primary", fn: () => closeDialog() } ]);
+}
+// [暂停|功能待開發] 此按鈕暫指 topoTodo()，新增拓樸待日後啟用。原始實作保留。
 function linkAddDialog() {
   const proj = rackView.project;
   const members = machines.filter(x => x.project === proj && x.level === "rack");
@@ -2604,7 +2660,13 @@ function onAddLevelChange() {
   const isRack = $("f-level").value === "rack";
   wrap.style.display = isRack ? "flex" : "none";
 }
-function openAdd() {
+function openAdd(lockedLevel) {
+  // 需求：L10 分頁只能加 L10，L11 分頁只能加 L11（依目前分頁鎖定層級）
+  const locked = lockedLevel || (projectLevelFilter.val === "rack" ? "rack" : "system");
+  const lvlSel = $("f-level");
+  lvlSel.value = locked;
+  lvlSel.disabled = !!locked;   // 從 System Manager 分頁進來就鎖死層級，不能切換
+  if (locked) onAddLevelChange();   // L11 時顯示「必選 U 數」
   fillProjectSelect("f-project");
   resetBmcProbe();
   $("add-modal").style.display = "flex";
@@ -2681,6 +2743,7 @@ async function saveMachine() {
     if (!body.bmc_user || !body.bmc_pass) { showErr("BMC 帳號和密碼為必填（供開關機/遠端管理用）— 欄位已標示紅色 *。"); return; }
   } else if (body.bmc_ip && (!body.bmc_user || !body.bmc_pass)) { showErr("有填 BMC IP 時，BMC 帳號和密碼為必填。"); return; }
   if (!body.project) { showErr("請選擇專案（沒有案子的請先開專案分類）"); return; }
+  if (body.level === "rack" && (!body.rack_size || body.rack_size < 1)) { showErr("L11 機櫃系統必須選擇占用高度（幾 U）"); return; }
   const btn = $("save-btn");
   btn.disabled = true; btn.textContent = "連線中…"; showErr("");
   try {
@@ -2966,10 +3029,84 @@ function rackBroadcastDialog(project) {
     ]);
 }
 
+// System Manager 的「📡 系統廣播」：依專案把帶 OS 的 L10 系統分組列出，勾選後開啟廣播。
+function systemBroadcastDialog() {
+  const cands = machines.filter(m => m.os_ip && !isRackItem(m));
+  const anyCands = machines.filter(m => m.os_ip);
+  if (!cands.length) {
+    if (anyCands.length) {
+      showDialog("📡 系統廣播", `<div class="empty">目前沒有帶 OS IP 的 L10 系統可廣播。\n有 OS 連線資訊的機台：<br>${esc(anyCands.map(m=>m.name).join("、"))}</div>`);
+    } else {
+      showDialog("📡 系統廣播", `<div class="empty">目前沒有任何帶 OS 連線資訊的系統可用。</div>`);
+    }
+    return;
+  }
+  // 依專案分組
+  const groups = {};
+  cands.forEach(m => { const p = m.project || "(未分類)"; (groups[p] = groups[p] || []).push(m); });
+  const html = Object.entries(groups).map(([proj, list]) => `
+    <div style="margin-bottom:10px">
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
+        <b>${esc(proj)}</b><span class="hint">${list.length} 台</span>
+        <span style="margin-left:auto"><button class="btn small" onclick="systemBroadcastSetGroup('${esc(proj)}', true)">☑</button>
+        <button class="btn small" onclick="systemBroadcastSetGroup('${esc(proj)}', false)">☐</button></span>
+      </div>
+      ${list.map(m => `<label class="bc-check" style="display:block;padding:6px 10px;border:1px solid var(--border);border-radius:8px;margin-bottom:4px;cursor:pointer">
+         <input type="checkbox" class="bc-chk" value="${esc(m.name)}" data-proj="${esc(proj)}" checked>
+         <b>${esc(m.name)}</b> <span class="mono" style="color:var(--text-dim)">${esc(m.os_ip)}</span>
+       </label>`).join("")}
+    </div>`).join("");
+
+  showDialog("📡 系統廣播 — 依專案選擇要同時控制的主機", `
+    <label style="display:block;font-size:12px;color:var(--text-faint);margin-bottom:10px">
+      勾選要同步下指令的系統（一次指令同時送到所有勾選主機的 OS shell）。依專案分組。
+    </label>
+    <div class="table-scroll" style="max-height:52vh;overflow:auto;margin-bottom:12px">${html}</div>
+    <div style="display:flex;gap:8px">
+      <button class="btn small" onclick="bcSetAll(true)">☑ 全選</button>
+      <button class="btn small" onclick="bcSetAll(false)">☐ 全不選</button>
+      <span class="spacer"></span><span class="hint">已選 <span id="bc-sel-count">${cands.length}</span> 台</span>
+    </div>`,
+    [
+      { txt: "取消", cls: "", fn: () => closeDialog() },
+      { txt: "開啟廣播", cls: "primary", fn: () => {
+        const sel = [...document.querySelectorAll(".bc-chk:checked")].map(x => x.value);
+        closeDialog();
+        if (!sel.length) { alert("請至少勾選一台主機。"); return; }
+        openBroadcast(sel);
+      } },
+    ]);
+  // 即時更新「已選 N 台」
+  const upd = () => { const el = $("bc-sel-count"); if (el) el.textContent = document.querySelectorAll(".bc-chk:checked").length; };
+  document.querySelectorAll(".bc-chk").forEach(c => c.addEventListener("change", upd));
+}
+// 依專案整組勾選/取消勾選（System Manager 系統廣播的專案分組用）
+function systemBroadcastSetGroup(proj, on) {
+  document.querySelectorAll(".bc-chk").forEach(c => { if (c.dataset.proj === proj) c.checked = on; });
+  const el = $("bc-sel-count"); if (el) el.textContent = document.querySelectorAll(".bc-chk:checked").length;
+}
+
 function bcSetAll(v) {
   document.querySelectorAll(".bc-chk").forEach(c => c.checked = v);
   const n = document.querySelectorAll(".bc-chk:checked").length;
   const el = $("bc-sel-count"); if (el) el.textContent = `已選 ${n} 台`;
+}
+
+// 指令歷史（bc-hlog）：開啟廣播時清空，送出指令時記錄「時間 + 指令」（不列目標主機，避免控多台時列表爆掉）
+function bcInitLog() {
+  const h = $("bc-hlog"); if (!h) return;
+  h.innerHTML = `<div class="bc-hlog-empty">（尚未送出指令）</div>`;
+}
+function bcLog(cmd) {
+  const h = $("bc-hlog"); if (!h) return;
+  const empty = h.querySelector(".bc-hlog-empty"); if (empty) empty.remove();
+  const now = new Date();
+  const ts = `${String(now.getHours()).padStart(2,"0")}:${String(now.getMinutes()).padStart(2,"0")}:${String(now.getSeconds()).padStart(2,"0")}`;
+  const line = document.createElement("div");
+  line.className = "bc-hlog-item";
+  line.innerHTML = `<span class="bc-hlog-time">${ts}</span><span class="bc-hlog-cmd">${esc(cmd)}</span>`;
+  h.appendChild(line);
+  h.scrollTop = h.scrollHeight;
 }
 
 function openBroadcast(names) {
@@ -3007,6 +3144,7 @@ function openBroadcast(names) {
     bcState.terms[nm] = { term: t, fit };
     bcState.stat[nm] = "wait";
   });
+  bcInitLog();  // 開啟廣播時清除上一次的指令歷史
   $("bc-input").value = "";
   $("bc-input").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); bcSendInput(); } });
   $("bc-modal").style.display = "flex";
@@ -3101,6 +3239,7 @@ function bcSendInput() {
   else if (bcState.active) bcState.ws.send(JSON.stringify({ type: "sendOne", name: bcState.active, data: payload }));
   // 📡 B：標記「已送出，等收確認」：廣播→所有已連線主機都亮「…」；單台→只亮該台
   targets.forEach(nm => bcMarkAck(nm, "send"));
+    bcLog(cmd);  // 記錄到指令歷史（時間 + 指令，不含目標主機）
   bcStatus(`${esc(cmd)} → ${bcState.broadcast ? `廣播 ${targets.length} 台（等待確認）` : esc(bcState.active) + "（等待確認）"}`);
 }
 

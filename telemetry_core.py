@@ -561,7 +561,9 @@ def get_rack_series(project, minutes):
     """
     since = time.time() - min(minutes or 60, int(os.environ.get("TELEMETRY_MAX_MIN", "43200"))) * 60
     all_m = _load_machines()
-    members = {n: m for n, m in all_m.items() if m.get("project") == project}
+    # 只撈「在此專案 Rack（L11 機櫃）平面圖上」的元件：排除 L10 單機（level=="system"）如 proj_k-app-1
+    members = {n: m for n, m in all_m.items()
+               if m.get("project") == project and m.get("level") == "rack"}
     if not members:
         return {}
 

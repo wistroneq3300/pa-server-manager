@@ -1673,8 +1673,8 @@ def rack_telemetry(project: str, minutes: int = 60):
     """
     telemetry_core.init_db()
     proj = project
-    # 依專案列出所有元件（含類型），讓前端能顯示「每種類型有幾台」即使尚無資料
-    members = [m for m in machines.values() if m.get("project") == proj]
+    # 只撈「在此專案 Rack（L11 機櫃）平面圖上」的元件（level=="rack"）：排除 L10 單機（level=="system"）如 proj_k-app-1
+    members = [m for m in machines.values() if m.get("project") == proj and m.get("level") == "rack"]
     # 排除 blanking 擋板（passive 且無監控指標），不列入監控類型
     components = sorted([
         {"name": m.get("name", ""), "kind": telemetry_core.kind_of(m)}
@@ -1683,6 +1683,10 @@ def rack_telemetry(project: str, minutes: int = 60):
     # 每種類型的台數（供佔位提示）
     from collections import Counter
     kinds_count = dict(Counter(c["kind"] for c in components))
+    # 指定呈現順序：server 一定最上面靠左、switch 靠右，其後 powershelf/pdu/cdu/storage/network 依序往下。
+    _RACK_KIND_ORDER = ["server", "switch", "powershelf", "pdu", "cdu", "storage", "network"]
+    ordered_kinds = sorted(kinds_count.keys(), key=lambda k: _RACK_KIND_ORDER.index(k) if k in _RACK_KIND_ORDER else len(_RACK_KIND_ORDER))
+    kinds_count = {k: kinds_count[k] for k in ordered_kinds}
     data = telemetry_core.get_rack_series(proj, int(minutes))
     # 即使目前無採樣資料，也回傳「該專案擁有的類型+指標定義」讓前端畫出對應區塊
     for kind in kinds_count:
@@ -1700,6 +1704,75 @@ def rack_telemetry(project: str, minutes: int = 60):
         "components": components,
         "data": data,
     }
+
+
+@app.get("/api/rack/{project}/telemetry/analyze")
+def rack_telemetry_analyze(project: str, minutes: int = 60):
+    """整櫃（Rack Level）Telemetry AI：依各類型的最新指標摘要叫 Ollama 做簡短分析，
+    回傳一段繁體中文說明（2~3 句），供 front-end 頂部的 🤖 Telemetry AI 列顯示。
+    """
+    telemetry_core.init_db()
+    proj = project
+    data = telemetry_core.get_rack_series(proj, int(minutes))
+    if not data:
+        return {"ok": False, "error": "此專案尚無 telemetry 資料，無法分析"}
+
+    # 依各類型最新值組成精簡摘要
+    summaries = []
+    order = ["server", "switch", "powershelf", "pdu", "cdu", "storage", "network"]
+    has_any = False
+    for kind in sorted(data.keys(), key=lambda k: order.index(k) if k in order else len(order)):
+        m = data[kind]
+        machines = m.get("machines") or []
+        hist = m.get("history") or {}
+        if not machines:
+            continue
+        # 每一台的各指標最新值
+        mach_lines = []
+        for mm in machines:
+            cells = []
+            for metric, hm in hist.items():
+                v = mm.get(metric)
+                if v is not None:
+                    cells.append(f"{hm.get('label', metric)} {v:g}{hm.get('unit','')}")
+            if cells:
+                mach_lines.append(f"{mm.get('name')}({'; '.join(cells)})")
+        # 每一指標的整櫃聚合最新值
+        agg_lines = []
+        for metric, hm in hist.items():
+            vals = [x for x in (hm.get("values") or []) if x is not None]
+            if not vals:
+                continue
+            agg_lines.append(f"{hm.get('label', metric)} {vals[-1]:g}{hm.get('unit','')}")
+        summaries.append(f"【{kind}】共{len(machines)}台：{('；'.join(mach_lines)) or ('—')}；整櫃{('; '.join(agg_lines)) or ('—')}")
+        has_any = True
+    if not has_any:
+        return {"ok": False, "error": "此專案尚無 telemetry 資料，無法分析"}
+    summary = "\n".join(summaries)
+
+    sys_prompt = (
+        "你是 AI/GPU 機房的資深工程師，專責管理整櫃（Rack）的伺服器與週邊（switch/power shelf/PDU/CDU）。\n"
+        "使用者會給你『整櫃各類型元件的監控指標摘要』（每台最新值與整櫃聚合值）。\n"
+        "請用繁體中文，回覆**非常簡短**的一段話（2~3 句內，勿超過 3 句），語氣平實：\n"
+        "1) 先一句：整體『正常』還是『有異常警訊』。\n"
+        "2) 若有異常（過熱 / 高功耗 / 高負載 / 水壓異常等），簡短點出最需注意的 1~2 個元件與方向；若皆正常則不需列。\n"
+        "3) 不要列點、不要給指令、不要重複列出所有數值。"
+    )
+    user_prompt = "以下為整櫃各類型元件的監控摘要：\n" + summary + "\n請給簡短分析："
+    payload = {
+        "model": OLLAMA_MODEL, "prompt": sys_prompt + "\n\n" + user_prompt + "\nAssistant:",
+        "stream": False, "think": False,
+        "options": {"temperature": 0.3, "num_predict": 300},
+    }
+    try:
+        import requests
+        r = requests.post(OLLAMA_URL + "/api/generate", json=payload, timeout=120)
+        txt = (r.json().get("response") or "").strip()
+        if not txt:
+            return {"ok": False, "error": "Ollama 未產生內容"}
+    except Exception as e:
+        return {"ok": False, "error": f"AI 分析失敗: {e}"}
+    return {"ok": True, "summary": summary, "analysis": txt, "minutes": int(minutes), "project": proj}
 
 
 
