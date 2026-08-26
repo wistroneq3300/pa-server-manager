@@ -140,34 +140,59 @@ function pageDashboard() {
         <div class="card-title">Projects <span class="hint">${projects.length} 個專案</span></div>
         <div class="dash-proj-grid">${projCards}</div>
       </div>
-      <div class="glass-panel copilot-panel">
-        <div class="card-title">AI Copilot <span class="hint" id="cop-model">Ollama · qwen3.8</span></div>
-        <div class="copilot-body" id="cop-box" style="max-height:440px;overflow:auto">
-          <div class="copilot-msg ai">👋 我是 AI Copilot（串到你本機 Ollama qwen3.8:27b）。目前已監控 <b>${total}</b> 台系統、<b>${online}</b> 線上、<b>${offline}</b> 離線。問我任何問題～（例如「哪台有問題？」「proj_k 專案狀態？」）</div>
+      <div class="rack-cop-panel">
+        <div class="rack-cop-head">
+          <span class="cop-avatar ai">🤖</span>
+          <div class="cop-title">AI Copilot <span class="hint" id="cop-model">Ollama · qwen3.8</span></div>
+          <button class="btn small rack-cop-clear" id="cop-clear" title="清除對話紀錄">🗑</button>
         </div>
-        <div class="copilot-input">
-          <input class="input" id="cop-input" placeholder="輸入指令給 Copilot…" autocomplete="off">
-          <button class="btn primary" id="cop-send">送出</button>
+        <div class="rack-cop-body" id="cop-box">
+          <div class="cop-msg ai">
+            <span class="cop-avatar ai">🤖</span>
+            <div class="cop-bubble ai">👋 我是 AI Copilot（串到你本機 Ollama qwen3.8:27b）。目前已監控 <b>${total}</b> 台系統、<b>${online}</b> 線上、<b>${offline}</b> 離線。問我任何問題～（例如「哪台有問題？」「proj_k 專案狀態？」）</div>
+          </div>
+        </div>
+        <div class="rack-cop-input">
+          <textarea id="cop-input" rows="1" placeholder="輸入訊息，Enter 送出…" autocomplete="off"></textarea>
+          <button class="btn primary" id="cop-send">➤</button>
         </div>
       </div>
     </div>
   `;
 }
 
-function copAppend(role, html) {
+let _copBusy = false;
+function copAppend(role, html, raw) {
   const box = document.getElementById("cop-box");
   if (!box) return;
-  box.insertAdjacentHTML("beforeend", `<div class="copilot-msg ${role}">${html}</div>`);
+  const av = role === "user" ? "🧑" : "🤖";
+  box.insertAdjacentHTML("beforeend", `<div class="cop-msg ${role}">
+    <span class="cop-avatar ${role}">${av}</span>
+    <div class="cop-bubble ${role}">${raw ? html : esc(html)}</div>
+  </div>`);
+  box.scrollTop = box.scrollHeight;
+}
+function copTyping(on) {
+  const box = document.getElementById("cop-box");
+  if (!box) return;
+  let t = document.getElementById("cop-typing");
+  if (on) {
+    if (t) return;
+    box.insertAdjacentHTML("beforeend", `<div class="cop-msg ai" id="cop-typing">
+      <span class="cop-avatar ai">🤖</span><div class="cop-bubble ai typing">正在思考…</div></div>`);
+  } else if (t) { t.remove(); }
   box.scrollTop = box.scrollHeight;
 }
 async function copSend() {
   const inp = document.getElementById("cop-input");
   const send = document.getElementById("cop-send");
   const text = (inp ? inp.value : "").trim();
-  if (!text) return;
-  copAppend("user", esc(text));
-  if (inp) inp.value = "";
+  if (!text || _copBusy) return;
+  copAppend("user", text);
+  if (inp) inp.value = autoGrow(inp);
+  _copBusy = true;
   if (send) { send.disabled = true; send.textContent = "…"; }
+  copTyping(true);
   try {
     const r = await fetch("/api/copilot", {
       method: "POST",
@@ -175,23 +200,33 @@ async function copSend() {
       body: JSON.stringify({ message: text }),
     });
     const j = await r.json();
-    if (j.ok) copAppend("ai", esc(j.reply).replace(/\n/g, "<br>"));
-    else copAppend("ai", `⨠ ${esc(j.error || "呼叫失敗")}`);
+    copTyping(false);
+    if (j.ok) copAppend("ai", j.reply, true);
+    else copAppend("ai", `⨠ ${j.error || "呼叫失敗"}`);
   } catch (e) {
-    copAppend("ai", `⨠ ${esc("無法連線到後端： " + e.message)}`);
+    copTyping(false);
+    copAppend("ai", `⨠ 無法連線到後端： ${e.message}`);
   } finally {
-    if (send) { send.disabled = false; send.textContent = "送凨"; }
+    _copBusy = false;
+    if (send) { send.disabled = false; send.textContent = "➤"; }
   }
 }
 function bindCopilot() {
   const inp = document.getElementById("cop-input");
   const send = document.getElementById("cop-send");
+  const clr = document.getElementById("cop-clear");
   if (send) send.addEventListener("click", copSend);
-  if (inp) inp.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); copSend(); } });
+  if (inp) inp.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); copSend(); }
+  });
+  if (inp) inp.addEventListener("input", () => autoGrow(inp));
+  if (clr) clr.addEventListener("click", () => {
+    const box = document.getElementById("cop-box");
+    if (box) box.innerHTML = "";
+    copAppend("ai", "👋 對話已清除。問我任何問題～（例如「哪台有問題？」）");
+  });
 }
 
-// ===== Rack Manager 的 AI Copilot：只回答目前選中的機櫃專案 =====
-let _rackCopBusy = false;
 function rackCopilotHtml() {
   const proj = rackView.project || "";
   return `
