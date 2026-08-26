@@ -1201,7 +1201,7 @@ function machineRowSortable(m, pi, mi, total) {
     <tr>
       <td class="mono mach-drag" draggable="true" title="按左鍵拖曳以調整排序"><a href="#" class="mach-link mach-linkbox" onclick="event.preventDefault();openMachine('${esc(m.name)}')"><b>${esc(m.name)}</b></a>${typeTag}</td>
       <td>${lvlBadge}</td>
-      <td class="mono os-ip-cell">${esc(m.os_ip)}${m.os_user ? `<span class="ip-user">@${esc(m.os_user)}</span>` : ""}</td>
+      <td class="mono os-ip-cell" title="${m.os_user ? `帳號 @${esc(m.os_user)}` : ``}">${esc(m.os_ip)}</td>
       <td class="mono bmc-ip-cell">${esc(m.bmc_ip || "—")}</td>
       <td>${statusBadge(m.os_alive)}</td>
       <td>${m.bmc_ip ? statusBadge(m.bmc_alive) : `<span style="color:var(--text-faint)">—</span>`}</td>

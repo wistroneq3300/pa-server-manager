@@ -228,9 +228,8 @@ table.t{width:100%;border-collapse:collapse}
 /* 未分類表格（少兩欄）也對齊層級欄起點：第2欄為系統名稱、第3欄為層級 */
 .proj-card .t th:nth-child(8),.proj-card .t td:nth-child(8){white-space:nowrap}
 .proj-card .t th:nth-child(9),.proj-card .t td:nth-child(9){white-space:nowrap}
-/* OS IP / BMC IP 欄：IP 一行固定對齊，帳號(若有)顯示在 IP 下方小字，避免長度差異造成上下歪斜 */
-.proj-card .t td.os-ip-cell,.proj-card .t td.bmc-ip-cell{vertical-align:top;white-space:nowrap;line-height:1.5;min-width:110px}
-.proj-card .t td.os-ip-cell .ip-user{display:block;font-size:9.5px;color:var(--text-faint);line-height:1.2;margin-top:2px}
+/* OS IP / BMC IP 欄：單行純 IP、等寬字型，各列垂直一致，避免帳號長度差異造成參差 */
+.proj-card .t td.os-ip-cell,.proj-card .t td.bmc-ip-cell{white-space:nowrap;min-width:110px}
 .t tr:last-child td{border-bottom:none}
 .t tbody tr:hover{background:var(--bg-hover)}
 .mono{font-family:Consolas,Menlo,monospace;font-size:11.5px}
