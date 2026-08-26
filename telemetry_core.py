@@ -573,13 +573,17 @@ def get_rack_series(project, minutes):
                          % ",".join("?" * len(members)), tuple(members) + (since,)).fetchall()
     # server 類型沿用 os_metrics/gpu_metrics 彙總
     server_members = {n: m for n, m in members.items() if kind_of(m, n) == "server"}
+    server_os_metrics = {}   # n -> set(metric) 記錄「有真實 OS 資料」的 metric，供回退判斷
     for n in server_members:
         osd = get_os_series(n, minutes)
         gpu = get_gpu_series(n, minutes)
         # cpu_used / mem_used_pct 取 os_metrics
         per_kind_series.setdefault("server", {})
         for metric in ("cpu_used", "mem_used_pct"):
-            per_kind_series["server"].setdefault(metric, {})[n] = [(r["ts"], r[metric]) for r in (osd["os"] or []) if r.get(metric) is not None]
+            pts = [(r["ts"], r[metric]) for r in (osd["os"] or []) if r.get(metric) is not None]
+            per_kind_series["server"].setdefault(metric, {})[n] = pts
+            if pts:
+                server_os_metrics.setdefault(n, set()).add(metric)
         # gpu_power 取每 GPU 的 power 加總
         gpows = []
         for s in (gpu.get("series") or []):
@@ -591,18 +595,26 @@ def get_rack_series(project, minutes):
             for series in gpows:
                 for t, p in series:
                     agg[t].append(p)
-            per_kind_series["server"].setdefault("gpu_power", {})[n] = [(t, round(sum(v),1)) for t, v in sorted(agg.items())]
+            gpts = [(t, round(sum(v),1)) for t, v in sorted(agg.items())]
+            per_kind_series["server"].setdefault("gpu_power", {})[n] = gpts
+            if gpts:
+                server_os_metrics.setdefault(n, set()).add("gpu_power")
 
-    # 其它類型（switch/powershelf/pdu/cdu/storage/network）從 rack_metrics
+    # 其它類型（switch/powershelf/pdu/cdu/storage/network）從 rack_metrics；
+    # server 類型：該台在 os_metrics/gpu_metrics 完全沒資料（例如離線）時，回退採用
+    # rack_metrics kind=server 的模擬/預留資料，讓圖也能顯示且不與 OS 資料重複。
     for r in rows:
         k, metric, nm = r["kind"], r["metric"], r["machine"]
-        if k == "server":
-            continue
         if r["value"] is None:
+            continue
+        if k == "server":
+            # 該台此 metric 已有真實 OS/GPU 資料就跳過；否則用 rack_metrics 模擬/預留資料補
+            if metric in server_os_metrics.get(nm, set()):
+                continue
+            per_kind_series.setdefault("server", {}).setdefault(metric, {}).setdefault(nm, []).append((r["ts"], r["value"]))
             continue
         per_kind_series.setdefault(k, {}).setdefault(metric, {}).setdefault(nm, []).append((r["ts"], r["value"]))
 
-    # 組輸出
     out = {}
     for kind, metrics in per_kind_series.items():
         defs = RACK_METRIC_DEF.get(kind, {})

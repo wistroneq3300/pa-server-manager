@@ -1487,6 +1487,10 @@ const projectLevelFilter = { val: "system" };
 function setProjectLevelFilter(v) {
   projectLevelFilter.val = v;
   document.querySelectorAll(".lvl-tab").forEach(b => b.classList.toggle("active", b.dataset.lvl === v));
+  const bb = document.getElementById("sys-btn-broadcast");
+  const bc = document.getElementById("sys-btn-addcomp");
+  if (bb) bb.style.display = (v === "system") ? "" : "none";   // 📡 系統廣播 只在 L10
+  if (bc) bc.style.display = (v === "rack") ? "" : "none";     // ＋ 新增元件 只在 L11
   const holder = $("proj-sort-list");
   if (holder) { holder.outerHTML = renderProjectsList(); initProjectDrag(); }
 }
@@ -1569,7 +1573,8 @@ function pageProjects() {
       <button class="btn" onclick="openProjectModal()">📁 專案管理</button>
       <button class="btn" onclick="refreshStatus()" id="refresh-btn">⟳ 重新掃描</button>
       <button class="btn primary" onclick="openAdd()">＋ 新增系統</button>
-      <button class="btn" onclick="addRackComponentDialog()" title="新增可放入機櫃的元件（switch / power shelf / CDU / PDU 等），會加入選定的整櫃專案">＋ 新增元件</button>
+      <button class="btn" id="sys-btn-addcomp" style="display:${projectLevelFilter.val==="rack"?"":"none"}" onclick="addRackComponentDialog()" title="新增可放入機櫃的元件（switch / power shelf / CDU / PDU 等），會加入選定的整櫃專案">＋ 新增元件</button>
+      <button class="btn" id="sys-btn-broadcast" style="display:${projectLevelFilter.val==="system"?"":"none"}" onclick="systemBroadcastDialog()" title="對多台 L10 系統同時下指令（廣播終端）">📡 系統廣播</button>
     </div>
     ${renderProjectsList()}
   `;

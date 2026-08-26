@@ -433,6 +433,7 @@ def add_machine(body: AddMachine):
         "project": body.project,
         "level": body.level if body.level in ("system", "rack") else "system",
         "rack_size": body.rack_size if body.level == "rack" and 0 < body.rack_size <= 48 else 1,
+        "rack_u": 0,   # L11 新增時一律不指定 U（0=未放上機櫃），由 Rack Manager 的＋手動放置
         "use_c17": True,
         "order": max([x.get("order", 0) for x in machines.values()] or [-1]) + 1,
         "created": datetime.datetime.now().isoformat(timespec="seconds"),
@@ -517,7 +518,7 @@ def add_rack_passive(body: AddRackPassive):
         "project": body.project or "",
         "level": "rack",
         "mgx_type": body.mgx_type,
-        "rack_u": body.rack_u if 0 < body.rack_u <= 48 else 1,
+        "rack_u": body.rack_u if 0 < body.rack_u <= 48 else 0,   # 0 = 未放上機櫃（不佔 U、不顯示在 rack），由 Rack Manager 的＋手動放置
         "rack_side": body.rack_side if body.rack_side in ("front", "rear") else "front",
         "rack_size": body.rack_size if 0 < body.rack_size <= 48 else 1,
         "use_c17": True,
