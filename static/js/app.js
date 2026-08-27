@@ -1736,6 +1736,7 @@ function machineRowSortable(m, pi, mi, total) {
       <td style="white-space:nowrap">
         ${lvlBtn}
         ${canTerm ? `<button class="btn small" onclick="openTerm('${esc(m.name)}')">▶ Terminal</button>` : ""}
+        <button class="btn small" onclick="machControlDialog('${esc(m.name)}')" title="開關機 / Reboot / AC cycle（BMC 電源控制）">⏻ 開關機</button>
         <button class="btn small" onclick="changeOsIp('${esc(m.name)}')" title="變更 OS IP（需 ping 通 + hostname 相符）">⚙ 設定</button>
         <button class="btn small" onclick="deleteMachine('${esc(m.name)}')">刪除</button>
       </td>
@@ -1774,6 +1775,7 @@ function machineRowUnassigned(m) {
       <td style="white-space:nowrap">
         ${lvlBtn}
         ${canTerm ? `<button class="btn small" onclick="openTerm('${esc(m.name)}')">▶ Terminal</button>` : ""}
+        <button class="btn small" onclick="machControlDialog('${esc(m.name)}')" title="開關機 / Reboot / AC cycle（BMC 電源控制）">⏻ 開關機</button>
         <button class="btn small" onclick="changeOsIp('${esc(m.name)}')" title="變更 OS IP（需 ping 通 + hostname 相符）">⚙ 設定</button>
         <button class="btn small" onclick="deleteMachine('${esc(m.name)}')">刪除</button>
       </td>
