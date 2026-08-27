@@ -12,6 +12,7 @@
 """
 import asyncio
 import json
+import kvm_bridge
 import os
 import subprocess
 import threading
@@ -574,6 +575,55 @@ def edit_machine(name: str, body: dict):
         m["use_c17"] = bool(body["use_c17"])
     _save_data()
     return {"ok": True, "machine": m}
+
+
+class ChangeOsIp(BaseModel):
+    new_os_ip: str
+
+
+@app.post("/api/machines/{name}/change-os-ip")
+def change_os_ip(name: str, body: ChangeOsIp):
+    """變更機台的 OS IP（因 DHCP 有時會漂移）。
+
+    只允許改 OS IP（BMC IP 不給改）。改之前必須「驗證該新 IP 確實是同一台」：
+      1) ping 得到（線上）
+      2) 用原本的 OS 帳密 SSH 過去抓 hostname，且 **與機台名稱（即原 hostname）相同**
+    → 符合才更新 os_ip 並存檔。避免把 IP 誤配到別的機器。
+    """
+    if name not in machines:
+        raise HTTPException(404, f"機台不存在: {name}")
+    m = machines[name]
+    new_ip = (body.new_os_ip or "").strip()
+    if not new_ip:
+        raise HTTPException(400, "請輸入新的 OS IP")
+    if new_ip == m.get("os_ip"):
+        return {"ok": True, "changed": False, "msg": "IP 與原本相同，未變更。"}
+    if not m.get("os_user") or not m.get("os_pass"):
+        raise HTTPException(400, "此機台沒有存 OS 帳密，無法驗證 hostname")
+
+    # 1) ping 新 IP
+    if not ping_check(new_ip, timeout=3):
+        return {"ok": False, "changed": False,
+                "msg": f"Ping 不到新 OS IP {new_ip}，未變更。請確認該 IP 現在是線上。"}
+
+    # 2) SSH 新 IP 抓 hostname
+    hostname, rc, err = ssh_run(new_ip, m.get("os_user",""), m.get("os_pass",""),
+                                m.get("os_port", 22), "hostname", timeout=12)
+    if rc != 0 or not hostname:
+        return {"ok": False, "changed": False,
+                "msg": f"無法以 SSH 連上新 IP {new_ip}（rc={rc}，{err or '連線失敗'}）"}
+
+    hostname = hostname.strip()
+    if hostname != name:
+        return {"ok": False, "changed": False,
+                "msg": f"新 IP {new_ip} 的 hostname 是「{hostname}」，與本機「{name}」不符，"
+                       f"判定為別的機器，拒絕變更。"}
+
+    old_ip = m.get("os_ip")
+    m["os_ip"] = new_ip
+    _save_data()
+    return {"ok": True, "changed": True, "msg": f"已將 OS IP 由 {old_ip} 更新為 {new_ip}。",
+            "machine": m}
 
 
 # ---- 線上狀態快取（TTL），避免大量機台時每次 API 都同步 ping 卡住 ----
@@ -1451,11 +1501,26 @@ async def _proxy_ws(websocket: WebSocket, target_path: str):
             pass
 
 
+@app.websocket("/ws/kvm/{name}")
+async def kvm_ws(websocket: WebSocket, name: str):
+    """KVM 代理：把前端 /ws/kvm/{name} 雙向連到該 BMC 的 KVM (RFB over WSS)。
+    瀏覽器只用 noVNC 連這個端點，BMC 帳密全部留在後端（kvm_bridge 處理）。"""
+    await kvm_bridge.kvm_proxy(websocket, name)
+
+
 @app.websocket("/ws/terminal/{name}/{kind}")
 async def terminal(websocket: WebSocket, name: str, kind: str):
     # 終端已移轉至獨立的 node/ssh2 bridge（port 6968，事件驅動，避免 paramiko
     # 併發 SSH 造成 "Invalid packet blocking"）。此處雙向代理到 bridge 對應路徑。
-    await _proxy_ws(websocket, f"/ws/terminal/{name}/{kind}")
+    # 必須把瀏覽器帶來的 query（?host=..&user=..&pass=..&port=..）一併轉發，否則
+    # bridge 收不到手動填寫的帳密 → 對沒有存帳密的機台會回「未設定連線資訊」。
+    target_path = f"/ws/terminal/{name}/{kind}"
+    qp = websocket.query_params
+    if qp:
+        from urllib.parse import urlencode
+        q = urlencode([(k, v) for k, v in qp.items()])
+        target_path += "?" + q
+    await _proxy_ws(websocket, target_path)
 
 
 # ---- 整櫃廣播終端（Broadcast Terminal）----

@@ -110,9 +110,9 @@ Wistron PA Server Manager：Web 管理介面（FastAPI 後端 + 原生 JS 前端
 - 完整對話紀錄與本 AGENTS.md 的備份位置，由最近一次工作階段告知使用者實際路徑。
 - 建議新對話開啟後：`cat AGENTS.md` 或請 agent 讀本檔，即可接續 §八 的待辦。
 
-## 十、BMC / KVM 廣播系統研究備忘（暫停中，勿忘）
+## 十、BMC / KVM 廣播系統研究備忘（已解凍，2026-08 重啟）
 
-> 使用者要求「先記著，先處理別的問題」。此為已完成的探索與評估，KVM 實作尚未動工。
+> 早期「此為探索、尚未動工」的狀態已過時——**KVM 廣播已實際開發中，詳見最下方 §十二**。§十 底下的是早期研究筆記，部分結論（如「OneTree 404 / 需挖 OEM 路徑」）已被 §十二 的實作推翻（實際走 /kvm/0 就通）。
 
 - **現況**：pa_manager 沒有 KVM，BMC 只有「文字 terminal」= node bridge `/ws/terminal/{name}/bmc` 直接 SSH 進 BMC shell（ssh2 `client.shell()`）；開關機走 backend `ipmi_power()`（OS 內 ipmitool `-I open` 優先 → OOB lanplus `-C 17`，fleet_l OpenBMC 專用）。
 - **OneTree = AMI MegaRAC OneTree，是 OpenBMC-based**。兩者共用 bmcweb（Redfish+KVM WebSocket+GUI+DBus）、obmc-ikvm（VNC/RFB server, libvncserver）、obmc-console（SOL, multi-sol）。
@@ -150,3 +150,181 @@ Wistron PA Server Manager：Web 管理介面（FastAPI 後端 + 原生 JS 前端
 ### 追加調整（同 session，未 commit）
 - rack 平面圖空槽「＋」只保留「新增系統」一個入口：`rackEmptyClick` 改為直接呼叫 `rackAddDialogAt(u)`（不再跳出「新增機櫃元件 / 加入同專案 L11」兩個按鈕的選單）。機櫃元件改由 System Manager 的 L11 分頁「＋ 新增元件」（addRackComponentDialog）加入。
 - rack 加入既有 L11 時 U 數固定：`rm-add-size` select 設 `disabled`，`rackAddPickMachine` 依該 L11 系統自身的 rack_size 鎖定選項（只能選那一個），且「加入」時 `rack_size` 直接取該機台的 rack_size（不再讀下拉）。`rackAddPassiveAt(u)` 已無入口呼叫（保留函式）。
+
+
+## 十二、KVM 廣播系統 — 實際開發進度（2026-08 重啟，進行中）
+
+> 使用者重啟此需求：在 System Manager 的專案卡片加「依專案的廣播 KVM」，目標一次同步改多台 BIOS。
+> 第一階段只針對 **fleet_l 專案**（兩台：host_g、host_a）。採「方案 2」= 後端代登入+代理、前端 noVNC。
+
+### 重要反轉：§十 早期筆記有兩處已被實作推翻
+1. **KVM 端點就是標準 `wss://{bmc}/kvm/0`（RFB 003.008）**，不是客製 OEM 路徑。早期回 404 是因為**沒帶登入 cookie/subprotocol**。
+2. **認證 = AMI `POST /login` → XSRF-TOKEN cookie 當 WS subprotocol**（不是 Redfish X-Auth-Token）。要同時帶 SESSION cookie 進 WS header 才會過。
+
+### 已完成的技術驗證（實際打通）
+- 兩台 fleet_l 都 `POST /login` 成功，`wss://<bmc>/kvm/0` 帶 `subprotocol=XSRF-TOKEN` + `Cookie: SESSION=...` 後，**收到 `RFB 003.008\n`**（標準 RFB 握手）。
+- `MaxConcurrentSessions:1` 是「每台 BMC 各自 1 個」，多台各自開不互搶 → 「多台各開 KVM + 鍵鼠同步廣播」架構成立。
+
+### 架構 / 檔案（當前狀態）
+- **後端 `kvm_bridge.py`（新增，未 commit）**：
+  - `_ami_login`（POST /login→XSRF+SESSION cookie）+ `_openbmc_login`（Redfish X-Auth-Token 備援）。
+  - `_connect_kvm(bmc,u,p)` async：先 AMI 後 OpenBMC，成功回已連上的 BMC WS。
+  - `kvm_proxy(ws, name)`：從 data.json 讀機台 → 連 BMC → **雙向透傳 RFB bytes**。
+    **重要：成功時【不可】先送 JSON status**（noVNC 需要第一個 bytes 就是 RFB 握手）。只在連線失敗時 send_json 錯誤。
+  - 認證是同步 requests，用 `asyncio.to_thread` 包避免卡 event loop。
+- **`main.py`（已改，未 commit）**：`import kvm_bridge`；新增 `@app.websocket("/ws/kvm/{name}")` → 呼叫 `kvm_bridge.kvm_proxy`。
+- **前端 `static/js/kvm_broadcast.js`（新增，未 commit）**：ES module。
+  - `import RFB from "/static/vendor/novnc/core/rfb.js"`（noVNC 1.5.0 core，**新增** `static/vendor/novnc/`，含 LICENSE）。
+  - `openKvmBroadcast(project)` 建立全螢幕 overlay，每台一格（canvasWrap + noVNC RFB client 連 `/ws/kvm/{name}`），
+    grid `repeat(auto-fill,minmax(420px,1fr))`；每格頭部「★ 設為 Master」+ 狀態點（灰=連線中/綠=已連/紅=斷）。
+  - 工具列：Master 下拉、🔊同步廣播 + 鍵盤/滑鼠複選、快捷鍵（F2/F11/F12/Esc/Enter/Ctrl+Alt+Del）。
+  - **同步廣播核心 `installInputMirror` + `mirrorInput`**：在 document 上用 **capture 監聽** keydown/keyup/mousedown/
+    mouseup/mousemove/wheel。若事件 `target === masterRec.rfb._canvas`，用 `new ev.constructor(ev.type, ev)` clone 並
+    `dispatchEvent` 到每個 slave 的 `rfb._canvas`（slave 自己的 noVNC 會把它送進各自 BMC）。kbSync/msSync 各自開關。
+  - `window.openKvmBroadcast` / `kvmSendKey` / `kvmSendCtrlAltDel` / `closeKvmBroadcast` 供 app.js onclick。
+- **`static/js/app.js`（已改，未 commit）**：
+  - line 75 esc 後加 `window.kvmMachinesFn = () => machines;`（給 kvm_broadcast 讀機台清單，避免循環相依）。
+  - renderProjectsList 的 proj-card-head（「📺 KVM 廣播」按鈕，onclick=`openKvmBroadcast('<proj>')`，title 說明同步改 BIOS），
+    放在「▲收合」之前。
+- **`static/index.html`（已改，未 commit）**：app.js 後加 `<script type="module" src="/static/js/kvm_broadcast.js?v=20260828h">`。
+
+### 目前驗證狀態
+- ✅ kvm_bridge 直接連兩台 fleet_l 都收到 RFB 003.008（python 直測）。
+- ✅ main.py import + route 註冊 `/ws/kvm/{name}`。
+- ✅ `systemctl restart pa-manager` 後：root 200、novnc core/rfb.js 200、kvm_broadcast.js 200。
+- ✅ proxy `ws://localhost:6969/ws/kvm/host_a` 收到原始 bytes 非 JSON（restart 後）。
+- ✅ proxy `ws://localhost:6969/ws/kvm/host_a` **已確認回傳 `RFB 003.008\n`（非 JSON）**，後端端到端打通。
+- ✅ **瀏覽器端已實際連上**：使用者火狐實測，fleet_l 兩台都連上 KVM 廣播介面並顯示 Ubuntu 畫面（左已登入 shell、右 host_b 停在 login），noVNC 渲染 OK。
+  - **待使用者實測**：開 System Manager → fleet_l 專案卡片「📺 KVM 廣播」。
+  - 重要：noVNC 1.5 **需手動 `rfb.connect()`**（constructor 不會自動連）——已在 kvm_broadcast.js 補上。
+### 安全注意
+- 瀏覽器只連後端 `/ws/kvm/{name}`，BMC 帳密（data.json 內明文）**只在後端**存取，不進前端。
+- noVNC 自簽憑證由後端繞過（ssl verify none），前端無感。
+- 不同解析度下「滑鼠座標」是直接複製（noVNC 各自 scaleViewport），進 BIOS 以鍵盤為主，滑鼠錯位影響小；已在設計上接受。
+
+### 接續清單（未完成）
+1. 重跑 proxy 驗證確認端點回 `RFB 003.008\n`。
+2. 用 headless chrome 或請使用者在 http://INTERNAL_IP_10:6969 的 fleet_l 專案卡片按「📺 KVM 廣播」實測：畫面顯示、同步鍵盤、F2 進 BIOS。
+3. 若連線不穩再考慮「後端單一連線 fan-out」或 session 釋放。
+4. 完成後 commit：kvm_bridge.py、main.py、kvm_broadcast.js、index.html、app.js、static/vendor/novnc/。
+
+### 🔥 最近一次 session 結束時的進行中狀態（2026-08，使用者睡前交代、尚未收尾）
+> 這段是使用者「要去睡覺了」時交代的收尾工作，**尚未完成、尚未 commit**。下次接續直接往下做。
+
+- **🔴 host_b 這台的 KVM 開不起來**（其他 fleet_l 都正常）。需**自行偵測判斷它是哪款 BMC**（不是 AMI OneTree），再針對該 BMC 開 KVM。
+- **使用者要求：以後開 KVM 前要先偵測 BMC 是哪款，再針對該 BMC 走對應的 KVM 路徑**（不要假設都是 OneTree `/kvm/0`）。目前已知 BMC 型別：`AMI OneTree`（fleet_l，走 /kvm/0）與 `AMI MegaRAC SP-X`（host_b，待挖私有 KVM 路徑），另有純 OpenBMC 尚未涵蓋。
+- **✅ BMC 類型已確認（使用者提供 BMC Web UI 畫面）**：host_b 是 **AMI MegaRAC SP-X**（AMI 商業版 BMC，不是標準 OpenBMC）。登錄 IP：**INTERNAL_IP_2**（UI 網址 INTERNAL_IP_2/#login，右上角 AMI 標誌、標題 MegaRAC SP-X，正體中文登錄頁）。
+- **除錯現況**：連 host_b 的 `/kvm` WS 回 **400**。已嘗試 subprotocol `["binary","base64"]`、帶完整 header/cookie、檢查 host 是否加 port，仍 400。下一步：用 **raw socket 手動發 Sec-WebSocket handshake** 抓 server 回應是 400 vs 101。
+  - 線索：viewer JS 用 `["binary","base64"]`；需帶 QSESSIONID（可能與 session 綁定）；host 用 `bmc_ip`（無 port）。
+  - AMI MegaRAC SP-X 的 KVM 是 AMI 私有 HTML5 通道（非標準 /GraphicalConsole），需從其 Web UI 的 JS bundle 挖 KVM WebSocket 路徑與 subprotocol/cookie 格式。
+- **host_b 帳密**：admin / CHANGE_ME__SPX_KVM_ADMIN_PASSWORD（使用者提供）。
+- **✅ UI bug 已驗證修復（2026-08，headless chrome CDP 實測）**：KVM 每格「⛶ 單獨」放大後直接「✕ 關閉」，`closeKvmBroadcast()` 內已有 `if(backBtn) backBtn.remove()` 徹底移除「◀ 返回多格」，實測關閉後 `#kvm-back-grid` 已完全不存在、overlay display=none，無殘留。
+- **收尾指令（使用者原話）**：「你做完自己開 chrome 看功能 OK 了，就自動 push github 跟 commit，晚安。」→ 完成後必須 headless chrome 實測 + commit + push 到 github.com/wistroneq3300/pa-server-manager。
+
+
+### AMI MegaRAC SP-X（host_b, INTERNAL_IP_2）——KVM 技術探勘成果（2026-08 新一輪）
+> 目標：讓開 KVM 前先偵測 BMC 型別，SP-X 用不同於 OneTree 的通道。以下為實際挖 Web UI JS bundle 得出的技術細節。
+
+- **偵測結果**：host_b = **AMI MegaRAC SP-X**（AMI Redfish Server, Manager v? , RtpVersion 13.03），NVIDIA HGX 平台
+  （Managers 另有 HGX_BMC_0 / HGX_FabricManager_0）。登錄 UI `INTERNAL_IP_2/#login`（正體中文）。
+- **重要：SP-X 的 KVM WebSocket 是 `wss://{bmc_ip}/kvm`（非 OneTree 的 `/kvm/0`），subprotocol `["binary","base64"]`**。
+  由 `/libs/kvm/videosocket.js` 實作（gzip 壓縮，檔頭有 `mj` 前綴），`new WebSocket(ws_proto+bmc+"/kvm", ["binary","base64"])`，
+  `ws_proto` 依 https→wss。`ws.binaryType="arraybuffer"`。
+- **登入（Web）**：`POST /api/session`，body `{username,password}`，成功回 JSON `{CSRFToken, user_id, privilege, ok, passwordStatus}`。
+  前端把 `CSRFToken` 存進 cookie **`garc`** + `user_id` + `privilege`，之後所有請求帶 **header `X-CSRFTOKEN: <garc>`**
+  （`e.ajaxSetup({headers:{"X-CSRFTOKEN":getCookie("garc")}})`）。SOL 的 WS `/sol` 也靠 `garc` cookie（csrftoken_not_found）。
+- **KVM /kvm WS 認證**：videosocket.js 沒有額外的 subprotocol/header 邏輯 → **靠同源瀏覽器自動帶 cookie**（garc/SESSION）
+  過認證。所以後端代理時必須**先完成 /api/session 登入拿 cookie，再帶同批 cookie 連 /kvm**。
+- **Redfish 登入（備援路徑）**：`POST /redfish/v1/SessionService/Sessions {UserName,Password}` → 201 + `X-Auth-Token` header，
+  之後帶 `X-Auth-Token` 存取。Manager 路徑是 `/redfish/v1/Managers/BMC`（大寫 BMC，不是 bmc）。
+  VirtualMedia = `/redfish/v1/Managers/BMC/VirtualMedia`（CD1-4）。NetworkProtocol 有 `KVMIP:{Port:443,ProtocolEnabled:true}`。
+- **Web UI 結構**：root `/` 是 gzip 的 index.html → `data-main=/app/main`，`/source.min.js`（7.6MB bundle，含多語系）為全 app 合併檔。
+  獨立模組可抓 `/libs/kvm/videosocket.js` 等（**每檔都是 gzip，且檔名前面有 `mj`/`lj` 等 cache-bust 前綴字元**，
+  解壓後 `mjvideosocket.js` 是乾淨 JS）。API 全在 `/api/*`。
+- **🚫 上次「No route to host」已查明原因（2026-08，使用者證實）**：不是 IP 反爆破/封鎖，是**有人把該機台的 AC 電源搬走了**，BMC 整台斷電，要等對方重新啟動系統後才恢復。下次再遇到整個來源對該 BMC 失聯，先考慮 AC/斷電，別誤判成反爆破。（先前曾誤記為來源 IP 被封鎖，已修正。）
+
+### ⚠️  SP-X KVM 実作待辦（下次接続）
+- 等 host_b（INTERNAL_IP_2）AC 恢復、重新啟動後：
+  1. 若先前「POST /api/session 回 403」在恢復後仍出現，需釐清是**存取控制(ACL/管理白名單)**還是功能問題：
+     - 重點：**Redfish SessionLogin 那時是回 201 成功的**（X-Auth-Token 有拿到），但 Web `/api/session` 回 lighttpd 403 XML。
+       兩者同一來源 IP、結果不同 → 代表不是來源整體被檔，而是 Web 路徑有別的限制。要從使用者慣用那台（平常能開 KVM 的來源 IP）驗證 /api/session 是否也 403。
+     - `/kvm` 回 400（非 404）= 端點存在、WS 握手缺認證，不是功能被關。
+  2. 用 `/usr/bin/python3.12` 走「POST /api/session → 拿 garc cookie → 帶 cookie 連 wss://INTERNAL_IP_2/kvm」驗證 RFB 握手。
+     （之前連 /kvm 回 400 很可能就是沒帶 cookie。若仍 400，試 subprotocol 只 `["binary"]` 或加 `X-CSRFTOKEN` header，或確認 SP-X 版本 KVM 是否需先啟用。）
+  3. KVM 廣播 UI 已驗證正常（solo→close 返回鈕無殘留，見下）；SP-X 連線端與 SP-X 偵測 adapter 已在 `kvm_bridge.py` 加上
+     （`_spx_login` + `_detect_bmc`：SP-X 走 /api/session + wss /kvm，OneTree 走原 /login + /kvm/0，OpenBMC 走 Redfish + token）。
+
+### 🎉 SP-X KVM 已打通：完整可行流程（2026-08 實測，host_b INTERNAL_IP_2）
+**403 的根因找到了：`/api/session` 只吃 `application/x-www-form-urlencoded`（jQuery 表單 data=），
+用 JSON body 會被 lighttpd 直接回 403。**（先前卡了很久就是因為一直用 JSON 送。）
+完整可行流程（後端 kvm_bridge.py 已照此實作）：
+1. `POST https://{bmc}/api/session`，**body 用 form-urlencoded**：`username=admin&password=...`，
+   headers 帶 `Accept: application/json,...; q=0.01`、`X-Requested-With: XMLHttpRequest`、`Origin`、`Referer`、瀏覽器 UA。
+   → **200**，回 JSON `{CSRFToken, user_id, privilege, passwordStatus, ok, QSESSIONID在Set-Cookie}`。
+2. 組 cookie（關鍵命名，瀏覽器用 `__Host-` 前綴）：`__Host-garc=<CSRFToken>`、`__Host-user_id`、`__Host-privilege`、
+   + server 設的 `QSESSIONID`。
+3. `wss://{bmc}/kvm`，subprotocol `["binary","base64"]`，**一定要帶 `Origin: https://{bmc}`** + `Cookie` header。
+   （沒帶 Origin 會 400；帶了即 OPEN，subprotocol 選 binary，第一包 `23,0,0,0,...` 是 AMI 私有協定 RFB 資料封包。）
+4. 前端 noVNC 連後端 `/ws/kvm/{name}` 代理 → 後端依此連 BMC。
+偵測：`_detect_bmc` 依序 SP-X(/api/session form) → OneTree(/login JSON) → OpenBMC(Redfish Sessions)。
+SP-X 的 KVM 是用 AMI 私有資料封包（頭 `23 00 00 00 06 00 00 02 00` 等），不是標準 `RFB ` 開頭——videosocket.js 自己解析。
+其他確認：無獨立 VNC TCP port(5900 關)、無 launch.jnlp(404)、只有 443 + 623(IPMI) 開；/libs/kvm/*.js 存在(Web KVM 前端資源健全)。
+
+
+### ⚙ 變更 OS IP（⚙ 設定按鈕，2026-08 完成+UI實測）
+**功能**：System Manager 機台列「▶ Terminal」與「刪除」之間新增「⚙ 設定」按鈕，
+可變更**只改 OS IP**（BMC IP 不可改）。因 DHCP 有時會漂移，改之前必須驗證「新 IP 確實是同一台」：
+1) **ping** 新 IP 必須線上；2) 用原本 OS 帳密 SSH 新 IP 抓 **hostname**，且須與**機台名稱相同**。
+→ 符合才更新並存檔；不符會拒絕並給明確訊息（避免把 IP 誤配到別的機器）。
+- **後端**：`main.py` `POST /api/machines/{name}/change-os-ip`，body `{new_os_ip}`。用 `ping_check` + `ssh_run(new_ip, os_user, os_pass, os_port, "hostname")`。
+  若 `hostname != name` 或 ping 不到 → 回 `{ok:false,...}`；成功才 `m["os_ip"]=new_ip; _save_data()`。
+- **前端**：`app.js` `machineRowSortable()` 與 `machineRowUnassigned()`（兩處）在 Terminal 與刪除之間加
+  `<button onclick="changeOsIp('...')">⚙ 設定</button>`；`changeOsIp()` 開 dialog + `submitChangeOsIp()` 呼叫後端。
+- **驗證（headless chrome 實測通過）**：
+  * System Manager 出現 7 個 ⚙ 設定按鈕，title「變更 OS IP（需 ping 通 + hostname 相符）」。
+  * 點開 dialog：prefilled 目前 OS IP、含輸入框、標題「⚙ 設定 OS IP — <機台名>」。
+  * 對 host_a 提交 client_d 的 IP(INTERNAL_IP_6) → 正確被拒：hostname 不符，紅字訊息顯示於 dialog，dialog 不關。
+  * 相同 IP → 「IP 與原本相同，未變更」。
+- 未 commit。
+
+
+### ⏸️ SP-X 渲染層抉擇：先擱置（等使用者回來決定）
+**使用者指示：先記著這個 action，先去做別的功能。** 接續時由此繼續。
+目前狀態：後端已打通（_detect_bmc = spx，_connect_kvm 連上 wss /kvm、收到第一包 IVTP 資料）。
+剩下的是「前端渲染」抉擇，使用者尚未選：
+- **A.** SP-X 前端用 AMI 自己的 videosocket/IVTP client，塞進多格廣播架構。
+- **B.** 後端把 IVTP 轉成標準 RFB 餵 noVNC（維持現有多格廣播）。
+- **C.** SP-X 用 iframe/solo 嵌 AMI 原生 KVM 畫面；多格鍵鼠同步廣播暫時只支援 RFB 型 BMC。
+筆者(agent)傾向 C。等使用者決定後：headless chrome 驗證 + commit + push。
+
+
+### ✅ fleet_l 專案 KVM 現況與 UI 實測（2026-08）
+- fleet_l 專案在 prod data 有 **4 台帶 BMC**：host_g(INTERNAL_IP_9)、host_f(INTERNAL_IP_5)、host_a(INTERNAL_IP_11)、node_h(INTERNAL_IP_13)，皆 bmc_user=root。
+  host_b 在 prod 的 bmc_user=**sysadmin**（但使用者提供 Web 帳號 admin / CHANGE_ME__SPX_KVM_ADMIN_PASSWORD——SP-X 以使用者給的為準，data 內的 sysadmin 可能是 SSH/其他）。
+- headless chrome CDP 實測 pa-manager 前端：fleet_l 開 KVM 廣播 → overlay+4 格 box+master 下拉 4 option 正常；solo→close 後 back 鈕無殘留（見上）。
+  3. 完成後 headless chrome 實測 + commit + push。
+
+### noVNC 部署陷阱（重要，踩過坑）——2026-08 修正
+- noVNC 除了 `core/` 還需要 `vendor/pako/`（zlib 壓縮）。缺它 → RFB module 載入失敗 → `openKvmBroadcast is not defined`。
+  Firefox 對 ES module 的 MIME 很嚴格：後端找不到檔時 fallback 回 application/json，火狐直接封鎖載入。
+- **從 npm `@novnc/novnc` 套件拿的 vendor/pako 是 CommonJS 轉譯版**（`Object.defineProperty(exports,"__esModule")`），
+  noVNC 的 inflator.js 用 ES `import ZStream from` 需要 **ESM 版**，會報 `does not provide an export named default`。
+- **正確解法**：從 GitHub 官方 release tarball `novnc/noVNC v1.5.0` 抓完整包，只保留 `core/` + `vendor/` + `LICENSE.txt`（總 ~720KB）。
+  官方 vendor/pako 的 zstream.js 是 `import default function ZStream(){}`（真 ESM）。
+- 驗證指令：掃 core/** 所有 `from ".js"` 是否 resolvable（python script）+ 檢查 zstream.js 第一行是否 `import default function`。
+
+- ✅ **連線渲染已完成實測**（2026-08，使用者火狐）：KVM 廣播介面兩格都顯示 Ubuntu 畫面。
+- ⚠️ **「鍵鼠同步」已加上 MASTER/SLAVE 徽章與「🔁 已同步 N 台」視覺回饋**，尚待使用者確認同步是否真正生效。
+  - Master 現在會「確定性設定」為第一台並自動 focus canvas；★設為 Master 按鈕 + 點格皆可切換。
+  - 同步原理：document capture 攔截 master 格 `_canvas` 的 key/mouse → clone 事件 dispatch 到各 slave 的 `_canvas`。
+
+- 🔴 **已找到同步失效關鍵 bug 並修正**（2026-08）：原先 alive 靠 noVNC 的 `connect` 事件設 true，
+  但實測該事件**並未觸發**（畫面有顯示、後端 WS 有 accepted，但 `connect` 事件沒 dispatch）→ 所有 `if(!rec.alive) return` 的功能（同步廣播、F2/F12 快捷鍵送 key、單台放大）全部被擋住 → 狀態列恒顯示 0/0、紅點、Master 徽章全藍。
+  - **修正**：改用 `setTimeout` 輪詢 `rec.rfb._rfbConnectionState === 'connected'` 決定 alive / 紅綠點，不依賴 connect 事件。
+  - **新增「⛶ 單獨」按鈕**（每格標題列）：單獨放大該台到全畫面（單台 KVM 控制需求，`kvmSolo(name)`/`kvmBackToGrid`/`applySoloUI`），右下角「◀ 返回多格」。
+  - **★ 設為 Master**：確定性設第一台為 master、即時切換 + 金框/MASTER 藍色 SLAVE 徽章已在。
+
+- 🔥 **全部功能已用 headless chrome（secure context 127.0.0.1）實測通過**（2026-08）：
+  - **根因**：官方 noVNC v1.5.0 的 RFB **沒有公開 `connect()` 方法**（constructor 傳 wsUrl 即自動 `_connect()`）。之前寫了 `rfb.connect()` → 拋 `rfb.connect is not a function` → 每台 RFB 建失敗 → 0/0 連線、Master 下拉空、★/⛶/同步全失效。**移除該行即修復**。
+  - ✅ 驗證結果：2/2 已連線；Master=host_a；下拉有 2 option；★MASTER(金)/SLAVE(藍)徽章正確；⛶單獨放大/返回多格正常；★設為Master切換正常；master canvas dispatch keydown → 狀態列「🔁 已同步 1 台 slave(keydown)」。
+- ⚠️ 安全上下文：使用者從 `http://INTERNAL_IP_10:6969` 開 → noVNC 印 `noVNC requires a secure context (TLS)` 警告（rfb.js:100）。實測在 insecure context 下**仍能連、畫面仍顯示**，但為求穩定建議後續評估改走 https。

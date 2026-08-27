@@ -369,6 +369,17 @@ input#f-bmc-pass:autofill{
 }
 .term-body{flex:1;display:flex;gap:8px;padding:10px;min-height:0}
 .term-pane{flex:1;display:flex;flex-direction:column;min-width:0}
+/* 終端機視圖切換：os / bmc 單獨放大 或 both 並排 */
+.term-mode{display:flex;gap:6px}
+.term-mode-btn{padding:2px 10px;font-size:11px;opacity:.7}
+.term-mode-btn.active{opacity:1;background:var(--accent,rgba(0,180,255,.18));border-color:var(--accent,#0af);color:var(--text)}
+.term-mode-btn:disabled{opacity:.4;cursor:not-allowed}
+.term-state-os .term-pane-os{display:flex}
+.term-state-os .term-pane-bmc{display:none}
+.term-state-bmc .term-pane-os{display:none}
+.term-state-bmc .term-pane-bmc{display:flex}
+.term-state-both .term-pane-os{display:flex}
+.term-state-both .term-pane-bmc{display:flex}
 .term-pane-label{
   font-size:11px;font-weight:700;padding:5px 10px;letter-spacing:.4px;color:var(--text-faint);
   border:1px solid var(--border);border-bottom:none;border-radius:8px 8px 0 0;background:var(--bg-panel-2);

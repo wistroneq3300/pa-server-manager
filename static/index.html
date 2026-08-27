@@ -194,15 +194,19 @@
     </div>
     <div class="term-statusbar" id="term-status">
       <span id="term-os-status">OS 連線中…</span>
-      <span class="spacer"></span>
+      <div class="term-mode" id="term-mode">
+        <button class="btn small term-mode-btn" id="term-mode-both" title="OS 與 BMC 並排顯示" onclick="setTermMode('both')">◫ 並排</button>
+        <button class="btn small term-mode-btn" id="term-mode-os" title="只顯示 OS，放大佔滿" onclick="setTermMode('os')">🖥 OS 放大</button>
+        <button class="btn small term-mode-btn" id="term-mode-bmc" title="只顯示 BMC，放大佔滿" onclick="setTermMode('bmc')">🌐 BMC 放大</button>
+      </div>
       <span id="term-bmc-status">BMC 連線中…</span>
     </div>
     <div class="term-body">
-      <div class="term-pane" id="term-os-pane">
+      <div class="term-pane term-pane-os" id="term-os-pane">
         <div class="term-pane-label">OS</div>
         <div class="term-box" id="term-os"></div>
       </div>
-      <div class="term-pane" id="term-bmc-pane">
+      <div class="term-pane term-pane-bmc" id="term-bmc-pane">
         <div class="term-pane-label">BMC</div>
         <div class="term-box" id="term-bmc"></div>
       </div>
@@ -243,6 +247,7 @@
 <script src="/static/vendor/xterm/xterm.js"></script>
 <script src="/static/vendor/xterm/addon-fit.js"></script>
 <script src="/static/vendor/chartjs/chart.umd.min.js"></script>
-<script src="/static/js/app.js?v=20260828h"></script>
+<script src="/static/js/app.js?v=20260828k"></script>
+<script type="module" src="/static/js/kvm_broadcast.js?v=20260828k"></script>
 </body>
 </html>

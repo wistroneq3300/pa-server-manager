@@ -1670,6 +1670,7 @@ function machineRowSortable(m, pi, mi, total) {
       <td style="white-space:nowrap">
         ${lvlBtn}
         ${canTerm ? `<button class="btn small" onclick="openTerm('${esc(m.name)}')">▶ Terminal</button>` : ""}
+        <button class="btn small" onclick="changeOsIp('${esc(m.name)}')" title="變更 OS IP（需 ping 通 + hostname 相符）">⚙ 設定</button>
         <button class="btn small" onclick="deleteMachine('${esc(m.name)}')">刪除</button>
       </td>
     </tr>`;
@@ -1707,6 +1708,7 @@ function machineRowUnassigned(m) {
       <td style="white-space:nowrap">
         ${lvlBtn}
         ${canTerm ? `<button class="btn small" onclick="openTerm('${esc(m.name)}')">▶ Terminal</button>` : ""}
+        <button class="btn small" onclick="changeOsIp('${esc(m.name)}')" title="變更 OS IP（需 ping 通 + hostname 相符）">⚙ 設定</button>
         <button class="btn small" onclick="deleteMachine('${esc(m.name)}')">刪除</button>
       </td>
     </tr>`;
@@ -2868,6 +2870,7 @@ async function deleteProject(name) {
 }
 /* ---------- 終端機（左右：左 OS / 右 BMC） ---------- */
 let termInstances = null;
+let termMode = "both";   // 'both' | 'os' | 'bmc'：終端機視圖（並排 / 只 OS / 只 BMC）
 // 把帳密資訊編進 URL 查詢（passive 元件點開時需動態填）
 function _termUrl(name, kind, creds) {
   let u = `/ws/terminal/${encodeURIComponent(name)}/${kind}`;
@@ -2958,6 +2961,7 @@ function openTermAt(name, osCreds, bmcCreds) {
   resetTermGeometry();
   $("term-os-status").innerHTML = `OS <span class="term-badge warn">連線中</span>`;
   $("term-bmc-status").innerHTML = `BMC <span class="term-badge warn">連線中</span>`;
+  // 有商品(creds)的 pane 完全由 termMode (CSS state class) 控制；不存在的 pane 用 inline display:none 強制隱藏
   $("term-os-pane").style.display = showOs ? "" : "none";
   $("term-bmc-pane").style.display = showBmc ? "" : "none";
   $("term-modal").style.display = "flex";
@@ -2967,6 +2971,31 @@ function openTermAt(name, osCreds, bmcCreds) {
   if (showOs) termInstances.os = new Term("term-os", _termUrl(name, "os", osCreds), "term-os-status");
   if (showBmc) termInstances.bmc = new Term("term-bmc", _termUrl(name, "bmc", bmcCreds), "term-bmc-status");
   Object.values(termInstances).forEach(t => t.connect());
+  setTermMode("both");   // 一開啟預設並排，並依商品可用性致能按鈕
+  requestAnimationFrame(() => fitAll());
+}
+// 切換終端機視圖：'both' 並排 / 'os' 單獨放大 / 'bmc' 單獨放大
+function setTermMode(mode) {
+  const box = $("term-modal-box");
+  const hasOs = !!termInstances?.os && $("term-os-pane").style.display !== "none";
+  const hasBmc = !!termInstances?.bmc && $("term-bmc-pane").style.display !== "none";
+  // 指定 mode 不可用時自動回退到可用的
+  let m = mode;
+  if (m === "os" && !hasOs) m = hasBmc ? "bmc" : "both";
+  if (m === "bmc" && !hasBmc) m = hasOs ? "os" : "both";
+  if (m === "both" && !hasOs && !hasBmc) m = "both";
+  termMode = m;
+  if (box) {
+    box.classList.remove("term-state-both", "term-state-os", "term-state-bmc");
+    box.classList.add("term-state-" + (m === "both" ? "both" : m));
+  }
+  ["both", "os", "bmc"].forEach(k => {
+    const b = $("term-mode-" + k);
+    if (!b) return;
+    b.classList.toggle("active", k === m);
+    if (k === "os") b.disabled = !hasOs;
+    if (k === "bmc") b.disabled = !hasBmc;
+  });
   requestAnimationFrame(() => fitAll());
 }
 // 原本的 openTerm：使用已存帳密（有 os+bmc 連兩窗；沒有就帶 creds 為空）
@@ -2976,6 +3005,41 @@ function openTerm(name) {
   openTermAt(name,
     (m.os_ip && m.os_user && m.os_pass) ? { host: m.os_ip, user: m.os_user, pass: m.os_pass, port: m.os_port || 22 } : null,
     (m.bmc_ip && m.bmc_user && m.bmc_pass) ? { host: m.bmc_ip, user: m.bmc_user, pass: m.bmc_pass, port: m.bmc_port || 623 } : null);
+}
+// ⚙ 設定：變更 OS IP（只改 OS IP，BMC 不給改），先驗證 ping 通 + hostname 相符
+function changeOsIp(name) {
+  const m = machines.find(x => x.name === name);
+  if (!m) return;
+  const cur = m.os_ip || "";
+  showDialog(`⚙ 設定 OS IP — ${esc(name)}`, `
+    <div class="rm-modal-body">
+      <p style="font-size:12px;color:var(--text-faint);margin-bottom:8px">
+        將變更此機台的 <b>OS IP</b>（BMC IP 不給改）。為避免 DHCP 漂移誤配，新 IP 必須：
+        <b>(1) ping 得通</b>、<b>(2) SSH 抓到的 hostname 與此機台名稱相同</b>，才允許變更。
+      </p>
+      <label style="display:block;font-size:12px;color:var(--text-faint);margin:8px 0 4px">新 OS IP</label>
+      <input class="input" id="new-os-ip-input" style="width:100%;padding:8px;font-family:monospace" value="${esc(cur)}" placeholder="例如 INTERNAL_IP_10">
+      <div id="osip-msg" style="margin-top:10px;font-size:12px"></div>
+    </div>`,
+    [
+      { txt: "取消", cls: "", fn: () => closeDialog() },
+      { txt: "變更 OS IP", cls: "primary", fn: () => submitChangeOsIp(name) },
+    ]);
+}
+async function submitChangeOsIp(name) {
+  const input = $("new-os-ip-input");
+  const msgEl = $("osip-msg");
+  const ip = input ? input.value.trim() : "";
+  if (!ip) { if (msgEl) { msgEl.textContent = "請輸入新 OS IP"; msgEl.style.color = "var(--red)"; } return; }
+  try {
+    const d = await api(`/api/machines/${encodeURIComponent(name)}/change-os-ip`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ new_os_ip: ip }) });
+    if (msgEl) { msgEl.textContent = d.msg || (d.changed === false ? "IP 與原本相同，未變更。" : "變更成功。"); msgEl.style.color = d.ok === false || d.changed === false ? "var(--amber)" : "var(--green)"; }
+    if (d.changed) { const mm = machines.find(x => x.name === name); if (mm) { mm.os_ip = d.machine ? d.machine.os_ip : ip; } loadMachines().then(() => setView(state.view)); }
+    if (d.ok === false) return;   // 拒絕變更時不關 dialog，方便看原因
+    closeDialog();
+  } catch (e) {
+    if (msgEl) { msgEl.textContent = e.message; msgEl.style.color = "var(--red)"; }
+  }
 }
 function setupTermPane(id) { $(id).innerHTML = ""; }
 function fitAll() {
