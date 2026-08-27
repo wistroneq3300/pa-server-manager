@@ -20,8 +20,10 @@ A centralized **web management console** for **AI GPU servers** (and racks). It 
 ### 1.2 L10 System Level (single node)
 - Add / manage individual servers over OS SSH (IP / user / password / port); hostname auto-probed on add.
 - BMC support: BMC IP can be auto-probed from the OS via `ipmitool` (`use_c17` maps to newer OpenBMC cipher 17).
-- View OS info, hardware inventory (CPU/DIMM/SSD/GPU/NIC), sensors, BMC power on/off.
-- **Telemetry viewer**: SQLite history + charts + trend analysis.
+- View OS info, hardware inventory (CPU / DIMM / SSD / **GPU** / NIC), sensors, **sensor AI diagnosis**, and BMC power on/off/AUX/reboot.
+- **GPU (NVIDIA + AMD)**: hardware inventory shows GPU count, model and VRAM, plus per-card **GPU FW / VBIOS**. Telemetry plots per-card util / temp / power / VRAM.
+  - NVIDIA via `nvidia-smi`; AMD Instinct (e.g. MI300X OAM) via `rocm-smi` + `amd-smi` (`telemetry_core.parse_amdgpu`).
+- **Telemetry viewer**: SQLite history + charts (CPU / Load / DIMM / SSD / NIC / GPU) + **Telemetry AI analysis** (2–3 line 繁中 readability of the selected window, local Ollama).
 - **BMC power badge**: live chassis power state with color coding.
 
 ### 1.3 L11 Rack Level (rack view)
@@ -29,8 +31,13 @@ A centralized **web management console** for **AI GPU servers** (and racks). It 
 - Empty-slot **"+"** adds a system (only shows **existing L11 systems of the same project, placed outside the rack**; U count is locked to that system's `rack_size`, not editable).
 - Occupancy checks: avoids occupied U ranges; multi-U devices need contiguous free slots.
 - **Rack topology map**: draws node ↔ switch/PDU/CDU links as an SVG connection diagram.
-  - The **"New Topology / Simulate Topology" buttons are currently paused** — they show a "feature under development" popup. (Original implementations `linkAddDialog()` / `rackDemoTopo()` are still fully preserved in `app.js`; point the button `onclick` back to them to re-enable.)
+  - The **"New Topology / Simulate Topology" buttons are currently paused** — they show a "此功能待開發" popup (see `topoTodo()` in `app.js`). (Original implementations `linkAddDialog()` / `rackDemoTopo()` are still fully preserved in `app.js`; point the button `onclick` back to them to re-enable.)
 - Topology toolbar: "expand/collapse" (`.topo-compact`), "delete all" (clear this project's links), SVG height-limited scrolling.
+- **Rack Telemetry** (whole-rack, per component type — the rack view's *Telemetry* sub-tab):
+  - Grouped by kind — **Server** (CPU / 記憶體 / GPU 功耗) · **Switch** (port 流量 / 溫度 / fan) · **Power Shelf / PDU** (功耗 / 電壓 / 電流) · **CDU** (水流量 / 水溫 / 水壓).
+  - Each type block is collapsible (per-block toggle + "全部收合/展開"); a per-machine latest-value table (機台 × 指標) plus whole-rack line charts over a selectable window (10 分鐘 → 24 小時).
+  - **Rack AI analysis**: 2–3 line 繁中 read of the whole-rack summary (same local-Ollama pattern as L10).
+  - Data path: backend SSH-collects per machine (`telemetry_core.get_rack_series`); project-name match is case-insensitive (proj_k / proj_k are the same rack).
 
 ### 1.4 Projects
 - Group machines by project (e.g. NCP / H100 / Miramar); L10 and L11 tabs are independent.
@@ -45,31 +52,58 @@ A centralized **web management console** for **AI GPU servers** (and racks). It 
 - List L10 systems with OS grouped by project, and send one command to many hosts' OS shells at once.
 - Command history `bcLog` records only **time + command**, **not** the target host list.
 
-### 1.7 AI Copilot
-- Natural-language assistant wired to a local Ollama (qwen3.8:27b). Also assists diagnostics / trend analysis.
+### 1.7 AI Copilot & AI Analysis
+- **AI Copilot** (`/api/copilot`): natural-language assistant wired to a **local Ollama** (`qwen3.8:27b`).
+- **AI analysis** is reused across several surfaces (all local Ollama, 繁中):
+  - **Sensor AI diagnosis** (`/api/machine/{name}/sensors/analyze`) — L10 detail.
+  - **Telemetry AI analysis** (`/api/machine/{name}/telemetry/analyze`) — L10, the selected time window.
+  - **Rack AI analysis** (`/api/rack/{project}/telemetry/analyze`) — the whole-rack telemetry summary.
+  - **Diagnostics / AI analysis** (`/api/machine/{name}/diagnose`).
+
+### 1.8 KVM (single + broadcast/sync)
+- **Single KVM**: browser noVNC → `/ws/kvm/{name}` → backend proxy to that BMC's RFB; BMC credentials stay server-side (`kvm_bridge.py`).
+- **KVM broadcast / 同步**: one keystroke/mouse fans out to many same-project machines. Flow:
+  1. Front-end first calls **`GET /api/kvm/basecode?project=<專案>`** to detect each BMC basecode (OpenBMC / OneTree / ...), returns `sync_ok` + reason.
+  2. `sync_ok` true → the "📺 KVM 同步" button (project card) is enabled; one input then broadcasts to the online syncable set.
+  3. Mixed protocols (RFB + IVTP), or all-IVTP (SP-X key/mouse sync not yet implemented) → `sync_ok=false`, button disabled with a reason.
+- **SP-X KVM auto-login broker** (`spx_kvm_broker/`, own uvicorn / port 18992): auto-login + dedicated-subdomain KVM for SP-X (IVTP) machines.
+  - Config `deploy/broker_env.sh`, systemd `deploy/spx-broker.service`, start `deploy/start_broker.sh`.
+  - Background: `docs/spx-kvm-auto-login-evaluation.md`, `docs/regression-spx-kvm-broker.md`, `docs/rollback-spx-kvm-broker.md`, `docs/runbook-spx-session-cap-15000.md`.
+
+### 1.9 Deep-link URLs
+- `#/` — overview.
+- `#/rack` / `#/rack/{project}` / `#/rack/{project}/{subview}` (subview: `plane` | `telemetry`).
+- `#/projects/{name}` — locate + flash-highlight that project's card.
+- Legacy `#/rack/{subview}/{project}` still works for compatibility.
+- F5 / refresh keeps the current project + subview state.
 
 ---
 
 ## 2. System Architecture (read before deploying)
 
 ```
-Browser (index.html + app.js + xterm.js)
+Browser (index.html + app.js + xterm.js + noVNC)
    |
    | HTTP (REST)    /api/*
    | WebSocket      /ws/*
    v
 pa-manager  ----(FastAPI, uvicorn)----  port 6969 (prod) / 8788 (trial)
-   |  * handles REST API, WebSocket proxy, reads/writes data.json & telemetry.db
-   |  * /ws/terminal/* and /ws/rack-broadcast are two-way proxies to the node bridge
+   |  * REST API + telemetry collection; reads/writes data.json & telemetry.db
+   |  * AI: local Ollama (qwen3.8:27b) — copilot + every AI-analysis endpoint
+   |  * proxies /ws/terminal/*, /ws/rack-broadcast → bridge; /ws/kvm/* → BMC RFB
    v
 pa-terminal-bridge  ----(node + ssh2)----  port 6968
    |  * actually opens SSH connections to each host (OS / BMC)
+   |
+   |    spx_kvm_broker (uvicorn, port 18992) — SP-X/IVTP auto-login + dedicated-subdomain KVM
    v
-Managed hosts  (OS over SSH, BMC over IPMI/Redfish)
+Managed hosts  (OS over SSH, BMC over IPMI/Redfish, KVM over RFB)
 ```
 
-- `pa-manager`: Python backend — data, REST, and proxies terminal WebSockets to the bridge.
-- `pa-terminal-bridge`: Node service that opens the real SSH channels; **without it the web terminal is unavailable** (everything else still works).
+- `pa-manager`: Python backend — data, REST, telemetry, AI (local Ollama), and proxies WebSockets.
+- `pa-terminal-bridge`: Node (ssh2) service that opens the real SSH channels; **without it the web terminal is unavailable** (everything else still works).
+- `spx_kvm_broker`: separate uvicorn process (port 18992) for SP-X / IVTP KVM auto-login + dedicated-subdomain KVM. **Optional** — only needed for SP-X machines.
+- Ollama (local LLM, `qwen3.8:27b`): needed for the AI Copilot and all AI-analysis endpoints; if down, those lines show empty text while the rest of the console works.
 - Data: the machine list lives in `data.json`, telemetry history in SQLite `telemetry.db`.
 
 ---
@@ -79,23 +113,28 @@ Managed hosts  (OS over SSH, BMC over IPMI/Redfish)
 ```
 pa_server_manager/
 ├── main.py                 # FastAPI backend (main program)
-├── telemetry_core.py       # telemetry collection core
+├── telemetry_core.py       # telemetry collection core (OS/GPU/switch/CDU/...)
+├── kvm_bridge.py           # KVM proxy (browser noVNC → BMC RFB) + basecode detect
 ├── requirements.txt        # Python dependencies
 ├── run.sh                  # dev / trial launch script
 ├── pa-manager.service      # systemd unit (production, port 6969)
 ├── backup_prod.sh          # daily backup script
 ├── scripts/
 │   └── seed_simulated_telemetry.py
+├── spx_kvm_broker/         # SP-X (IVTP) KVM auto-login broker (own uvicorn / port 18992)
+├── deploy/                 # SP-X broker ops: broker_env.sh, spx-broker.service, start_broker.sh
+├── docs/                   # SP-X KVM runbooks / evaluation / regression / rollback
 ├── static/
 │   ├── index.html          # frontend entry
 │   ├── css/style.css
 │   ├── js/app.js           # frontend logic (all features live here)
 │   ├── img/
-│   └── vendor/             # chartjs / xterm
+│   └── vendor/             # chartjs / xterm / noVNC
 ├── terminal_bridge/        # Node terminal bridge (ssh2 + ws)
 │   ├── server.js
 │   ├── package.json
 │   └── package-lock.json    # run `npm ci` after clone
+├── tests/                  # pytest (parsers, GPU parsers, ...)
 └── AGENTS.md               # project knowledge for OpenHands (development)
 ```
 
@@ -132,6 +171,17 @@ cd ..
 ```
 
 > If `npm ci` is not available, `npm install` works too.
+
+### Step 3b — Local Ollama (for the AI features — optional)
+
+> Optional, but without it the AI Copilot and every AI-analysis box (sensor / telemetry / rack)
+> just show empty text; everything else works fine.
+
+```bash
+curl -fsSL https://ollama.com/install.sh | sh        # install Ollama once
+ollama pull qwen3.8:27b                                # model the code expects (main.py OLLAMA_MODEL)
+ollama serve &                                         # or run as a systemd service
+```
 
 ### Step 4 — Prepare a data directory
 
@@ -178,11 +228,25 @@ sudo systemctl status pa-manager pa-terminal-bridge
 > Both services must run, and **pa-terminal-bridge must be able to read the same
 > `$PA_DATA_DIR/data.json`** (it reads credentials from that same file).
 
+**Optional — SP-X KVM auto-login broker** (only if you manage **SP-X / IVTP** machines):
+
+```bash
+cp deploy/broker_env.sh /etc/pa-broker.env        # edit tokens / endpoints
+sudo cp deploy/spx-broker.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now spx-broker            # uvicorn on port 18992
+```
+
+> Non-SP-X (plain OpenBMC RFB) KVM does **not** need the broker — `pa-manager` proxies straight to the BMC.
+
 ### Step 6 — Verify
 
 - Open http://<host>:6969/ — the UI should load.
 - In "System Manager", add a system (OS IP/user/password), then open its web
   terminal to confirm SSH works.
+- If Ollama is running, open a machine's / rack's Telemetry view and confirm the
+  AI-analysis line fills in with a 繁中 summary.
+- (SP-X only) confirm the broker: `sudo systemctl status spx-broker` and a KVM sync test.
 
 ---
 
@@ -226,6 +290,10 @@ sudo systemctl restart pa-manager pa-terminal-bridge
 | `TERM_BRIDGE_PORT` | 6968 | node terminal bridge port |
 | `TERM_BRIDGE_HOST` | 0.0.0.0 | node terminal bridge bind address |
 | `IPMI_CIPHER` | 17 | ipmitool cipher (use 17 for newer OpenBMC) |
+| `IPMI_CIPHER_NO17` | 3 | cipher used when a machine has `use_c17=false` |
+| `TELEMETRY_MAX_MIN` | 43200 | hard cap (minutes) on how far back telemetry series are fetched |
+
+> Note: the AI model/endpoint are hard-coded in `main.py` — `OLLAMA_URL` (default `http://127.0.0.1:11434`) and `OLLAMA_MODEL` (default `qwen3.8:27b`).
 
 ---
 
@@ -240,18 +308,24 @@ sudo systemctl restart pa-manager pa-terminal-bridge
 | GET | `/api/machine/{name}` | Machine detail |
 | GET | `/api/machine/{name}/detail` | OS info + hardware inventory |
 | GET | `/api/machine/{name}/sensors` | Sensor readings |
+| GET | `/api/machine/{name}/sensors/analyze` | Sensor AI diagnosis |
 | GET/POST | `/api/machine/{name}/power` | Read / control BMC power |
+| POST | `/api/machine/{name}/aux`, `/reboot` | AUX power / reboot (BMC) |
 | GET | `/api/machine/{name}/telemetry` | Telemetry history (SQLite) |
-| GET | `/api/machine/{name}/telemetry/analyze` | Trend analysis |
+| GET | `/api/machine/{name}/telemetry/analyze` | Telemetry AI analysis (local Ollama) |
 | GET/POST | `/api/machine/{name}/diagnose` | Diagnostics / AI analysis |
 | GET | `/api/rack/ping` | Rack-level ping sweep |
+| GET | `/api/rack/{project}/telemetry` | Whole-rack telemetry (by component type) |
+| GET | `/api/rack/{project}/telemetry/analyze` | Rack AI analysis (local Ollama) |
 | POST/GET/DELETE | `/api/rack/passive`, `/api/links` | Rack elements & links |
-| GET/POST/DELETE | `/api/projects` | Project management |
+| GET/POST/DELETE | `/api/projects` | Project management (+ `/api/projects/reorder`, `/api/machines/reorder`) |
 | POST | `/api/copilot` | AI Copilot |
+| GET | `/api/kvm/basecode` | Detect per-machine BMC basecode + whether KVM sync is possible |
 
 WebSocket:
 - `/ws/terminal/{name}/{kind}` — OS/BMC terminal (kind = `os` | `bmc`), proxied two-way to the bridge.
 - `/ws/rack-broadcast` — rack broadcast terminal (same-project multi-host).
+- `/ws/kvm/{name}` — single KVM (noVNC) proxied to the BMC RFB; plus KVM-broadcast sync across a project.
 
 ---
 
