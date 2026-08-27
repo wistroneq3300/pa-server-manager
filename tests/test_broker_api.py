@@ -111,6 +111,21 @@ class TestBmcLaunch:
         assert client.post("/__spx_launch", json={"launch_id": lid}, headers=h,
                            follow_redirects=False).status_code == 403
 
+    def test_consume_via_form_encoded_body(self, client, monkeypatch):
+        """Frontend SP-X card uses an HTML <form> submit (urlencoded body).
+        Broker must accept launch_id from form-encoded POST body (not just JSON)."""
+        monkeypatch.setattr("spx_kvm_broker.broker.SpxClient", FakeSpxClient)
+        lid = _launch(client).json()["launch_id"]
+        h = {"Host": "bmc-bmc-internal-a.kvm.lab.example.internal"}
+        resp = client.post(
+            "/__spx_launch",
+            data={"launch_id": lid},          # urlencoded form body
+            headers={**h, "Content-Type": "application/x-www-form-urlencoded"},
+            follow_redirects=False)
+        assert resp.status_code == 302, resp.text
+        names = [c.split("=", 1)[0] for c in resp.headers.get_list("set-cookie")]
+        assert "QSESSIONID" in names
+
     def test_missing_launch_id(self, client):
         h = {"Host": "bmc-bmc-internal-a.kvm.lab.example.internal"}
         assert client.post("/__spx_launch", json={}, headers=h).status_code == 400

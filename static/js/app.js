@@ -1592,7 +1592,7 @@ function renderProjectsList() {
             ${p.desc ? `<span class="proj-card-desc">${esc(p.desc)}</span>` : ""}
           </div>
           <span class="spacer"></span>
-          ${kvmCands.length ? `<button class="btn small proj-kvm-btn" onclick="event.stopPropagation();openKvmBroadcast && openKvmBroadcast('${esc(p.name)}')" title="把此專案有 BMC 的 ${kvmCands.length} 台系統以 noVNC 並排顯示，並可鍵盤/滑鼠同步廣播">📺 KVM 廣播</button>` : ""}
+          ${kvmCands.length ? `<button class="btn small proj-kvm-btn" onclick="event.stopPropagation();openKvmBroadcast && openKvmBroadcast('${esc(p.name)}')" title="專案 KVM：SP-X 自動登入個別廟畫，RFB/OpenBMC 並排同步廣播">📺 KVM</button>` : ""}
           <button class="btn small proj-collapse-btn" onclick="event.stopPropagation();toggleProject('${esc(p.name)}')" title="${collapsed ? "展開此專案" : "收合此專案（隱藏機台清單）"}">${collapsed ? "▼ 展開" : "▲ 收合"}</button>
         </div>
         ${!collapsed && members.length ? `<div class="proj-table-scroll"><table class="t">

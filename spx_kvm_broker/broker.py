@@ -134,11 +134,18 @@ class Broker:
 
         The browser must send the launch_id in the POST body (never URL).
         """
-        try:
-            body = await request.json()
-        except Exception:
-            return JSONResponse({"ok": False, "error": "bad_request"},
-                                status_code=400)
+        # Accept launch_id in the POST body either as JSON or form-encoded.
+        # (HTML <form> submit uses application/x-www-form-urlencoded; the portal
+        #  JS uses JSON. Never read launch_id from URL/query.)
+        ctype = (request.headers.get("content-type") or "").lower()
+        if "application/json" in ctype:
+            try:
+                body = await request.json()
+            except Exception:
+                return JSONResponse({"ok": False, "error": "bad_request"},
+                                    status_code=400)
+        else:
+            body = dict(await request.form())
         launch_id = (body.get("launch_id") or "").strip() if isinstance(body, dict) else ""
         if not launch_id:
             return JSONResponse({"ok": False, "error": "missing_launch_id"},

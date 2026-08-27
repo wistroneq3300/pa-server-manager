@@ -247,7 +247,17 @@
 <script src="/static/vendor/xterm/xterm.js"></script>
 <script src="/static/vendor/xterm/addon-fit.js"></script>
 <script src="/static/vendor/chartjs/chart.umd.min.js"></script>
-<script src="/static/js/app.js?v=20260828n"></script>
-<script type="module" src="/static/js/kvm_broadcast.js?v=20260828r"></script>
+<script src="/static/js/app.js?v=20260901b"></script>
+<script>
+// KVM 自動登入（Plan A）：launch_id 由 broker mint，route 是 Portal origin 提供
+// （nginx 把 /api/kvm/launch 代轉 broker）。主 app 若跑在 dev origin（127.0.0.1:6969），
+// 就用指定的 broker Portal host；正式部署時整個 app 掛在 portal host 下即自動對齊。
+window.SPX_KVM_LAUNCH_API =
+  (window.SPX_KVM_LAUNCH_API) ||
+  (location.hostname === "127.0.0.1" && "https://portal.lab.example.internal/api/kvm/launch") ||
+  (location.origin + "/api/kvm/launch");
+</script>
+<script type="module" src="/static/js/kvm_broadcast.js?v=20260901f"></script>
 </body>
+
 </html>

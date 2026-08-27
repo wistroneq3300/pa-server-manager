@@ -293,54 +293,69 @@ function detectDetailHTML(data) {
   return `<div style="margin-top:2px"><b>偵測結果：</b>協議 = ${esc(kindsStr)}</div>${rows}`;
 }
 
-/* 非 RFB / 離線 卡片：不連線，只顯示 basecode 與原因 */
-/* 非 RFB / 離線卡片：
-   - SP-X 在線：SP-X 自帶 Web KVM（lighttpd，X-Frame-Options SAMEORIGIN 禁止跨域 iframe），
-     所以給「新分頁開啟原生 KVM」按鈕（https://<bmc_ip>/，SP-X 登入頁帳密 admin/CHANGE_ME__SPX_KVM_ADMIN_PASSWORD）。
-   - 離線 / 偵測失敗：純「未開啟」顯示。 */
-function offlineCard(name, baseLabel, ip, reason, kind) {
+/* ---------- SP-X 卡片：本版本 KVM 不可用（無開啟按鈕） ---------- */
+/* MegaRAC SP-X 使用專屬 IVTP 協定，本版本暫不提供 KVM 開啟，僅顯示「無法使用」。 */
+function spxCard(name, bmcSubdomain) {
   const grid = $("kvm-grid");
   if (!grid) return;
-  const isSpx = (kind === "spx") && !!ip;
-  const c = isSpx ? "#e8c46a" : "#e05656";
   const box = document.createElement("div");
   box.className = "kvm-box";
   box.dataset.name = name;
-  box.dataset.kind = kind || "offline";
-  box.style.cssText = "background:#0f1319;border:1px dashed " + (isSpx ? "#3a2f14" : "#4a3d1f") +
-    ";border-radius:10px;overflow:hidden;display:flex;flex-direction:column;min-height:220px;";
-  const url = isSpx ? "https://" + ip + "/" : "";
+  box.dataset.kind = "spx";
+  box.style.cssText = "background:#0f1319;border:1px solid #3a2f14;border-radius:10px;overflow:hidden;" +
+    "display:flex;flex-direction:column;min-height:220px;";
   box.innerHTML = `
     <div style="display:flex;align-items:center;gap:8px;padding:6px 10px;border-bottom:1px solid #223043;background:#131a24">
-      <span style="width:8px;height:8px;border-radius:50%;background:${c};flex:0 0 auto"></span>
-      <span style="font-size:11px;font-weight:700;color:${c};background:#2a2014;border:1px solid #4a3a28;border-radius:4px;padding:1px 6px;flex:0 0 auto">${isSpx ? "未同步" : "未開啟"}</span>
+      <span style="width:8px;height:8px;border-radius:50%;background:#7a4a4a;flex:0 0 auto"></span>
+      <span style="font-size:11px;font-weight:700;color:#e8c46a;background:#2a2014;border:1px solid #4a3a28;border-radius:4px;padding:1px 6px;flex:0 0 auto">SP-X</span>
+      <b class="spx-name" style="font-size:13px;color:#dfe6f0"></b>
+      <span class="spx-bmc" style="color:#5a6b80;font-size:11px"></span>
+    </div>
+    <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:16px;color:#9fb0c4;text-align:center">
+      <b style="color:#e88a8f;font-size:14px">MegaRAC SP-X</b>
+      <div style="font-size:12px;line-height:1.7;max-width:360px">⚠ KVM 無法使用：本機為 MegaRAC SP-X，使用專屬 IVTP 協定，本版本不提供 KVM 開啟。</div>
+    </div>`;
+  box.querySelector(".spx-name").textContent = name;
+  box.querySelector(".spx-bmc").textContent = subdomainToIp(bmcSubdomain);
+  grid.appendChild(box);
+}
+
+/* bmc-<id>.kvm.lab... -> bmc-internal-a（顯示用；也是 broker 的 server_id 對照來源） */
+function subdomainToIp(sub) {
+  const m = /^bmc-([0-9-]+)\.kvm\./.exec(sub || "");
+  return m ? m[1].replace(/-/g, ".") : (sub || "");
+}
+
+/* 伺服器 BMC IP -> dedicated subdomain：INTERNAL_IP_2 -> bmc-bmc-internal-a.kvm.lab.example.internal
+   （與 nginx `map $host $bmc_upstream` 的 allowlist 命名一致） */
+function subdomainFor(bmcIp) {
+  const sid = String(bmcIp || "").replace(/\./g, "-");
+  return sid ? `bmc-${sid}.kvm.lab.example.internal` : "";
+}
+
+/* 非 RFB / 離線 卡片：不連線，只顯示 basecode 與原因（SP-X 另走 spxCard） */
+function offlineCard(name, baseLabel, ip, reason) {
+  const grid = $("kvm-grid");
+  if (!grid) return;
+  const box = document.createElement("div");
+  box.className = "kvm-box";
+  box.dataset.name = name;
+  box.dataset.kind = "offline";
+  box.style.cssText = "background:#0f1319;border:1px dashed #4a3d1f;border-radius:10px;overflow:hidden;display:flex;flex-direction:column;min-height:220px;";
+  box.innerHTML = `
+    <div style="display:flex;align-items:center;gap:8px;padding:6px 10px;border-bottom:1px solid #223043;background:#131a24">
+      <span style="width:8px;height:8px;border-radius:50%;background:#e05656;flex:0 0 auto"></span>
+      <span style="font-size:11px;font-weight:700;color:#e05656;background:#2a2014;border:1px solid #4a3a28;border-radius:4px;padding:1px 6px;flex:0 0 auto">未開啟</span>
       <b class="oc-name" style="font-size:13px;color:#dfe6f0"></b>
       <span class="oc-bmc" style="color:#5a6b80;font-size:11px"></span>
     </div>
     <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:16px;color:#9fb0c4;text-align:center">
-      <b style="color:${c};font-size:14px">${isSpx ? "⚠ MegaRAC SP-X（同步未開放）" : "⚠ 本機未連線"}</b>
+      <b style="color:#e05656;font-size:14px">⚠ 本機未連線</b>
       <div class="oc-reason" style="font-size:12px;line-height:1.7;max-width:360px"></div>
-      <span class="oc-act"></span>
     </div>`;
   box.querySelector(".oc-name").textContent = name;
   box.querySelector(".oc-bmc").textContent = `${baseLabel || "未知"} · ${ip || "-"}`;
-  const reasonEl = box.querySelector(".oc-reason");
-  const actEl = box.querySelector(".oc-act");
-  if (isSpx) {
-    reasonEl.innerHTML = "SP-X 自帶原生 Web KVM UI。此頁無法把多台 SP-X 鍵鼠同步（IVTP 私有協定），"
-      + "請在新分頁開啟該機 KVM，登入後即可操作。<br>"
-      + "<span style='color:#8fb0f0'>https://<span class='oc-ip'></span>/</span>"
-      + "　帳密：admin / CHANGE_ME__SPX_KVM_ADMIN_PASSWORD";
-    box.querySelectorAll(".oc-ip").forEach(e => e.textContent = ip);
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.textContent = "📺 開啟 SP-X 原生 KVM（新分頁）";
-    btn.style.cssText = "margin-top:4px;background:#1d2a3a;color:#dfe6f0;border:1px solid #2f4259;border-radius:8px;padding:8px 14px;font-size:13px;cursor:pointer";
-    btn.onclick = (e) => { e.preventDefault(); e.stopPropagation(); window.open(url, "_blank", "noopener"); return false; };
-    actEl.appendChild(btn);
-  } else {
-    reasonEl.textContent = reason || "離線 / 偵測失敗";
-  }
+  box.querySelector(".oc-reason").textContent = reason || "離線 / 偵測失敗";
   grid.appendChild(box);
 }
 
@@ -372,8 +387,8 @@ async function openKvmBroadcast(project) {
     setBanner(`⚠ 偵測失敗（${esc(det.error)}）。將以「全部當 RFB」方式嘗試（可能部分失敗）。`, "warn");
   }
 
-  // 2) 分類：能同步 = online 且 rfb !== false
-  const rfbCands = [], otherCands = [];
+  // 2) 分類：RFB(可同步) / SP-X(走 auto-login 新分頁) / 其他離線或不可同步
+  const rfbCands = [], spxCands = [], otherCands = [];
   for (const c of cands) {
     const d = detMap[c.name] || {};
     c._base = d.label || "未偵測";
@@ -383,11 +398,13 @@ async function openKvmBroadcast(project) {
       const isRfb = d.rfb !== false;
       if (online && isRfb) {
         rfbCands.push(c);
+      } else if (online && c._kind === "spx") {
+        spxCands.push(c);          // SP-X：新分頁開原生 KVM（Plan A auto-login）
       } else {
         otherCands.push(c);
         c._reason = !online
           ? "離線 / BMC 帳密偵測失敗"
-          : `${c._base}（非 RFB/IVTP）本版本未開放同步 — 等待 Phase 2 方案 C（iframe 嵌 AMI 原生 KVM）`;
+          : `${c._base}（非 RFB/IVTP）本版本未開放同步`;
       }
     } else {
       rfbCands.push(c);
@@ -396,8 +413,8 @@ async function openKvmBroadcast(project) {
 
   // 3) Banner + 偵測詳情
   if (det.ok) {
-    if (!det.data.sync_ok) {
-      // sync-incompatible -> explicit popup
+    if (!det.data.sync_ok && !spxCands.length) {
+      // 完全 sync-incompatible 且沒有 SP-X 可開：只連 RFB 可同步的。
       const NL = '\n';
       const lines = Object.keys(det.data.machines || {}).map(function(n) {
         const d = (det.data.machines && det.data.machines[n]) || {};
@@ -411,31 +428,35 @@ async function openKvmBroadcast(project) {
     }
     if (det.data.sync_ok) {
       setBanner(`✔ 協議一致，可同步。<br>${detectDetailHTML(det.data)}`, "ok");
-    } else if (otherCands.length && rfbCands.length) {
+    } else if ((otherCands.length || spxCands.length) && rfbCands.length) {
       setBanner(`⚠ 協議不一致，無法「全部同步」。<br>
                  <div style="color:#e88a8f">原因：${esc(det.data.reason || "")}</div>
                  ${detectDetailHTML(det.data)}
-                 <div style="margin-top:4px;color:#8fa0b5">本頁只連線「可同步（RFB、同協議）」的系統；其餘以「未開啟」卡片顯示。</div>`,
+                 <div style="margin-top:4px;color:#8fa0b5">SP-X（MegaRAC）本版本不提供 KVM，以「無法使用」卡片顯示；RFB 則並排同步。</div>`,
                 "err");
+    } else if (spxCands.length) {
+      setBanner(`ℹ 本專案為 SP-X（MegaRAC IVTP），本版本不提供 KVM 開啟，顯示為「無法使用」。<br>${detectDetailHTML(det.data)}`, "warn");
     } else if (otherCands.length) {
-      setBanner(`⚠ 本專案沒有可同步的 RFB 系統（SP-X/IVTP 尚未開放同步）。<br>${detectDetailHTML(det.data)}`, "warn");
+      setBanner(`⚠ 本專案沒有可開啟的 RFB/SP-X 系統。<br>${detectDetailHTML(det.data)}`, "warn");
     } else {
       setBanner(detectDetailHTML(det.data), "ok");
     }
   }
 
-  // 4) 非同步（SP-X 或離線）卡片
-  otherCands.forEach(c => offlineCard(c.name, c._base, c.bmc_ip, c._reason, c._kind));
+  // 4) 卡片：SP-X 顯示「無法使用」；其他離線/不可同步為「未開啟」
+  //    先更新 overlay 標題（無論有無 RFB 都會顯示目前專案）
+  const projEl = $("kvm-proj");
+  if (projEl) projEl.textContent = `｜專案：${project}（RFB ${rfbCands.length} 台 · SP-X ${spxCands.length} 台` + (otherCands.length ? ` · 其他 ${otherCands.length} 台不可同步` : "") + `）`;
+  spxCands.forEach(c => spxCard(c.name, subdomainFor(c.bmc_ip)));
+  otherCands.forEach(c => offlineCard(c.name, c._base, c.bmc_ip, c._reason));
 
-  // 5) 沒有可同步的 → 早退
+  // 5) 完全沒有可連線的 RFB（可同步）系統 → 早退（SP-X 卡已顯示）
   if (!rfbCands.length) {
-    showStatus("沒有可開啟的 RFB 系統");
+    showStatus(spxCands.length ? `偵測到 ${spxCands.length} 台 SP-X（MegaRAC），KVM 不可用` : "沒有可開啟的 RFB 系統");
     return;
   }
 
   // 6) 綁定控制項並對 RFB 系統連線
-  const projEl = $("kvm-proj");
-  if (projEl) projEl.textContent = `｜專案：${project}（RFB ${rfbCands.length} 台` + (otherCands.length ? `，另有 ${otherCands.length} 台非同步` : "") + `）`;
   $("kvm-broadcast").checked = true; K.broadcast = true;
   $("kvm-kbsync").checked = true; K.kbSync = true;
   $("kvm-mssync").checked = true; K.msSync = true;
