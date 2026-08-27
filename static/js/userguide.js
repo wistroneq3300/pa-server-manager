@@ -4,9 +4,13 @@ const USER_GUIDE = (() => {
 
   async function loadTemplate() {
     try {
-      const r = await fetch('/static/userguide_template.html', { cache: 'no-cache' });
+      const r = await fetch('/static/userguide_template.html?v=20260904e', { cache: 'no-cache' });
       if (!r.ok) throw new Error('HTTP ' + r.status);
-      return (await r.text()).trim();
+      let t = (await r.text());
+      // 檔案是被 <script type="text/userguide-html"> 包住的內嵌模板，取裡面的 HTML
+      const m = t.match(/<script[^>]*id="guide-tpl"[^>]*>([\s\S]*?)<\/script>/);
+      if (m) t = m[1];
+      return t.trim();
     } catch (e) {
       return '<p style="color:#ff8a80">載入說明內容失敗：' + (e && e.message || e) + '</p>';
     }
