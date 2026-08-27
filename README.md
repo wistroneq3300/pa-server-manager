@@ -37,7 +37,7 @@ A centralized **web management console** for **AI GPU servers** (and racks). It 
   - Grouped by kind — **Server** (CPU / 記憶體 / GPU 功耗) · **Switch** (port 流量 / 溫度 / fan) · **Power Shelf / PDU** (功耗 / 電壓 / 電流) · **CDU** (水流量 / 水溫 / 水壓).
   - Each type block is collapsible (per-block toggle + "全部收合/展開"); a per-machine latest-value table (機台 × 指標) plus whole-rack line charts over a selectable window (10 分鐘 → 24 小時).
   - **Rack AI analysis**: 2–3 line 繁中 read of the whole-rack summary (same local-Ollama pattern as L10).
-  - Data path: backend SSH-collects per machine (`telemetry_core.get_rack_series`); project-name match is case-insensitive (proj_k / proj_k are the same rack).
+  - Data path: backend SSH-collects per machine (`telemetry_core.get_rack_series`); project-name match is case-insensitive (e.g. `MyRack` and `myrack` resolve to the same rack).
 
 ### 1.4 Projects
 - Group machines by project (e.g. NCP / H100 / Miramar); L10 and L11 tabs are independent.
