@@ -14,6 +14,8 @@ const ROW_TOP = RACK_U + 1; // CSS grid 第 1 列在最上方（U48）；topRow 
 const RACK_SIZES = [1,2,3,4,6,8,12,16,24,32,48]; // 可選元件高度
 let machines = [];
 let projects = [];
+// KVM 廣播（static/js/kvm_broadcast.js，type=module）需要這隻 callback 取機台清單
+window.kvmMachinesFn = () => machines;
 const root = document.documentElement;
 function applyTheme(t) {
   root.dataset.theme = t;
@@ -879,7 +881,8 @@ function pageRack() {
       <button class="btn btn-danger" onclick="rackPowerAllDialog(false)">⏻ 關機整櫃</button>
       <button class="btn btn-warn" onclick="rackBulkReboot()">⟳ Reboot 整櫃</button>
       <button class="btn" onclick="rackBulkAux()">⚡ AUX 整櫃</button>
-      <button class="btn primary" onclick="rackBroadcastDialog('${esc(rackView.project)}')">📡 廣播終端</button>` : ""}
+      <button class="btn primary" onclick="rackBroadcastDialog('${esc(rackView.project)}')">📡 廣播終端</button>
+      <button class="btn" id="rack-kvm-btn" title="把此機櫃專案有 BMC 的系統以 noVNC 並排顯示，並可鍵盤/滑鼠同步廣播" onclick="openKvmBroadcast && openKvmBroadcast('${esc(rackView.project)}')">📺 KVM 廣播</button>` : ""}
     </div>
     <div class="rack-status-legend">
       ${Object.values(MGX_TYPES).filter((v, i, a) => a.findIndex(x => x.cls === v.cls) === i).map(v => `<span class="mgx-legend"><span class="mgx-dot ${v.cls}"></span>${esc(v.label)}</span>`).join("")}
