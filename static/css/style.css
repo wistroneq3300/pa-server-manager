@@ -182,6 +182,9 @@ body {
 .proj-sort-list{display:flex;flex-direction:column;gap:16px}
 .proj-card{background:var(--bg-panel);border:1px solid var(--border);border-radius:12px;overflow:hidden;padding:0;box-shadow:var(--shadow);transition:border-color .15s, box-shadow .15s}
 .proj-card:hover{border-color:color-mix(in srgb, var(--w-green) 35%, var(--border));box-shadow:var(--shadow-lg)}
+.proj-card-active{border-color:var(--w-green)!important;box-shadow:0 0 0 3px color-mix(in srgb, var(--w-green) 35%, transparent),var(--shadow-lg)}
+@keyframes projFlash{0%{background:color-mix(in srgb, var(--w-green) 22%, var(--bg-panel))}100%{background:var(--bg-panel)}}
+.proj-card-active .proj-card-head{animation:projFlash 1.2s ease-out}
 .proj-card-head{display:flex;align-items:center;padding:16px 18px;border-bottom:1px solid var(--border-soft);background:
   linear-gradient(180deg, color-mix(in srgb, var(--bg-panel-2) 92%, var(--accent-blue-bg)), var(--bg-panel-2));
   cursor:grab;user-select:none}
@@ -668,6 +671,9 @@ input#f-bmc-pass:autofill{
 .tel-collapse-all{font-size:11px;color:var(--text-faint);cursor:pointer;user-select:none}
 .tel-toolbar{display:flex;align-items:center;gap:10px;margin:0 0 12px}
 .tel-ai-hint{font-size:11px;color:var(--text-faint);margin-left:auto}
+#racktel-ai-wrap{margin-top:6px}
+#racktel-ai-wrap .racktel-ai-head{font-size:11px;font-weight:700;color:var(--text-faint);margin-bottom:3px;letter-spacing:.3px}
+#racktel-ai-wrap .tel-ai{margin-top:0}
 .tel-range-sel{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text-faint)}
 .tel-range-sel .input{padding:4px 8px;font-size:12px}
 .tel-ai{display:flex;align-items:flex-start;gap:8px;margin:0 0 14px;padding:10px 14px;
@@ -704,6 +710,8 @@ input#f-bmc-pass:autofill{
 .rt-bar-cell{display:flex;align-items:center;font-family:var(--mono);color:var(--text)}
 .rt-bar-num{background:var(--bg);border:1px solid var(--border-soft);border-radius:4px;padding:1px 6px;white-space:nowrap}
 .rt-bar-na{color:var(--text-faint)}
+.tel-block .tel-arrow{font-size:11px;color:var(--text-faint)}
+.tel-block[data-open="0"] > .tel-block-body{display:none}
 /* 每個 rt-kind 依其指標數設定欄位數（由 JS 設定 --rt-cols） */
 /* 整櫃 telemetry 比照單機詳情：左右左右兩欄（server 上面靠左、switch 上面靠右，其後依序往下） */
 #racktel-grid{grid-template-columns:1fr 1fr;gap:14px}

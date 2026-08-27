@@ -940,10 +940,12 @@ _HW_CMD = (
     "echo '__NIC__'; lspci 2>/dev/null | grep -Ei 'Ethernet|Network controller|InfiniBand' ; "
     "echo '__IPLINK__'; ip -o link show 2>/dev/null | awk -F': ' '{print $2}' | grep -Ev '^(lo|dummy|docker|virbr|veth|br-|vlan)' | sed 's/@.*//' ; "
     "echo '__GPU__'; nvidia-smi --query-gpu=index,name,memory.total,utilization.gpu --format=csv,noheader 2>/dev/null ; "
+    "echo '__AMDGPU__'; rocm-smi --showproductname 2>/dev/null ; rocm-smi --showmeminfo vram 2>/dev/null ; "
+    "echo '__AMD_ROCM__' ; rocm-smi --showuse 2>/dev/null ; rocm-smi --showtemp 2>/dev/null ; rocm-smi --showpower 2>/dev/null ; "
     "echo '__FW__'; dmidecode -t bios 2>/dev/null | grep -E 'Vendor:|Version:|Release Date:' | sed 's/^[[:space:]]*//' ; "
     "echo '__FW_SSD__'; for n in /sys/class/nvme/nvme[0-9]/firmware_rev; do [ -f \"$n\" ] && fw=$(cat \"$n\" | tr -d '[:space:]') && [ -n \"$fw\" ] && echo \"$(basename $(dirname $n)): $fw\"; done ; "
     "echo '__FW_NIC__'; for i in $(ls /sys/class/net/ 2>/dev/null | grep -Ev '^(lo|docker|veth|virbr|br-)'); do fw=$(ethtool -i \"$i\" 2>/dev/null | awk -F': ' '/firmware-version/{gsub(/^ +| +$/,\"\",$2); print $2}'); [ -n \"$fw\" ] && echo \"$i: $fw\"; done ; "
-    "echo '__FW_GPU__'; nvidia-smi --query-gpu=index,name,vbios_version --format=csv,noheader 2>/dev/null ; "
+    "echo '__FW_GPU__'; nvidia-smi --query-gpu=index,name,vbios_version --format=csv,noheader 2>/dev/null ; if command -v amd-smi >/dev/null 2>&1; then amd-smi static --json 2>/dev/null | python3 -c 'import sys,json;[print(str(c.get(\"gpu\",\"\"))+\",\"+str((c.get(\"asic\") or {}).get(\"market_name\",\"AMD GPU\"))+\",\"+str((c.get(\"vbios\") or {}).get(\"version\",\"\"))) for c in json.load(sys.stdin)]' 2>/dev/null ; fi ; "
     "true"
 )
 
@@ -1022,6 +1024,28 @@ def parse_hw(text):
         parts = [p.strip() for p in l.split(",")]
         if len(parts) >= 4:
             gpus.append({"name": parts[1], "mem": parts[2], "util": parts[3]})
+    if not gpus:
+        # AMD GPU：rocm-smi --showproductname 每張卡各有一行「Card Series」→ 張數/型號；
+        # --showmeminfo vram 抓 VRAM Total Memory (B) → 顯示用 GiB。與 NVIDIA {name,mem,util} 同構。
+        amd_lines = _section("__AMDGPU__")
+        am_name = None
+        am_count = 0
+        am_mem_mib = None
+        for l in amd_lines:
+            if "Card Series" in l:
+                am_count += 1
+                v = l.split("Card Series", 1)[1].strip(": ").strip()
+                if v:
+                    am_name = v
+            if "VRAM Total Memory (B)" in l:
+                try:
+                    b = float(l.split("VRAM Total Memory (B):", 1)[1].strip())
+                    am_mem_mib = int(round(b / (1024 ** 2)))
+                except Exception:
+                    pass
+        if am_count:
+            memtxt = str(am_mem_mib) if am_mem_mib else ""
+            gpus = [{"name": am_name or "AMD GPU", "mem": memtxt, "util": ""} for _ in range(am_count)]
     if gpus:
         hw["gpu"] = gpus
 
@@ -1118,7 +1142,7 @@ def machine_detail(name: str, refresh: int = 0):
         want_fresh = bool(refresh) or name not in _os_info_cache
         if want_fresh:
             hostname, rc, err = ssh_run(m["os_ip"], m.get("os_user",""), m.get("os_pass",""), m.get("os_port",22),
-                                        "uname -a && echo ---OSREL--- && cat /etc/os-release 2>/dev/null | head -4 && echo ---UPTIME--- && uptime && echo ---CPU--- && nproc && echo ---MEM--- && free -h | head -2 && echo ---GPU--- && nvidia-smi --query-gpu=name,memory.total,memory.used,utilization.gpu --format=csv,noheader 2>/dev/null | head -20")
+                                        "uname -a && echo ---OSREL--- && cat /etc/os-release 2>/dev/null | head -4 && echo ---UPTIME--- && uptime && echo ---CPU--- && nproc && echo ---MEM--- && free -h | head -2 && echo ---GPU--- && (nvidia-smi --query-gpu=name,memory.total,memory.used,utilization.gpu --format=csv,noheader 2>/dev/null || (command -v rocm-smi >/dev/null 2>&1 && { rocm-smi --showuse 2>/dev/null; rocm-smi --showmemuse vram 2>/dev/null })) | head -20")
             if rc == 0 and hostname:
                 _os_info_cache[name] = hostname
                 _os_info_time[name] = now.isoformat(timespec="seconds")
@@ -1670,7 +1694,7 @@ def _collect_diag(m):
         "echo '======= LOAD/TOP ======='; ps -eo pcpu,pmem,comm --sort=-pcpu | head -12; "
         "echo '======= DMESG-ERR ======='; dmesg -T 2>/dev/null | grep -iE 'error|fail|warn|panic|oops|mce|nvme|pcie|temperature|thermal' | tail -30; "
         "echo '======= JOURNAL-ERR ======='; journalctl -p err -n 30 --no-pager 2>/dev/null | tail -30; "
-        "echo '======= GPU ======='; nvidia-smi --query-gpu=index,name,utilization.gpu,temperature.gpu,memory.used,memory.total,power.draw --format=csv,noheader 2>/dev/null | head -10"
+        "echo '======= GPU ======='; (nvidia-smi --query-gpu=index,name,utilization.gpu,temperature.gpu,memory.used,memory.total,power.draw --format=csv,noheader 2>/dev/null || (command -v rocm-smi >/dev/null 2>&1 && { rocm-smi --showuse 2>/dev/null; rocm-smi --showtemp 2>/dev/null; rocm-smi --showmemuse vram 2>/dev/null; rocm-smi --showpower 2>/dev/null; })) | head -20"
     )
     osout, rc, err = ssh_run(m.get("os_ip"), m.get("os_user",""), m.get("os_pass",""),
                              m.get("os_port",22), os_cmd, timeout=30)
@@ -1774,7 +1798,9 @@ def rack_telemetry(project: str, minutes: int = 60):
     telemetry_core.init_db()
     proj = project
     # 只撈「在此專案 Rack（L11 機櫃）平面圖上」的元件（level=="rack"）：排除 L10 單機（level=="system"）如 proj_k-app-1
-    members = [m for m in machines.values() if m.get("project") == proj and m.get("level") == "rack"]
+    # 專案名大小寫不敏感（proj_k/proj_k 視為同一專案）
+    want_proj = (proj or "").casefold()
+    members = [m for m in machines.values() if (m.get("project") or "").casefold() == want_proj and m.get("level") == "rack"]
     # 排除 blanking 擋板（passive 且無監控指標），不列入監控類型
     components = sorted([
         {"name": m.get("name", ""), "kind": telemetry_core.kind_of(m)}

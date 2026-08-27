@@ -8,6 +8,8 @@ const NAV_ITEMS = [
 const TITLES = { dashboard: "首頁 / Dashboard", projects: "System Manager", rack: "Rack Manager", machine: "單機詳情" };
 const RENDERERS = { dashboard: pageDashboard, projects: pageProjects, rack: pageRack, machine: pageMachine };
 const state = { view: "dashboard" };
+let _activeProject = "";       // #/projects/{name}：目前定位的專案（deep-link + 高亮）
+let _flashActiveProject = false;  // 只在 parseHash deep-link 時設 true（跳轉後閃一下再清掉）
 const $ = (id) => document.getElementById(id);
 const RACK_U = 48;          // 機櫃總 U 數（改 48U 標準）
 const ROW_TOP = RACK_U + 1; // CSS grid 第 1 列在最上方（U48）；topRow = ROW_TOP - u
@@ -336,6 +338,7 @@ function bindRackCopilot() {
 
 function viewProject(pname) {
   projectLevelFilter.val = "all";
+  _activeProject = pname || "";
   state.view = "projects";
   setView("projects");
 }
@@ -980,8 +983,6 @@ function rackBlockRow(m, u, size, pinged) {
   const cls = up === true ? "green" : up === false ? "red" : "none";
   // 點機櫃元件本身一律進「單機詳情」；換位/類型請按右側「⇅」按鈕
   const click = `openMachine('${esc(m.name)}')`;
-  const ctrlBtn = `<button class="btn small" title="開機/關機/reboot/AUX" onclick="machControlDialog('${esc(m.name)}')">⚙</button>`;
-  const termBtn = `<button class="btn small" title="終端機" onclick="openTermDialog('${esc(m.name)}')">▶</button>`;
   const delBtn = `<button class="btn small btn-del" title="從機櫃移除" onclick="rackUnmount('${esc(m.name)}')">✕</button>`;
   const nm = `${info.icon} ${esc(m.name)}`;
   const uStack = size > 1
@@ -999,8 +1000,6 @@ function rackBlockRow(m, u, size, pinged) {
         <span class="rm-name">${nm}</span>
         <span class="rm-ip mono">${esc(m.bmc_ip || m.os_ip || "")}</span>
         <span class="rm-actions" onclick="event.stopPropagation()">
-          ${ctrlBtn}
-          ${termBtn}
           <button class="btn small" title="換位/類型" onclick="rackMoveDialog('${esc(m.name)}')">⇅</button>
           ${delBtn}
         </span>
@@ -1085,9 +1084,7 @@ function devicesHtml(members, pinged) {
         <td class="mono">${osCell}</td>
         <td class="mono">${bmcCell}</td>
         <td style="white-space:nowrap">
-          <button class="btn small" title="開機/關機/reboot/AUX" onclick="machControlDialog('${esc(m.name)}')">⚙</button>
-          <button class="btn small" title="終端機" onclick="openTermDialog('${esc(m.name)}')">▶</button>
-          <button class="btn small" onclick="rackMoveDialog('${esc(m.name)}')">⇅</button>
+          <button class="btn small" title="換位/類型" onclick="rackMoveDialog('${esc(m.name)}')">⇅</button>
         </td>
       </tr>`;
     }).join("") + `</tbody></table></div></div>`;
@@ -1136,23 +1133,57 @@ function rackTelemetryHtml() {
         </label>
       </div>
       <div class="racktel-status" id="racktel-status"></div>
+      <div id="racktel-ai-wrap" style="display:none">
+        <div class="racktel-ai-head">🤖 整櫃 AI 分析</div>
+        <div class="tel-ai" id="racktel-ai"></div>
+      </div>
       <div class="tel-grid" id="racktel-grid"><!-- 依類型動態填入 --></div>
       <div class="footer-hint">Rack Telemetry 依元件類型分開監控（Server＝CPU/記憶體/GPU、Switch＝Port流量/溫度、Power Shelf/PDU＝功耗/電壓/電流、CDU＝水流量/水溫/水壓），後端定時透過 SSH 收集。</div>
     </div>
   </div>`;
 }
+// 依 data-open 更新各 block 的箭頭（展開＝▼，收合＝▶）
+function rackTelUpdateArrows() {
+  document.querySelectorAll("#racktel-grid .rt-kind").forEach(b => {
+    const a = b.querySelector(":scope > .tel-block-head .tel-arrow");
+    if (a) a.textContent = (b.dataset.open === "1") ? "▼" : "▶";
+  });
+}
+function rackTelResizeVisible() {   // 展開後 canvas 之前可能是 0 尺寸，需 resize 重繪
+  Object.values(rackTelCharts).forEach(ch => { try { ch.resize(); } catch (_) {} });
+}
+function rackTelUpdateCollapseAll() {
+  const box = $("racktel-grid"); if (!box) return;
+  const el = $("racktel-collapse-all"); if (!el) return;
+  const anyClosed = box.querySelector("div[data-open='0']") !== null;
+  el.textContent = anyClosed ? "▼ 全部展開" : "▲ 全部收合";
+}
+function rackTelSetAll(open) {
+  const box = $("racktel-grid");
+  if (!box) return;
+  box.querySelectorAll("div[data-open]").forEach(d => d.dataset.open = open ? "1" : "0");
+  rackTelUpdateArrows();
+  rackTelUpdateCollapseAll();
+  if (open) requestAnimationFrame(rackTelResizeVisible);
+}
+function rackTelToggleBlock(headEl) {
+  const blk = headEl.closest(".tel-block");
+  if (!blk) return;
+  blk.dataset.open = (blk.dataset.open === "1") ? "0" : "1";
+  rackTelUpdateArrows();
+  rackTelUpdateCollapseAll();
+  if (blk.dataset.open === "1") requestAnimationFrame(rackTelResizeVisible);
+}
 function toggleRackTelAll() {
   const box = $("racktel-grid");
   if (!box) return;
-  const open = box.querySelector("div[data-open='1']") === null;
-  box.querySelectorAll("div[data-open]").forEach(d => d.dataset.open = open ? "1" : "0");
-  $("racktel-collapse-all").textContent = open ? "▲ 全部收合" : "▼ 全部展開";
+  rackTelSetAll(box.querySelector("div[data-open='1']") === null);  // 有開的→全收合；沒→全展開
 }
 // 產生某一類型（kind）的 tel-block HTML；canvas id 用 racktel-{kind}-{metric} 避免碰撞
 function rackTelKindBlock(kind, count) {
   const info = rackKindInfo(kind);
   return `<div class="tel-block rt-kind" data-kind="${esc(kind)}" data-open="1">
-    <div class="tel-block-head"><span class="tel-label">${info.icon} ${info.label} <em>（${count} 台）</em></span></div>
+    <div class="tel-block-head" onclick="rackTelToggleBlock(this)"><span class="tel-label">${info.icon} ${info.label} <em>（${count} 台）</em></span><span class="tel-arrow">▼</span></div>
     <div class="tel-block-body">
       <div class="rt-kind-empty" style="display:none">${info.icon} ${esc(info.label)} 目前無 telemetry 資料 — 等待接上真實系統後自動開始收集。</div>
       <div class="rt-kind-charts" style="display:block"></div>
@@ -1170,7 +1201,7 @@ function rackTelAppendBars(container, machines, defs) {
   container.style.setProperty("--rt-cols", String(metricKeys.length));
   // 用第一列標題，後面每台一列，每列內每個指標一個小格
   container.innerHTML = `
-    <div class="rt-bars-head">${metricKeys.map(k => `<span class="rt-bars-h">${esc((defs[k]||{}).label||k)}</span>`).join("")}</div>
+    <div class="rt-bars-head"><span class="rt-bars-h">機台</span>${metricKeys.map(k => `<span class="rt-bars-h">${esc((defs[k]||{}).label||k)}</span>`).join("")}</div>
     ${machines.map(m => `
       <div class="rt-bar-row">
         <span class="rt-bar-name">${esc(m.name)}</span>
@@ -1196,6 +1227,7 @@ async function loadRackTelemetry() {
     d = await api(`/api/rack/${encodeURIComponent(proj)}/telemetry?minutes=${_rackTelMinutes}`);
   } catch (e) { if (st) st.innerHTML = `⚠ 無法載入：${esc(e.message)}`; _rackTelLoading = false; return; }
   if (!d || !d.data) { if (st) st.innerHTML = "⚠ 此專案尚無 telemetry 資料（後端尚未採樣到機台）。"; _rackTelLoading = false; return; }
+  rackTelAnalyze(proj, _rackTelMinutes);   // 背景觸發 AI 分析（cache 去重，不阻塞渲染）
   // 依 kinds（後端已回傳此專案擁有的類型）建立各類型的 tel-block
   const kinds = d.kinds && d.kinds.length ? d.kinds : ["server"];
   const kindsCount = d.kinds_count || {};
@@ -1240,6 +1272,8 @@ async function loadRackTelemetry() {
     // bars：每台所有指標值
     if (machines.length) rackTelAppendBars(barsBox, machines, defs);
   });
+  rackTelUpdateArrows();
+  rackTelUpdateCollapseAll();
   _rackTelLoading = false;
 }
 function rackTelChart(id) {
@@ -1270,6 +1304,34 @@ function rackTelSet(id, labels, series, defs) {
              tension: .3, pointRadius: 0, borderWidth: 2 };
   });
   ch.update();
+}
+// 整櫃 telemetry 簡短 AI 分析：叫 /api/rack/{project}/telemetry/analyze → Ollama（跟單機同一 style）
+// 用 cache 避免每次 range 切換都打 Ollama（較慢）
+const rackAiTelCache = {};
+async function rackTelAnalyze(proj, minutes) {
+  const box = $("racktel-ai");
+  const wrap = $("racktel-ai-wrap");
+  if (!box || !wrap || !proj) return;
+  const key = `${proj}|${minutes}`;
+  if (rackAiTelCache[key] && box.dataset.k === key) {
+    box.innerHTML = rackAiTelCache[key]; wrap.style.display = ""; return;
+  }
+  wrap.style.display = "";
+  box.innerHTML = "✨ 正在彙總整櫃監控摘要並分析中…";
+  box.dataset.k = key;
+  let d;
+  try {
+    d = await api(`/api/rack/${encodeURIComponent(proj)}/telemetry/analyze?minutes=${minutes}`);
+  } catch (e) {
+    box.innerHTML = `⚠ AI 分析暫不可用（${esc(e.message)}）`; return;
+  }
+  if (d.error || !d.ok) {
+    box.innerHTML = d.error ? `⚠ ${esc(d.error)}` : "";
+    return;
+  }
+  const html = `${esc(d.analysis || d.summary || "")}`;
+  rackAiTelCache[key] = html;
+  box.innerHTML = html;
 }
 function initRackTelemetry() {
   const sel = $("racktel-select");
@@ -1592,7 +1654,7 @@ function renderProjectsList() {
             ${p.desc ? `<span class="proj-card-desc">${esc(p.desc)}</span>` : ""}
           </div>
           <span class="spacer"></span>
-          ${kvmCands.length ? `<button class="btn small proj-kvm-btn" onclick="event.stopPropagation();openKvmBroadcast && openKvmBroadcast('${esc(p.name)}')" title="專案 KVM：SP-X 自動登入個別廟畫，RFB/OpenBMC 並排同步廣播">📺 KVM</button>` : ""}
+          ${kvmCands.length ? `<button class="btn small proj-kvm-btn" onclick="event.stopPropagation();openKvmBroadcast && openKvmBroadcast('${esc(p.name)}')" title="支援 OpenBMC / OneTree 等 BMC 同步遠端">📺 同步 KVM</button>` : ""}
           <button class="btn small proj-collapse-btn" onclick="event.stopPropagation();toggleProject('${esc(p.name)}')" title="${collapsed ? "展開此專案" : "收合此專案（隱藏機台清單）"}">${collapsed ? "▼ 展開" : "▲ 收合"}</button>
         </div>
         ${!collapsed && members.length ? `<div class="proj-table-scroll"><table class="t">
@@ -1893,7 +1955,21 @@ function _renderMachine(view) {
   document.querySelectorAll(".nav-btn").forEach(b => b.classList.toggle("active", b.dataset.view === view));
   $("page-title").textContent = TITLES[view] || TITLES.machine;
   $("content").innerHTML = RENDERERS[view]();
-  if (view === "projects") { initProjectDrag(); }
+  if (view === "projects") {
+    initProjectDrag();
+    if (_activeProject && _flashActiveProject) {
+      _flashActiveProject = false;
+      requestAnimationFrame(() => {
+        const sel = `.proj-card[data-pname="${CSS.escape(_activeProject)}"]`;
+        const card = document.querySelector(sel);
+        if (card) {
+          card.classList.add("proj-card-active");
+          try { card.scrollIntoView({ behavior: "smooth", block: "start" }); } catch (_) { card.scrollIntoView(); }
+          setTimeout(() => card.classList.remove("proj-card-active"), 2500);
+        }
+      });
+    }
+  }
   if (view === "dashboard") bindCopilot();
   if (view === "machine") initTelemetry();
   if (view === "rack") {
@@ -1905,6 +1981,10 @@ function _renderMachine(view) {
 /* ---- URL 分頁路由（hash）：重新整理不回首頁 ---- */
 function currentRoute() {
   if (state.view === "machine") return "machine/" + encodeURIComponent(_activeMachine || "");
+  if (state.view === "rack" && rackView.project)
+    return "rack/" + encodeURIComponent(rackView.project);
+  if (state.view === "projects" && _activeProject)
+    return "projects/" + encodeURIComponent(_activeProject);
   return state.view || "dashboard";
 }
 function syncHash() {
@@ -1918,12 +1998,31 @@ function parseHash() {
   if (view === "machine" && parts[1]) {
     state.view = "machine";
     _activeMachine = decodeURIComponent(parts[1]).trim();
-  } else if (view === "rack" && parts[1]) {
-    // 支援 rack 子檢視 deep-link：#/rack/telemetry、#/rack/list、#/rack/plane、#/rack/{subview}/{project}
+  } else if (view === "rack") {
+    // 支援三種寫法（專案優先）：
+    //   #/rack/{project}                      ← 新（預設 subview）
+    //   #/rack/{project}/{subview}            ← 新
+    //   #/rack/{subview}/{project}            ← 舊（保留相容）
     state.view = "rack";
-    if (parts[1] === "telemetry") { devicesView = "telemetry"; if (parts[2]) rackSetProject(decodeURIComponent(parts[2])); }
-    else if (parts[1] === "list") { devicesView = "list"; if (parts[2]) rackSetProject(decodeURIComponent(parts[2])); }
-    else if (parts[1] === "plane") { devicesView = "plane"; if (parts[2]) rackSetProject(decodeURIComponent(parts[2])); }
+    if (parts.length >= 2) {
+      const SUBVIEWS = new Set(["plane", "list", "telemetry"]);
+      let sub = null, proj = null;
+      if (SUBVIEWS.has(parts[1])) {                          // rack/{subview}/{project}
+        sub = parts[1]; proj = parts[2] || null;
+      } else if (parts.length >= 3 && SUBVIEWS.has(parts[2])) {  // rack/{project}/{subview}
+        proj = parts[1]; sub = parts[2];
+      } else {                                                // rack/{project}
+        proj = parts[1];
+      }
+      if (sub)  devicesView = sub;
+      if (proj) rackSetProject(decodeURIComponent(proj));
+    }
+  } else if (view === "projects") {
+    state.view = "projects";
+    if (parts[1]) {
+      _activeProject = decodeURIComponent(parts[1]);
+      _flashActiveProject = true;
+    }
   } else {
     state.view = ["dashboard", "projects", "rack"].includes(view) ? view : "dashboard";
   }
@@ -2583,7 +2682,7 @@ function pageMachine() {
           </div>
         </div>
       </div>
-      <div class="footer-hint">Telemetry 由後端定時透過 SSH 收集（nvidia-smi + /proc），不需在被監控機器安裝 agent。</div>
+      <div class="footer-hint">Telemetry 由後端定時透過 SSH 收集（NVIDIA nvidia-smi / AMD rocm-smi + /proc），不需在被監控機器安裝 agent。</div>
     </div>`;
 }
 // 系統診斷結果暫存（key=機台名），避免頁面 async 更新時被清掉

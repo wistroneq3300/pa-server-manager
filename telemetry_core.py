@@ -4,6 +4,7 @@
 """
 import json
 import os
+import re
 import sqlite3
 import subprocess
 import threading
@@ -174,6 +175,7 @@ def ssh_run(host, user, password, port, command, timeout=25):
 
 # ---- GPU 收集 ----
 def parse_gpu(text):
+    """NVIDIA：nvidia-smi CSV（index,name,util,mem_total MiB,mem_used MiB,temp,power,power_limit）。"""
     out = []
     for line in (text or "").splitlines():
         line = line.strip()
@@ -198,12 +200,111 @@ def parse_gpu(text):
     return out
 
 
+def parse_amdgpu(raw_output):
+    """解析 AMD GPU 收集輸出，回傳與 NVIDIA 對齊的欄位
+    {gpu,name,util,mem_total,mem_used,temp,power,power_limit}（記憶體一律 GiB）。
+
+    真實 rocm-smi（ROCm 5.x/6.x）輸出格式為：
+      GPU[n]          : <LABEL>: <VALUE>
+    例：
+      GPU[0]          : GPU use (%): 0
+      GPU[0]          : VRAM Total Memory (B): 206141652992
+      GPU[0]          : VRAM Total Used Memory (B): 297771008
+      GPU[0]          : Temperature (Sensor junction) (C): 53.0
+      GPU[0]          : Current Socket Graphics Pipeline Power (W): 152.0
+      GPU[0]          : Card Series:  AMD Instinct MI300X OAM   （--showproductname）
+    GPU 數量＝出現過的最大索引 + 1；名稱優先取 `Card Series`（若無則回 "AMD GPU"）。
+    支援多支 GPU（依索引對應），溫度的多 sensor 取最大值。
+    """
+    # 資料行：GPU[n] : <label>: <number>
+    line_re = re.compile(r"^\s*GPU\[\s*(\d+)\s*\]\s*:\s*(.+?)\s*:\s*([\d.]+)\s*$")
+    # 名稱行：GPU[n] : Card Series: <name>（label 後面直接是名稱行而非數字，故另外抓）
+    name_re = re.compile(r"^\s*GPU\[\s*(\d+)\s*\]\s*:\s*Card Series:\s*(.+)$", re.I)
+
+    def classify(label):
+        s = label.lower()
+        if "vram total memory" in s:
+            return "mem_total_bytes"
+        if "total used memory" in s or "used memory" in s:
+            return "mem_used_bytes"
+        if "gpu use (%)" in s or "gpu utilization" in s or "gpu use" in s:
+            return "util"
+        if "temperature" in s:
+            return "temp"
+        if "power" in s and "max" not in s and ("(w)" in s or "power" in s.replace("max", "")):
+            return "power"
+        return None
+
+    name_by_idx = {}
+    rows = {}
+    for line in (raw_output or "").splitlines():
+        ns = name_re.match(line)
+        if ns:
+            name_by_idx[int(ns.group(1))] = ns.group(2).strip()
+            continue
+        m = line_re.match(line)
+        if not m:
+            continue
+        idx = int(m.group(1))
+        field = classify(m.group(2))
+        if field is None:
+            continue
+        val = float(m.group(3))
+        rec = rows.setdefault(idx, {})
+        if field == "temp":          # 多 sensor 取最大
+            rec["temp"] = max(rec.get("temp", val), val)
+        else:
+            rec[field] = val
+
+    if not rows:
+        return []
+    count = max(rows) + 1
+    default_name = next(iter(name_by_idx.values()), "AMD GPU")
+    out = []
+    for i in sorted(rows):
+        r = rows[i]
+        mem_total = r.get("mem_total_bytes")
+        mem_used = r.get("mem_used_bytes")
+        out.append({
+            "gpu": i,
+            "name": name_by_idx.get(i, default_name),
+            "util": r.get("util"),
+            "mem_total": (mem_total / (1024 ** 3)) if mem_total is not None else None,
+            "mem_used": (mem_used / (1024 ** 3)) if mem_used is not None else None,
+            "temp": r.get("temp"),
+            "power": r.get("power"),
+            "power_limit": None,
+        })
+    return out
+
+
+# AMD GPU 收集指令：rocm-smi 抓名稱 + 各指標，一次 SSH 帶回。
+# 部分 flag 在不同 ROCm 版本存在差異，皆以 `2>/dev/null` 吞掉錯誤輸出、互不干擾。
+AMD_GPU_CMD = (
+    "rocm-smi --showproductname 2>/dev/null ; "
+    "rocm-smi --showuse 2>/dev/null ; "
+    "rocm-smi --showmeminfo vram 2>/dev/null ; "
+    "rocm-smi --showmemuse 2>/dev/null ; "
+    "rocm-smi --showtemp 2>/dev/null ; "
+    "rocm-smi --showpower 2>/dev/null"
+)
+
+
 def collect_gpu(m):
+    """回傳 (ts, rows)。先試 NVIDIA nvidia-smi，無再試 AMD rocm-smi。
+    rows 為 [{gpu,name,util,mem_total,mem_used,temp,power,power_limit}]。"""
     if not all([m.get("os_ip"), m.get("os_user"), m.get("os_pass")]):
         return time.time(), []
-    out, rc, err = ssh_run(m["os_ip"], m["os_user"], m["os_pass"], m.get("os_port", 22),
-                           f"nvidia-smi --query-gpu={GPU_QUERY} --format=csv,noheader,nounits")
-    return time.time(), parse_gpu(out) if rc == 0 and out else []
+    nv, rc, err = ssh_run(m["os_ip"], m.get("os_user"), m.get("os_pass"), m.get("os_port", 22),
+                          f"nvidia-smi --query-gpu={GPU_QUERY} --format=csv,noheader,nounits")
+    if rc == 0 and nv:
+        return time.time(), parse_gpu(nv)
+    am, arcs, _ = ssh_run(m["os_ip"], m.get("os_user"), m.get("os_pass"), m.get("os_port", 22), AMD_GPU_CMD)
+    if am:
+        parsed = parse_amdgpu(am)
+        if parsed:
+            return time.time(), parsed
+    return time.time(), []
 
 
 def store_gpu(ts, name, rows):
@@ -562,8 +663,10 @@ def get_rack_series(project, minutes):
     since = time.time() - min(minutes or 60, int(os.environ.get("TELEMETRY_MAX_MIN", "43200"))) * 60
     all_m = _load_machines()
     # 只撈「在此專案 Rack（L11 機櫃）平面圖上」的元件：排除 L10 單機（level=="system"）如 proj_k-app-1
+    # 專案名比對用「大小寫不敏感」（proj_k/proj_k/proj_k 都視為同一專案）
+    want = (project or "").casefold()
     members = {n: m for n, m in all_m.items()
-               if m.get("project") == project and m.get("level") == "rack"}
+               if (m.get("project") or "").casefold() == want and m.get("level") == "rack"}
     if not members:
         return {}
 
