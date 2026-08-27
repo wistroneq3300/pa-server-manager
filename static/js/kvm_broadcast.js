@@ -294,27 +294,53 @@ function detectDetailHTML(data) {
 }
 
 /* 非 RFB / 離線 卡片：不連線，只顯示 basecode 與原因 */
-function offlineCard(name, baseLabel, ip, reason) {
+/* 非 RFB / 離線卡片：
+   - SP-X 在線：SP-X 自帶 Web KVM（lighttpd，X-Frame-Options SAMEORIGIN 禁止跨域 iframe），
+     所以給「新分頁開啟原生 KVM」按鈕（https://<bmc_ip>/，SP-X 登入頁帳密 admin/CHANGE_ME__SPX_KVM_ADMIN_PASSWORD）。
+   - 離線 / 偵測失敗：純「未開啟」顯示。 */
+function offlineCard(name, baseLabel, ip, reason, kind) {
   const grid = $("kvm-grid");
   if (!grid) return;
+  const isSpx = (kind === "spx") && !!ip;
+  const c = isSpx ? "#e8c46a" : "#e05656";
   const box = document.createElement("div");
   box.className = "kvm-box";
   box.dataset.name = name;
-  box.style.cssText = "background:#0f1319;border:1px dashed #4a3d1f;border-radius:10px;overflow:hidden;display:flex;flex-direction:column;min-height:220px;";
+  box.dataset.kind = kind || "offline";
+  box.style.cssText = "background:#0f1319;border:1px dashed " + (isSpx ? "#3a2f14" : "#4a3d1f") +
+    ";border-radius:10px;overflow:hidden;display:flex;flex-direction:column;min-height:220px;";
+  const url = isSpx ? "https://" + ip + "/" : "";
   box.innerHTML = `
-    <div class="oc-head" style="display:flex;align-items:center;gap:8px;padding:6px 10px;border-bottom:1px solid #223043;background:#131a24">
-      <span style="width:8px;height:8px;border-radius:50%;background:#e05656;flex:0 0 auto"></span>
-      <span style="font-size:11px;font-weight:700;color:#e05656;background:#2a1f14;border:1px solid #4a3a28;border-radius:4px;padding:1px 6px;flex:0 0 auto">未開啟</span>
+    <div style="display:flex;align-items:center;gap:8px;padding:6px 10px;border-bottom:1px solid #223043;background:#131a24">
+      <span style="width:8px;height:8px;border-radius:50%;background:${c};flex:0 0 auto"></span>
+      <span style="font-size:11px;font-weight:700;color:${c};background:#2a2014;border:1px solid #4a3a28;border-radius:4px;padding:1px 6px;flex:0 0 auto">${isSpx ? "未同步" : "未開啟"}</span>
       <b class="oc-name" style="font-size:13px;color:#dfe6f0"></b>
       <span class="oc-bmc" style="color:#5a6b80;font-size:11px"></span>
     </div>
-    <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;padding:16px;color:#9fb0c4;text-align:center">
-      <b style="color:#e8c46a;font-size:14px">⚠ 本機未連線</b>
-      <div class="oc-reason" style="font-size:12px;line-height:1.6"></div>
+    <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:16px;color:#9fb0c4;text-align:center">
+      <b style="color:${c};font-size:14px">${isSpx ? "⚠ MegaRAC SP-X（同步未開放）" : "⚠ 本機未連線"}</b>
+      <div class="oc-reason" style="font-size:12px;line-height:1.7;max-width:360px"></div>
+      <span class="oc-act"></span>
     </div>`;
   box.querySelector(".oc-name").textContent = name;
   box.querySelector(".oc-bmc").textContent = `${baseLabel || "未知"} · ${ip || "-"}`;
-  box.querySelector(".oc-reason").textContent = reason || "";
+  const reasonEl = box.querySelector(".oc-reason");
+  const actEl = box.querySelector(".oc-act");
+  if (isSpx) {
+    reasonEl.innerHTML = "SP-X 自帶原生 Web KVM UI。此頁無法把多台 SP-X 鍵鼠同步（IVTP 私有協定），"
+      + "請在新分頁開啟該機 KVM，登入後即可操作。<br>"
+      + "<span style='color:#8fb0f0'>https://<span class='oc-ip'></span>/</span>"
+      + "　帳密：admin / CHANGE_ME__SPX_KVM_ADMIN_PASSWORD";
+    box.querySelectorAll(".oc-ip").forEach(e => e.textContent = ip);
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = "📺 開啟 SP-X 原生 KVM（新分頁）";
+    btn.style.cssText = "margin-top:4px;background:#1d2a3a;color:#dfe6f0;border:1px solid #2f4259;border-radius:8px;padding:8px 14px;font-size:13px;cursor:pointer";
+    btn.onclick = (e) => { e.preventDefault(); e.stopPropagation(); window.open(url, "_blank", "noopener"); return false; };
+    actEl.appendChild(btn);
+  } else {
+    reasonEl.textContent = reason || "離線 / 偵測失敗";
+  }
   grid.appendChild(box);
 }
 
@@ -351,6 +377,7 @@ async function openKvmBroadcast(project) {
   for (const c of cands) {
     const d = detMap[c.name] || {};
     c._base = d.label || "未偵測";
+    c._kind = d.kind || null;
     if (det.ok) {
       const online = !!d.online;
       const isRfb = d.rfb !== false;
@@ -398,7 +425,7 @@ async function openKvmBroadcast(project) {
   }
 
   // 4) 非同步（SP-X 或離線）卡片
-  otherCands.forEach(c => offlineCard(c.name, c._base, c.bmc_ip, c._reason));
+  otherCands.forEach(c => offlineCard(c.name, c._base, c.bmc_ip, c._reason, c._kind));
 
   // 5) 沒有可同步的 → 早退
   if (!rfbCands.length) {

@@ -82,3 +82,45 @@ host_b（MegaRAC SP-X, INTERNAL_IP_2）：
 ## 七、待使用者確認
 - 方案 C 的 iframe 是否也要「後端代理 KVM 網址（保持帳密不上前端）」，還是直接 iframe 指向 BMC（需使用者瀏覽器有 SP-X session）
 - 多協議時：是「整組都不開、只 popup」，還是「能開的開、SP-X 另外單開」？
+
+---
+
+## 八、後續 session（方案 A／dedicated subdomain）KVM 嵌入實測結論 ⚠️ 2026-08-27
+
+> 本 session 依決策採「方案 A：每台 SP-X BMC 一個 dedicated subdomain reverse-proxy，BMC UI 維持 root path」。
+> PoC 環境已完成並**用 headless Chrome 實測 KVM 嵌入**，結論對 Phase 2 前端規劃影響重大。
+
+### 已建立（本機 PoC，未入 repo）
+- nginx：`bmc-bmc-internal-a.kvm.lab.example.internal` → `INTERNAL_IP_2`（root-path 純透傳，`map $host` allowlist 對應，未知子域 444）
+- wildcard cert `*.kvm.lab.example.internal`、/etc/hosts 映射
+- `/viewer` location 已 `proxy_hide_header` 剝離 upstream SAMEORIGIN，改放行 `X-Frame-Options: ALLOWALL` + CSP `frame-ancestors portal`（iframe 所需）
+- audit log `/var/log/nginx/bmc_audit.log`（host/server_id/method/uri/status/IP/UA/bytes）
+- Portal stub `https://portal.lab.example.internal/`（可 iframe 指向 viewer,或 window.open）
+
+### 已實證（headless Chrome 自動化）
+1. **登入 → dashboard → #remote_control → #download → popup** 全通；`GET /api/settings/media/h5viewercfg → 200`（拿 token/session）→ `GET /kvm → 101 Switching Protocols`（WS 升級成功、有 video frame）。✅ **popup 方案完全可用**
+2. cookie 全部 **host-only** on `bmc-bmc-internal-a.kvm.lab.example.internal`（QSESSIONID HttpOnly+Secure、`__Host-garc` CSRF Secure），**無 `.lab.example.internal` domain 洩漏** ✅
+3. **pure iframe（`<iframe src=viewer.html>`）：viewer 頁載入成功但 WS 不連**（不打 h5viewercfg、不連 /kvm）❌
+
+### 為什麼 iframe 嵌不進去（根因，已讀 viewer 原始碼確認）
+`viewer.html` 只是 bootstrapper（`data-main=/app/main`），真正的 KVM viewer 是**設計為 `window.open` popup**：
+- 大量讀 **`window.opener`**：`opener.privilege_id`、`opener.kvm_access`、`opener.vmedia_access`、`opener.CONSTANTS.CD_SERVER_APP_FLAG / KVM_SESS_RECON_FLG / VMEDIA_MAX_COUNT_FLAG`、`opener.$("#download")` 復原
+- 用 `window.name === 'H5Viewer'` 辨識自己為 KVM popup
+- 關閉時呼叫 `window.close()`
+- **iframe 內 `window.opener === null`** → viewer 判定「不是 KVM popup」→ fallback 跑整個主 APP（載 dashboard config），不進 KVM 模式。
+
+### bridge（window.open→iframe）也被瀏覽器擋死
+實測攔截 `window.open`、把 viewer 路由到同源 `<iframe>` 並嘗試設 `iframe.contentWindow.opener = window`：
+- **`SecurityError: Failed to set a named property 'opener' on 'Window': Blocked a frame…from accessing a cross-origin frame`**
+- `opener` 是瀏覽器管理的唯讀屬性，**無法程式化設定**（即使完全同源）。
+
+### 最終 verdict（Phase 2 前端依此規劃）
+- **SP-X H5 KVM 無法用 iframe 嵌入同頁**（純 iframe 或 open→iframe bridge 皆不行）。
+- **唯一可行 = 保持 `window.open` 原生 popup**，而 dedicated subdomain（方案 A）已讓 popup **完整運作 + cookie 不洩漏**。
+- 這正對應先前「**獨立開**」的決定：UI 上「KVM」按鈕 → Portal 內 `window.open("https://bmc-<id>.kvm…/viewer.html"…popup)`；KVM 開在獨立視窗，畫面/鍵鼠/WS 全在 popup 內。
+- 前端**不需**自己解碼 SP-X 私有 IVTP 視訊；也不需要 bridge script。（若要真同頁渲染，只能重寫 AMI 私有 decoder，超出範圍。）
+
+### 給下一 session 的 Todo
+- **A1#7**：Portal 認證 + audit 正式整合（後端 inventory 對應 server-id→BMC subdomain，前端禁 arbitrary upstream、禁洩漏 credential/token）
+- 前端 `openKvmBroadcast`：SP-X 走 `window.open` 獨立 popup（dedicated subdomain），RFB(OneTree) 維持多格同步
+- WS relay 長期連線驗證、cleanup 舊 PoC FastAPI proxy（8443/8444）
