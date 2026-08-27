@@ -148,3 +148,15 @@ host_b（MegaRAC SP-X, INTERNAL_IP_2）：
 1. BMC code 15000 事故處置（runbook）→ 建立真 kvm-operator + E2E（docs/regression B 段）。
 2. Portal main.py auth/RBAC 接上 broker 的 `/api/kvm/launch`（取代 noauth）。
 3. systemd `spx-broker.service` 正式啟用（目前 dev launcher 在跑）。
+
+---
+## 九之二（本 session 補記）BMC 事故處置 + Stage-1 + 真機 E2E ✅
+
+- **code 15000 處置**：實際確認 SP-X 無任何 session 管理 API（GET/OPTIONS 全 404/403），遠端「踢 session」不可行。經授權以 `ipmitool mc reset cold`（NVIDIA BMCA 6.10, admin 憑證）清空 15000，~90 秒後 BMC 回歸、登入成功（privilege 4）。
+- **RBAC Stage-1**：`rbac.EnvOperatorPortal`（identity 只取 env，request 不可自授權；unset fail-closed），`SPX_PORTAL_AUTH::operator`。5 個新測試，總計 **35 passed**。commit `a17c71d`。
+- **真機 E2E（operator mode，透過 nginx）**：
+  1. `POST /api/kvm/launch` → 200，launch_id + subdomain，無 secret ✅
+  2. `POST /__spx_launch`（BMC vhost）→ **302** 至 BMC root ✅
+  3. 7 支 **host-only + Secure + SameSite=Lax** cookies（含 `__Host-` 版），QSESSIONID 由 broker server-side 取得 ✅
+  4. **session reuse**：第 2 次 launch 回同一 `QSESSIONID`（未新建 web session）→ 防 15000 設計實證 ✅
+- 剩餘：真低權限 kvm-operator 建置、Portal 正式登入(Stage 2)、systemd 正式部屬。
