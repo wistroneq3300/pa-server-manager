@@ -124,3 +124,27 @@ host_b（MegaRAC SP-X, INTERNAL_IP_2）：
 - **A1#7**：Portal 認證 + audit 正式整合（後端 inventory 對應 server-id→BMC subdomain，前端禁 arbitrary upstream、禁洩漏 credential/token）
 - 前端 `openKvmBroadcast`：SP-X 走 `window.open` 獨立 popup（dedicated subdomain），RFB(OneTree) 維持多格同步
 - WS relay 長期連線驗證、cleanup 舊 PoC FastAPI proxy（8443/8444）
+
+
+---
+
+## 九、後續 session（broker 實作收尾）⚠️ 2026-08-27（晚場）
+
+> 承 §八 verdict（方案 A dedicated-subdomain / window.open popup / 不做 iframe）。本 session 把 click-to-KVM auto-login 機制實作完成並測通（mock），commit 5172c64。
+
+### 已完成
+- **broker 套件 `spx_kvm_broker/`（8 模組）**：config/secret_store/registry/spx_client/broker/rbac/app。launch_id mint/consume（TTL<=30s/single-use/binding）、RBAC、session 重用+正式 logout+rate-limit+per-BMC cap（防 code 15000）、audit。
+- **路由 wire**：nginx BMC vhost `location = /__spx_launch`、portal vhost `location = /api/kvm/launch` → broker(127.0.0.1:18992)，reload OK。
+- **Frontend** `/var/www/portal/index.html`：「直接開啟 SP-X KVM」→ POST /api/kvm/launch → popup 收 launch_id(postMessage)→POST /__spx_launch→302 root；失敗 rollback 開原生登入。
+- **secret store**：age 加密 0600 root，解密驗證 OK（admin 佔位 kvm-operator）。
+- **測試** `tests/` 30 全過（core/API/真實 mock-E2E：in-process mock SP-X `tests/mock_spx.py`，含 handoff 302+host-only Secure cookie、single-use、cap 503、launch_id 不進 URL）。
+- **四份文件**：runbook(15000)/rollback/regression/secret-store → docs/。
+
+### 尚阻塞
+- **測試 BMC INTERNAL_IP_2 仍 code 15000**（PoC 塞爆）→ 真機 E2E、建立真低權限 kvm-operator 帳號、privilege 實測待做。
+- **Portal 後端無 auth/RBAC**（main.py 硬編碼 admin、API 回機器憑證）→ broker 目前 `SPX_PORTAL_AUTH=noauth`；正式須接真登入 RBAC（app.py `_resolve_auth` seam）。
+
+### 下一 session 待辦
+1. BMC code 15000 事故處置（runbook）→ 建立真 kvm-operator + E2E（docs/regression B 段）。
+2. Portal main.py auth/RBAC 接上 broker 的 `/api/kvm/launch`（取代 noauth）。
+3. systemd `spx-broker.service` 正式啟用（目前 dev launcher 在跑）。

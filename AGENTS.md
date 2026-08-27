@@ -343,3 +343,44 @@ SP-X 的 KVM 是用 AMI 私有資料封包（頭 `23 00 00 00 06 00 00 02 00` �
 - 終端機視圖切換（System Manager 終端機 Modal）：◫並排 / 🖥OS放大 / 🌐BMC放大，同廣播終端切換概念。實作於 index.html(term-mode 按鈕)、style.css(.term-state-os/bmc/both)、app.js(setTermMode / openTermAt 改 state class)。OS-only 機台（如 CDU-1-main）BMC 放大鈕自動 disabled。
 - ⚙ 設定 OS IP（System Manager 機台列）：Terminal 與 刪除 之間，POST /api/machines/{name}/change-os-ip，僅改 OS IP，需 ping 通 + SSH hostname 相符才允許（防 DHCP 漂移）。
 - 終端 query 轉發 bug 已修（main.py /ws/terminal/{name}/{kind}）：之前 FastAPI proxy 丟掉瀏覽器帶的 ?host=&user=&pass=&port=，導致 passive/自訂帳密連線回「未設定連線資訊」。現已保留 query 轉發。
+
+
+---
+
+# 九、SP-X KVM Auto-Login Broker（方案 A / dedicated subdomain）— 2026-08-27
+
+## 已定案決策
+- 每台 SP-X BMC 一個 dedicated subdomain reverse-proxy（bmc-<sid>.kvm.lab.example.internal），BMC UI 維持 root path。
+- Portal 已登入+RBAC 使用者點「直接開啟 SP-X KVM」→ BMC dedicated-subdomain popup；使用者看不到 SP-X login、不需鍵帳密；保留 SP-X 原生 window.open H5Viewer（不做 iframe embedding / IVTP / bridge——window.opener 無法程式設定，iframe 一定進不去）。
+- launch_id 只能走 POST body（禁止 path/query/fragment）。
+
+## Broker 套件 spx_kvm_broker/（8 模組，commit 5172c64）
+- config.py  inventory allowlist（server-id→BMC subdomain/upstream/cred name，無密碼）
+- secret_store.py  age-encrypted root-only credential store
+- registry.py  SQLite session registry + launch_id(TTL/single-use/binding)
+- spx_client.py  SP-X 登入/登出 client（POST/DELETE /api/session）
+- broker.py  mint/consume、RBAC、session 重用/輪替、rate-limit、per-BMC cap、audit
+- rbac.py  RBAC（admin/operator 允許，viewer/anon 拒絕）+ _resolve_auth seam
+- app.py  FastAPI（/api/kvm/launch、/__spx_launch(BMC vhost)、/__spx_health）
+
+## 路由與部署
+- nginx BMC vhost location = /__spx_launch → broker；portal vhost location = /api/kvm/launch → broker（均在 /etc/nginx/conf.d/bmc_proxy.conf）
+- broker service：deploy/spx-broker.service（systemd，127.0.0.1:18992）；dev launcher deploy/start_broker.sh
+- secret store：/etc/portal/secrets/spx-bmc-credentials.age + spx-bmc-identity.txt（0600 root）
+- 系統目錄：/var/lib/portal、/var/log/portal
+
+## SP-X 登入真相（實測）
+- POST /api/session 只設 QSESSIONID；__Host-garc/user_id/privilege 由前端 JS 從登入 JSON 寫入。
+- cookie handoff：broker 在 BMC subdomain server-side 登入 → 用同源 response Set-Cookie 交 host-only 認證 cookie → 302→root。
+- session cap（code 15000）：達並行上限回 401 "Could not login" code 15000。broker 內建 session 重用+正式 logout+rate-limit+max_broker_sessions 防護。
+
+## 測試
+- tests/：30 測試全過（core/API/mock-E2E，in-process mock SP-X in tests/mock_spx.py）。跑法：/usr/bin/python3.12 -m pytest tests/ -q。
+
+## 目前阻塞
+- 測試 BMC INTERNAL_IP_2 被先前 PoC 塞爆（code 15000）→ 阻斷真機 E2E 與建立真 kvm-operator 帳號。需依 docs/runbook-spx-session-cap-15000.md 處置（等待 idle-timeout → 受控輪替 → 僅事故才 RACADM/reboot）。
+- 現有 Portal 後端（main.py）無 auth/RBAC（硬編碼 admin、API 回機器憑證）→ broker 目前 SPX_PORTAL_AUTH=noauth（fail-open 測試）；正式須接真 Portal 登入 RBAC（app.py _resolve_auth seam）。
+
+## 文件
+- docs/spx-kvm-auto-login-evaluation.md（機制評估/決策）
+- docs/runbook-spx-session-cap-15000.md、docs/rollback-spx-kvm-broker.md、docs/regression-spx-kvm-broker.md、docs/secret-store-deployment.md
