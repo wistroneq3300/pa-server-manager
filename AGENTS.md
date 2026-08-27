@@ -130,6 +130,8 @@ Wistron PA Server Manager：Web 管理介面（FastAPI 後端 + 原生 JS 前端
 - 用 file_editor 對含 UTF-8 emoji surrogate 對（如 🗺 🗑 📡）的檔案做 str_replace 時，曾整檔被覆寫成空檔（app.js 0-byte）。原因推測是工具處理 surrogate pair 時出錯。
 - 教訓：涉及含 emoji 或範本字串（backtick + ${}）的改動，改用 python 腳本取代；純 ASCII 無 emoji 的才用 file_editor。每次改完立刻 node --check。
 - 已用 `git checkout HEAD -- static/js/app.js` 還原。
+- **第二起（2026-08-28, README.md）**：用 file_editor 把 em-dash（—）等 3-byte UTF-8 字符做 str_replace 時，工具把 em-dash 寫成 double-encode mojibake（讀回是 â€"），且同一工具對 AGENTS.md 直接報「file appears to be binary」拒絕編輯。→ 改回原始版本（git checkout HEAD -- README.md）後，全程改用 python 腳本做所有編輯（腳本寫 UTF-8 一定正確），每步 assert 匹配。
+- **鐵律（更新）**：任何含 3-byte UTF-8（CJK、em-dash —、box-drawing、arrow →）的檔案，一律用 python 腳本編輯，不要用 file_editor。file_editor 這類工具對非 ASCII 字符不可靠。驗證：mojibake（â€"）數量應為 0。
 
 ### 本次完成（未 commit/push）
 1. 系統廣播重建：systemBroadcastDialog() 依專案分組列出帶 OS 的 L10、每組可整組勾/取消（systemBroadcastSetGroup）、bcSetAll 全選；「📡 系統廣播」按鈕只在 L10 分頁顯示（sys-btn-broadcast）。
