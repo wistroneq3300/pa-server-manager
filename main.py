@@ -24,7 +24,7 @@ import paramiko
 from concurrent.futures import ThreadPoolExecutor
 
 import telemetry_core  # System Telemetry 核心（CPU/DIMM/SSD/NIC/GPU 歷史收集）
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
@@ -1499,6 +1499,41 @@ async def _proxy_ws(websocket: WebSocket, target_path: str):
             await websocket.close()
         except Exception:
             pass
+
+
+@app.get("/api/kvm/basecode")
+async def kvm_basecode(request: Request):
+    """偵測指定專案（或全部）內各帶 BMC 機台的 basecode，回傳協定資訊。
+
+    query: ?project=<專案名> 或省略 = 全部分組。
+    前端點「📺 KVM 廣播」時先呼叫此 API，判斷大家是否同協議、能否同步。
+    """
+    proj = (request.query_params.get("project") or "").strip()
+    _load_data()                      # 更新全域 machines
+    ms = machines
+    cands = []
+    for name, m in ms.items():
+        if isinstance(m, dict) and m.get("bmc_ip"):
+            mname = m.get("name") or name
+            if proj and (m.get("project") or "") != proj:
+                continue
+            cands.append(mname)
+    det = await kvm_bridge.detect_basecode_async(cands)
+    # 綜合判定是否可同步：所有線上機台必須同協議（全 RFB 或全 IVTP）
+    kinds = {v["kind"] for v in det.values() if v["online"]}
+    if not kinds:
+        sync_ok, reason = False, "專案內沒有可連線（偵測得出 basecode）的 BMC"
+    elif len(kinds) == 1:
+        sync_ok, reason = True, ""
+        only_kind = next(iter(kinds))
+        if not kvm_bridge.basecode_label(only_kind)["rfb"]:
+            sync_ok, reason = False, (f"全部都是 IVTP（{kvm_bridge.basecode_label(only_kind)['label']}），"
+                                      "同協議但 SP-X 鍵鼠同步尚未實作")
+    else:
+        plist = "、".join(f"{v['label']}({v['proto']})" for v in det.values() if v["online"])
+        sync_ok, reason = False, f"混合協議無法同步：{plist}"
+    return {"project": proj, "machines": det, "sync_ok": sync_ok, "reason": reason,
+            "detected_kinds": sorted(kinds or [])}
 
 
 @app.websocket("/ws/kvm/{name}")

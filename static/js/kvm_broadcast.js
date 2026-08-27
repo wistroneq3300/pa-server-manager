@@ -60,6 +60,7 @@ function ensureOverlay() {
       <button class="kvm-btn" onclick="closeKvmBroadcast()">✕ 關閉</button>
     </div>
     <div id="kvm-status" style="padding:4px 14px;font-size:12px;color:#6f8498;background:#10151d;border-bottom:1px solid #1d252f"></div>
+    <div id="kvm-banner" style="display:none;padding:8px 14px;font-size:13px;line-height:1.7"></div>
     <div id="kvm-grid" style="flex:1;overflow:auto;display:grid;padding:12px;gap:10px;grid-template-columns:repeat(auto-fill,minmax(420px,1fr));align-content:start"></div>
   `;
   document.body.appendChild(ov);
@@ -256,13 +257,75 @@ function kvmSendCtrlAltDel() {
   showStatus("已送出 Ctrl+Alt+Del（全部）");
 }
 
+/* ---------- Phase1：basecode 偵測 + 協議把關（點『KVM 廣播』時先跑） ---------- */
+async function detectProjectBasecodes(project) {
+  try {
+    const r = await api(`/api/kvm/basecode?project=${encodeURIComponent(project)}`);
+    return { ok: true, data: r };
+  } catch (e) {
+    return { ok: false, error: (e && e.message) || String(e) };
+  }
+}
+
+function setBanner(html, kind) {
+  const el = $("kvm-banner");
+  if (!el) return;
+  if (!html) { el.style.display = "none"; el.innerHTML = ""; return; }
+  const colors = {
+    ok:   ["#0f1a12", "#1f4a2e", "#7fd69a"],
+    warn: ["#1a1508", "#4a3d1f", "#e8c46a"],
+    err:  ["#1a0f10", "#4a1f24", "#e88a8f"],
+  };
+  const [bg, bd, fg] = colors[kind] || colors.warn;
+  el.style.cssText = `display:block;padding:8px 14px;font-size:13px;line-height:1.7;background:${bg};border-bottom:1px solid ${bd};color:${fg};`;
+  el.innerHTML = html;
+}
+
+function detectDetailHTML(data) {
+  const ms = data.machines || {};
+  let rows = "";
+  Object.keys(ms).forEach((n) => {
+    const d = ms[n] || {};
+    const dot = d.online ? "🟢" : "🔴離線";
+    rows += `<div>· ${esc(n)} — ${esc(d.label || "未知")}（${esc(d.proto || "?")}）${dot}（${esc(d.bmc_ip || "-")}）</div>`;
+  });
+  const kindsStr = (data.detected_kinds || []).join("、") || "無";
+  return `<div style="margin-top:2px"><b>偵測結果：</b>協議 = ${esc(kindsStr)}</div>${rows}`;
+}
+
+/* 非 RFB / 離線 卡片：不連線，只顯示 basecode 與原因 */
+function offlineCard(name, baseLabel, ip, reason) {
+  const grid = $("kvm-grid");
+  if (!grid) return;
+  const box = document.createElement("div");
+  box.className = "kvm-box";
+  box.dataset.name = name;
+  box.style.cssText = "background:#0f1319;border:1px dashed #4a3d1f;border-radius:10px;overflow:hidden;display:flex;flex-direction:column;min-height:220px;";
+  box.innerHTML = `
+    <div class="oc-head" style="display:flex;align-items:center;gap:8px;padding:6px 10px;border-bottom:1px solid #223043;background:#131a24">
+      <span style="width:8px;height:8px;border-radius:50%;background:#e05656;flex:0 0 auto"></span>
+      <span style="font-size:11px;font-weight:700;color:#e05656;background:#2a1f14;border:1px solid #4a3a28;border-radius:4px;padding:1px 6px;flex:0 0 auto">未開啟</span>
+      <b class="oc-name" style="font-size:13px;color:#dfe6f0"></b>
+      <span class="oc-bmc" style="color:#5a6b80;font-size:11px"></span>
+    </div>
+    <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;padding:16px;color:#9fb0c4;text-align:center">
+      <b style="color:#e8c46a;font-size:14px">⚠ 本機未連線</b>
+      <div class="oc-reason" style="font-size:12px;line-height:1.6"></div>
+    </div>`;
+  box.querySelector(".oc-name").textContent = name;
+  box.querySelector(".oc-bmc").textContent = `${baseLabel || "未知"} · ${ip || "-"}`;
+  box.querySelector(".oc-reason").textContent = reason || "";
+  grid.appendChild(box);
+}
+
 /* ---------- 主流程：開啟 ---------- */
-function openKvmBroadcast(project) {
+async function openKvmBroadcast(project) {
   const cands = kvmCandidates(project);
   if (!cands.length) {
     alert(`專案「${project}」目前沒有帶 BMC IP 的系統可開 KVM。`);
     return;
   }
+
   K.project = project;
   K.rfbMap.clear();
   K.master = null;
@@ -270,35 +333,97 @@ function openKvmBroadcast(project) {
 
   const ov = ensureOverlay();
   ov.style.display = "flex";
-  const projEl = $("kvm-proj"), gridEl = $("kvm-grid"), masterEl = $("kvm-master");
-  if (!projEl || !gridEl || !masterEl) { showStatus("KVM 廣播 overlay 元件未建立，請重新整理頁面再試"); return; }
-  projEl.textContent = `｜專案：${project}（${cands.length} 台）`;
+  const gridEl = $("kvm-grid");
+  if (!gridEl) { setBanner("KVM 廣播 overlay 元件未建立", "err"); return; }
   gridEl.innerHTML = "";
-  masterEl.innerHTML = "";
+  $("kvm-master").innerHTML = "";
+  setBanner(`⏳ 正在自動偵測 ${cands.length} 台 BMC 的 basecode / KVM 協議…`, "ok");
 
-  $("kvm-broadcast").checked = true;
-  K.broadcast = true;
+  // 1) 偵測
+  const det = await detectProjectBasecodes(project);
+  const detMap = det.ok ? (det.data.machines || {}) : {};
+  if (!det.ok) {
+    setBanner(`⚠ 偵測失敗（${esc(det.error)}）。將以「全部當 RFB」方式嘗試（可能部分失敗）。`, "warn");
+  }
+
+  // 2) 分類：能同步 = online 且 rfb !== false
+  const rfbCands = [], otherCands = [];
+  for (const c of cands) {
+    const d = detMap[c.name] || {};
+    c._base = d.label || "未偵測";
+    if (det.ok) {
+      const online = !!d.online;
+      const isRfb = d.rfb !== false;
+      if (online && isRfb) {
+        rfbCands.push(c);
+      } else {
+        otherCands.push(c);
+        c._reason = !online
+          ? "離線 / BMC 帳密偵測失敗"
+          : `${c._base}（非 RFB/IVTP）本版本未開放同步 — 等待 Phase 2 方案 C（iframe 嵌 AMI 原生 KVM）`;
+      }
+    } else {
+      rfbCands.push(c);
+    }
+  }
+
+  // 3) Banner + 偵測詳情
+  if (det.ok) {
+    if (!det.data.sync_ok) {
+      // sync-incompatible -> explicit popup
+      const NL = '\n';
+      const lines = Object.keys(det.data.machines || {}).map(function(n) {
+        const d = (det.data.machines && det.data.machines[n]) || {};
+        return '  ' + n + ' - ' + (d.label || '?') + ' / ' + (d.proto || '?');
+      }).join(NL);
+      alert('KVM 無法同步廣播' + NL + NL +
+            (det.data.reason || '協議不一致') + NL + NL +
+            '偵測結果：' + NL +
+            lines + NL + NL +
+            '本頁仍會開啟，但只連線可同步的 RFB 系統。');
+    }
+    if (det.data.sync_ok) {
+      setBanner(`✔ 協議一致，可同步。<br>${detectDetailHTML(det.data)}`, "ok");
+    } else if (otherCands.length && rfbCands.length) {
+      setBanner(`⚠ 協議不一致，無法「全部同步」。<br>
+                 <div style="color:#e88a8f">原因：${esc(det.data.reason || "")}</div>
+                 ${detectDetailHTML(det.data)}
+                 <div style="margin-top:4px;color:#8fa0b5">本頁只連線「可同步（RFB、同協議）」的系統；其餘以「未開啟」卡片顯示。</div>`,
+                "err");
+    } else if (otherCands.length) {
+      setBanner(`⚠ 本專案沒有可同步的 RFB 系統（SP-X/IVTP 尚未開放同步）。<br>${detectDetailHTML(det.data)}`, "warn");
+    } else {
+      setBanner(detectDetailHTML(det.data), "ok");
+    }
+  }
+
+  // 4) 非同步（SP-X 或離線）卡片
+  otherCands.forEach(c => offlineCard(c.name, c._base, c.bmc_ip, c._reason));
+
+  // 5) 沒有可同步的 → 早退
+  if (!rfbCands.length) {
+    showStatus("沒有可開啟的 RFB 系統");
+    return;
+  }
+
+  // 6) 綁定控制項並對 RFB 系統連線
+  const projEl = $("kvm-proj");
+  if (projEl) projEl.textContent = `｜專案：${project}（RFB ${rfbCands.length} 台` + (otherCands.length ? `，另有 ${otherCands.length} 台非同步` : "") + `）`;
+  $("kvm-broadcast").checked = true; K.broadcast = true;
   $("kvm-kbsync").checked = true; K.kbSync = true;
   $("kvm-mssync").checked = true; K.msSync = true;
-
-  // 綁定控制項
   $("kvm-broadcast").onchange = (e) => { K.broadcast = e.target.checked; $("kvm-broadcast-lbl").textContent = K.broadcast ? "🔊 同步廣播" : "🔇 只控制 Master"; };
   $("kvm-kbsync").onchange = (e) => { K.kbSync = e.target.checked; };
   $("kvm-mssync").onchange = (e) => { K.msSync = e.target.checked; };
-  $("kvm-master").onchange = (e) => {
-    K.master = e.target.value;
-    markMasterUI();
-    showStatus(`Master 切換為 ${K.master}`);
-  };
+  $("kvm-master").onchange = (e) => { K.master = e.target.value; markMasterUI(); showStatus(`Master 切換為 ${K.master}`); };
 
-  cands.forEach(c => connectOne(c.name, c.bmc_ip));
+  rfbCands.forEach(c => connectOne(c.name, c.bmc_ip));
 
-  // 若沒設 master，預設第一台
   if (!K.master) {
     const sel = $("kvm-master");
     if (sel.options.length) { K.master = sel.value; markMasterUI(); }
   }
-  showStatus(`連線中 ${cands.length} 台…`);
+  showStatus(`連線中 ${rfbCands.length} 台 RFB 系統…`);
 }
 
 function closeKvmBroadcast() {

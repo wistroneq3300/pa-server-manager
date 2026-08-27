@@ -11,6 +11,7 @@ import asyncio
 import json
 import os
 import ssl
+import time
 
 import websockets
 
@@ -218,8 +219,8 @@ async def kvm_proxy(websocket, name):
         await websocket.send_json({"type": "error", "msg": "找不到機台或無 BMC IP"})
         await websocket.close()
         return
-    ws, note = await _connect_kvm(m["bmc_ip"], m.get("bmc_user") or "admin",
-                                  m.get("bmc_pass") or "")
+    u, p = _bmc_kvm_creds(m)
+    ws, note = await _connect_kvm(m["bmc_ip"], u, p)
     if ws is None:
         await websocket.send_json({"type": "error", "msg": f"KVM 連線失敗：{note}"})
         await websocket.close()
@@ -267,3 +268,99 @@ async def kvm_proxy(websocket, name):
             await websocket.close()
         except Exception:
             pass
+
+
+# ================= basecode 自動偵測（供 /api/kvm/basecode 用） =================
+# basecode 名稱 → 人類可讀協定標籤；kind 為 None 表示連不上/登入失敗。
+_BASE_LABEL = {
+    "spx":     {"label": "MegaRAC SP-X", "proto": "IVTP",   "rfb": False},
+    "ami":     {"label": "AMI OneTree",  "proto": "RFB",    "rfb": True},
+    "openbmc": {"label": "OpenBMC",      "proto": "RFB",    "rfb": True},
+}
+# TTL 快取：{name: (ts, kind)}，避免每次點 KVM 廣播都重打各 BMC
+_BASE_CACHE = {}
+_BASE_TTL = 180  # 秒
+
+
+def _bmc_kvm_creds(m):
+    """SP-X 的 KVM Web 用 bmc_kvm_user/bmc_kvm_pass；未設則退回 bmc_user/bmc_pass。"""
+    m = m or {}
+    u = m.get("bmc_kvm_user") or m.get("bmc_user") or "admin"
+    p = m.get("bmc_kvm_pass") or m.get("bmc_pass") or ""
+    return u, p
+
+
+def basecode_label(kind):
+    """kind → (label, proto, is_rfb)；未知 kind 給預設值。"""
+    return _BASE_LABEL.get(kind) or {"label": kind or "未知", "proto": "?", "rfb": False}
+
+
+def _detect_basecode_one(name):
+    """同步偵測單台 BMC 的 basecode；回 kind ('spx'/'ami'/'openbmc') 或 None。"""
+    try:
+        now = time.time()
+        ent = _BASE_CACHE.get(name)
+        if ent and (now - ent[0]) < _BASE_TTL:
+            return ent[1]
+    except Exception:
+        pass
+    m = _load_machine(name)
+    if not m or not m.get("bmc_ip"):
+        return None
+    try:
+        u, p = _bmc_kvm_creds(m)
+        kind, tok, _cookies = _detect_bmc(m["bmc_ip"], u, p)
+    except Exception:
+        kind, tok = None, None
+    result = kind if tok else None
+    try:
+        _BASE_CACHE[name] = (time.time(), result)
+    except Exception:
+        pass
+    return result
+
+
+def detect_basecode_sync(names):
+    """同步偵測一批機台 basecode（供 API 呼叫）。names: list[str]
+    回 {name: {kind, label, proto, rfb, bmc_ip, online}}。"""
+    if isinstance(names, str):
+        names = [names]
+    out = {}
+    for n in names:
+        try:
+            kind = _detect_basecode_one(n)
+            m = _load_machine(n) or {}
+            info = basecode_label(kind)
+            out[n] = {
+                "kind": kind,
+                "label": info["label"],
+                "proto": info["proto"],
+                "rfb": info["rfb"],
+                "bmc_ip": m.get("bmc_ip"),
+                "online": bool(kind),   # 能偵測出 basecode = BMC 可達且登入成功
+            }
+        except Exception as e:
+            out[n] = {"kind": None, "label": "錯誤", "proto": "?", "rfb": False,
+                      "bmc_ip": None, "online": False, "error": str(e)}
+    return out
+
+
+async def detect_basecode_async(names):
+    """非同步並行偵測一批機台 basecode。回傳同 detect_basecode_sync 結構。"""
+    if isinstance(names, str):
+        names = [names]
+    results = await asyncio.gather(*[asyncio.to_thread(_detect_basecode_one, n)
+                                     for n in names])
+    out = {}
+    for n, kind in zip(names, results):
+        m = _load_machine(n) or {}
+        info = basecode_label(kind)
+        out[n] = {
+            "kind": kind,
+            "label": info["label"],
+            "proto": info["proto"],
+            "rfb": info["rfb"],
+            "bmc_ip": m.get("bmc_ip"),
+            "online": bool(kind),
+        }
+    return out
