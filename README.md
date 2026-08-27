@@ -77,6 +77,11 @@ A centralized **web management console** for **AI GPU servers** (and racks). It 
 - Legacy `#/rack/{subview}/{project}` still works for compatibility.
 - F5 / refresh keeps the current project + subview state.
 
+### 1.10 In-browser User Guide
+- Top-bar book icon (or press `?`) opens a **draggable / resizable / maximizable** floating window with a full, searchable user guide of every feature.
+- Pure frontend: content is an HTML template + `static/js/userguide.js` (no backend, no new dependencies).
+- Window position / size / minimize / last-close state persist in `localStorage`; built-in search filters sections.
+
 ---
 
 ## 2. System Architecture (read before deploying)

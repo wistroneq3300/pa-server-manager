@@ -671,6 +671,9 @@ input#f-bmc-pass:autofill{
 .tel-collapse-all{font-size:11px;color:var(--text-faint);cursor:pointer;user-select:none}
 .tel-toolbar{display:flex;align-items:center;gap:10px;margin:0 0 12px}
 .tel-ai-hint{font-size:11px;color:var(--text-faint);margin-left:auto}
+/* GitHub icon link in topbar */
+.gh-link{display:inline-flex;align-items:center;justify-content:center;padding:2px 4px;color:var(--text-faint);text-decoration:none;transition:color .15s}
+.gh-link:hover{color:var(--text)}
 #racktel-ai-wrap{margin-top:6px}
 #racktel-ai-wrap .racktel-ai-head{font-size:11px;font-weight:700;color:var(--text-faint);margin-bottom:3px;letter-spacing:.3px}
 #racktel-ai-wrap .tel-ai{margin-top:0}
@@ -952,3 +955,49 @@ tr.mach-drag-src{opacity:.45}
 tr.mach-drag-src td.mach-drag .mach-linkbox{box-shadow:0 4px 12px rgba(0,0,0,.5)}
 tr.mach-over td{box-shadow:inset 0 2px 0 0 #4aa8ff}
 
+
+/* ============ User Guide 浮動視窗 ============ */
+#guide-root{pointer-events:none}
+.ug-window{position:fixed;z-index:200;width:640px;height:70vh;left:calc(50vw - 320px);top:14vh;
+  display:flex;flex-direction:column;background:var(--bg-panel);border:1px solid var(--border);
+  border-radius:12px;box-shadow:0 26px 70px rgba(0,0,0,.45);pointer-events:auto;overflow:hidden}
+.ug-window.ug-maxed{left:8px !important;top:8px;right:8px;bottom:8px;width:auto;height:auto}
+.ug-window.ug-minimized{height:38px;overflow:hidden}
+.ug-bar{flex:0 0 38px;display:flex;align-items:center;gap:8px;padding:0 10px;cursor:grab;user-select:none;
+  background:linear-gradient(180deg, color-mix(in srgb, var(--bg-panel-2) 90%, var(--accent-blue-bg)), var(--bg-panel));
+  border-bottom:1px solid var(--border)}
+.ug-bar:active{cursor:grabbing}
+.ug-title{font-size:13px;font-weight:800;letter-spacing:.2px;flex:1}
+.ug-btn{width:26px;height:23px;border-radius:6px;border:1px solid transparent;background:transparent;color:var(--text-faint);
+  font-size:13px;line-height:1;cursor:pointer;display:inline-flex;align-items:center;justify-content:center}
+.ug-btn:hover{color:var(--text);border-color:var(--border);background:rgba(120,150,180,.12)}
+.ug-btn.ug-close:hover{color:#ff6b6b;border-color:rgba(255,107,107,.4)}
+.ug-content{flex:1;display:flex;flex-direction:column;min-height:0}
+.ug-search{padding:10px 12px;border-bottom:1px solid var(--border)}
+.ug-search input{width:100%;box-sizing:border-box;padding:7px 11px;border-radius:8px;border:1px solid var(--border);
+  background:var(--input-bg, rgba(0,0,0,.25));color:var(--text);font-size:12.5px;outline:none}
+.ug-search input:focus{border-color:var(--w-green)}
+.ug-body{flex:1;overflow-y:auto;padding:14px 18px 30px;scroll-behavior:smooth}
+.ug-doc h2{font-size:15px;font-weight:800;margin:22px 0 8px;padding-bottom:6px;border-bottom:1px solid var(--border);letter-spacing:.2px}
+.ug-doc h2:first-child{margin-top:2px}
+.ug-doc h3{font-size:13px;font-weight:700;margin:14px 0 5px;color:var(--text)}
+.ug-doc p{font-size:12.5px;line-height:1.6;color:var(--text-dim);margin:5px 0}
+.ug-doc ul,.ug-doc ol{font-size:12.5px;line-height:1.65;color:var(--text-dim);margin:5px 0 5px 20px;padding:0}
+.ug-doc li{margin:3px 0}
+.ug-doc li::marker{color:var(--text-faint)}
+.ug-doc b{color:var(--text)}
+.ug-doc code{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11.5px;background:rgba(120,150,180,.14);
+  padding:1px 5px;border-radius:4px}
+.ug-doc a{color:var(--w-green-text,#39d98a);text-decoration:none}
+.ug-doc a:hover{text-decoration:underline}
+.ug-table{width:100%;border-collapse:collapse;font-size:12.5px;margin:6px 0}
+.ug-table td,.ug-table th{border:1px solid var(--border);padding:6px 9px;text-align:left;color:var(--text-dim)}
+.ug-table th{background:rgba(120,150,180,.1);color:var(--text);font-weight:700}
+.ug-hint{font-size:12px;color:var(--text-faint);margin-top:8px}
+.ug-sec{transition:opacity .2s}
+.ug-sec.ug-flash{animation:ugflash 1.5s ease}
+@keyframes ugflash{0%{background:rgba(57,217,138,.22)}100%{background:transparent}}
+.ug-grip{position:absolute;right:0;bottom:0;width:16px;height:16px;cursor:nwse-resize;
+  background:linear-gradient(135deg,transparent 0 50%,var(--text-faint) 50% 60%,transparent 60% 75%,var(--text-faint) 75% 85%,transparent 85%)}
+.ug-window.ug-maxed .ug-grip{display:none}
+.ug-window.ug-minimized .ug-grip{display:none}
