@@ -61,6 +61,28 @@ class NoAuthPortal(PortalAuth):
         return None
 
 
+class EnvOperatorPortal(PortalAuth):
+    """Stage-1 provider: authenticate a fixed operator from environment.
+
+    This is a *temporary* bootstrap so the live BMC handoff chain can be
+    exercised end-to-end before the real Portal login/RBAC exists. The operator
+    id/role come from environment (SPX_OPERATOR_ID / SPX_OPERATOR_ROLES), never
+    from the request, so a client cannot self-assign. Once Portal ships its own
+    auth, replace SPX_PORTAL_AUTH with the real provider (and keep this fail-closed
+    out of prod).
+    """
+    name = "operator"
+
+    def authenticate(self, headers, cookies, query):
+        import os
+        uid = os.environ.get("SPX_OPERATOR_ID", "")
+        if not uid:
+            return None
+        roles = [r.strip() for r in
+                 os.environ.get("SPX_OPERATOR_ROLES", "operator").split(",") if r.strip()]
+        return PortalUser(user_id=uid, username=uid, roles=roles)
+
+
 def rbac_allows(user: Optional[PortalUser], server_id: str) -> bool:
     """RBAC policy: KVM remote-control launch requires operator or admin role.
 

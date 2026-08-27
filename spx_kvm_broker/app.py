@@ -33,7 +33,7 @@ except Exception:  # pragma: no cover
 
 from .broker import Broker
 from .config import BrokerConfig
-from .rbac import NoAuthPortal, PortalAuth, PortalUser, rbac_allows
+from .rbac import EnvOperatorPortal, NoAuthPortal, PortalAuth, PortalUser, rbac_allows
 from .registry import SessionRegistry
 from .secret_store import AgeSecretStore
 
@@ -100,6 +100,8 @@ def current_user(request: Request) -> PortalUser:
 
 
 def _resolve_auth(provider_path, headers, cookies, query) -> PortalUser | None:
+    if provider_path and provider_path == "operator":
+        return EnvOperatorPortal().authenticate(headers, cookies, query)
     if provider_path and provider_path != "noauth":
         # Allow injecting a callable provider if the Portal backend supplies one.
         mod_name, _, fn = provider_path.partition(":")

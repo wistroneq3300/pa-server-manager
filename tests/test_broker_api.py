@@ -128,8 +128,9 @@ class TestBmcLaunch:
 
 class FakeSpxClient:
     """Stand-in for SpxClient.login/logout that returns a cookie set."""
-    def __init__(self, upstream_ip, scheme="https", session=None, verify=False):
-        self.base = f"{scheme}://{upstream_ip}"
+    def __init__(self, upstream_ip, scheme="https", session=None, verify=False,
+                 port=0):
+        self.base = f"{scheme}://{upstream_ip}" + (f":{port}" if port else "")
 
     def login(self, username, password):
         return build_fake_cookies(username)
