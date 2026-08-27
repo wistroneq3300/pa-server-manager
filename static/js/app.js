@@ -881,8 +881,7 @@ function pageRack() {
       <button class="btn btn-danger" onclick="rackPowerAllDialog(false)">⏻ 關機整櫃</button>
       <button class="btn btn-warn" onclick="rackBulkReboot()">⟳ Reboot 整櫃</button>
       <button class="btn" onclick="rackBulkAux()">⚡ AUX 整櫃</button>
-      <button class="btn primary" onclick="rackBroadcastDialog('${esc(rackView.project)}')">📡 廣播終端</button>
-      <button class="btn" id="rack-kvm-btn" title="把此機櫃專案有 BMC 的系統以 noVNC 並排顯示，並可鍵盤/滑鼠同步廣播" onclick="openKvmBroadcast && openKvmBroadcast('${esc(rackView.project)}')">📺 KVM 廣播</button>` : ""}
+      <button class="btn primary" onclick="rackBroadcastDialog('${esc(rackView.project)}')">📡 廣播終端</button>` : ""}
     </div>
     <div class="rack-status-legend">
       ${Object.values(MGX_TYPES).filter((v, i, a) => a.findIndex(x => x.cls === v.cls) === i).map(v => `<span class="mgx-legend"><span class="mgx-dot ${v.cls}"></span>${esc(v.label)}</span>`).join("")}
@@ -1582,6 +1581,7 @@ function renderProjectsList() {
     const rackN = members.filter(m=>m.level==="rack").length;
     const sysN = members.length - rackN;
     const collapsed = !!projectCollapsed[p.name];
+    const kvmCands = projectMembers(p.name).filter(m => m.bmc_ip);     // 該專案有 BMC 的系統（KVM 用）
     html += `
       <div class="proj-card card ${collapsed ? "collapsed" : ""}" data-pname="${esc(p.name)}">
         <div class="proj-card-head" draggable="true" title="拖動以調整專案順序">
@@ -1592,6 +1592,7 @@ function renderProjectsList() {
             ${p.desc ? `<span class="proj-card-desc">${esc(p.desc)}</span>` : ""}
           </div>
           <span class="spacer"></span>
+          ${kvmCands.length ? `<button class="btn small proj-kvm-btn" onclick="event.stopPropagation();openKvmBroadcast && openKvmBroadcast('${esc(p.name)}')" title="把此專案有 BMC 的 ${kvmCands.length} 台系統以 noVNC 並排顯示，並可鍵盤/滑鼠同步廣播">📺 KVM 廣播</button>` : ""}
           <button class="btn small proj-collapse-btn" onclick="event.stopPropagation();toggleProject('${esc(p.name)}')" title="${collapsed ? "展開此專案" : "收合此專案（隱藏機台清單）"}">${collapsed ? "▼ 展開" : "▲ 收合"}</button>
         </div>
         ${!collapsed && members.length ? `<div class="proj-table-scroll"><table class="t">
