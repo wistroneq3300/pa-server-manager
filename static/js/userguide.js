@@ -2,6 +2,15 @@ const USER_GUIDE = (() => {
   let win, bar, content, search, body, grip;
   let dragOffset = null, resizeStart = null, lastNormal = null, inited = false;
 
+  async function loadTemplate() {
+    try {
+      const r = await fetch('/static/userguide_template.html', { cache: 'no-cache' });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return (await r.text()).trim();
+    } catch (e) {
+      return '<p style="color:#ff8a80">載入說明內容失敗：' + (e && e.message || e) + '</p>';
+    }
+  }
   function el(tag, cls, html) {
     const n = document.createElement(tag);
     if (cls) n.className = cls;
@@ -9,15 +18,25 @@ const USER_GUIDE = (() => {
     return n;
   }
 
-  function open() {
-    if (inited) { win.style.display = ""; restore(); return; }
+  async function open() {
+    if (!window.__ugTpl) { window.__ugTpl = await loadTemplate(); }
+    if (inited) {
+      try {
+        const st = JSON.parse(localStorage.getItem("ug-state") || "{}");
+        st.closed = false; st.min = false;
+        localStorage.setItem("ug-state", JSON.stringify(st));
+      } catch (e) {}
+      win.style.display = "";
+      restore();
+      return;
+    }
     inited = true;
     win = el("div", "ug-window");
     bar = el("div", "ug-bar");
     bar.innerHTML =
       '<span class="ug-title">📖 User Guide</span>' +
       '<button class="ug-btn" data-act="min" title="最小化">–</button>' +
-      '<button class="ug-btn" data-act="max" title="最大化 / 還原"></button>' +
+      '<button class="ug-btn" data-act="max" title="最大化 / 縮小">□</button>' +
       '<button class="ug-btn ug-close" data-act="close" title="關閉">✕</button>';
     content = el("div", "ug-content");
     search = el("div", "ug-search");
@@ -25,7 +44,7 @@ const USER_GUIDE = (() => {
     si.placeholder = "🔍 搜尋…（GPU、KVM、廣播、遙測…）";
     search.appendChild(si);
     body = el("div", "ug-body");
-    body.innerHTML = (document.getElementById("guide-tpl") || {}).innerHTML || "";
+    body.innerHTML = window.__ugTpl || '';  // 由 loadTemplate 填入
     content.appendChild(search);
     content.appendChild(body);
     win.appendChild(bar);
@@ -156,11 +175,11 @@ const USER_GUIDE = (() => {
 document.addEventListener("DOMContentLoaded", () => {
   const btn = document.getElementById("guide-btn");
   if (btn) {
-    btn.addEventListener("click", (e) => { e.preventDefault(); USER_GUIDE.open(); });
+    btn.addEventListener("click", (e) => { e.preventDefault(); USER_GUIDE.open().catch(err => alert("載入說明失敗：" + err)); });
   }
   document.addEventListener("keydown", (e) => {
     if (e.key === "?" && !/^(INPUT|TEXTAREA)$/.test(document.activeElement.tagName)) {
-      e.preventDefault(); USER_GUIDE.open();
+      e.preventDefault(); USER_GUIDE.open().catch(err => alert("載入說明失敗：" + err));
     }
   });
 });
