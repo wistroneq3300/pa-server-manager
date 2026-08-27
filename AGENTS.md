@@ -328,3 +328,18 @@ SP-X 的 KVM 是用 AMI 私有資料封包（頭 `23 00 00 00 06 00 00 02 00` �
   - **根因**：官方 noVNC v1.5.0 的 RFB **沒有公開 `connect()` 方法**（constructor 傳 wsUrl 即自動 `_connect()`）。之前寫了 `rfb.connect()` → 拋 `rfb.connect is not a function` → 每台 RFB 建失敗 → 0/0 連線、Master 下拉空、★/⛶/同步全失效。**移除該行即修復**。
   - ✅ 驗證結果：2/2 已連線；Master=host_a；下拉有 2 option；★MASTER(金)/SLAVE(藍)徽章正確；⛶單獨放大/返回多格正常；★設為Master切換正常；master canvas dispatch keydown → 狀態列「🔁 已同步 1 台 slave(keydown)」。
 - ⚠️ 安全上下文：使用者從 `http://INTERNAL_IP_10:6969` 開 → noVNC 印 `noVNC requires a secure context (TLS)` 警告（rfb.js:100）。實測在 insecure context 下**仍能連、畫面仍顯示**，但為求穩定建議後續評估改走 https。
+
+---
+
+## 工具陷阱：file_editor 會破壞 app.js 中文編碼（重要！）
+
+- 症狀：用 file_editor（str_replace 等）編輯 static/js/app.js 後，整個檔案的中文字串全部變 mojibake（Cyrillic-ish 亂碼），同 session 用同一工具改 index.html/style.css/main.py 卻不會壞。
+- 檢查：git show HEAD:<file> 比對「已連線」「終端機」字串是否還存在；或數 UTF-8 3-byte CJK（E4-E9 起頭）。本專案 HEAD app.js 有 ~6395 個 CJK，若掉到個位數＝被破壞。
+- 解法：改 app.js 一律用 python 明確 io.open(p,'w',encoding='utf-8',newline='\n') 寫入，不要用 file_editor。重建手法：從 HEAD 還原乾淨版 → 用 python str.replace（assert count==1）重套功能。
+- 驗證：node --check static/js/app.js + 比對 CJK 數（HEAD→worktree 只應增加新加的量）。
+
+## 已完成功能（本次修復）
+
+- 終端機視圖切換（System Manager 終端機 Modal）：◫並排 / 🖥OS放大 / 🌐BMC放大，同廣播終端切換概念。實作於 index.html(term-mode 按鈕)、style.css(.term-state-os/bmc/both)、app.js(setTermMode / openTermAt 改 state class)。OS-only 機台（如 CDU-1-main）BMC 放大鈕自動 disabled。
+- ⚙ 設定 OS IP（System Manager 機台列）：Terminal 與 刪除 之間，POST /api/machines/{name}/change-os-ip，僅改 OS IP，需 ping 通 + SSH hostname 相符才允許（防 DHCP 漂移）。
+- 終端 query 轉發 bug 已修（main.py /ws/terminal/{name}/{kind}）：之前 FastAPI proxy 丟掉瀏覽器帶的 ?host=&user=&pass=&port=，導致 passive/自訂帳密連線回「未設定連線資訊」。現已保留 query 轉發。
