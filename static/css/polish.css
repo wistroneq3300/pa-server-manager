@@ -69,28 +69,3 @@ table.t th {
   border-radius: 14px;
 }
 
-/* 5) 移除「系統名稱」的拖曳外觀：不要灰框 + 不要抓取游標，只留一般深色文字連結。
-      排序功能仍保留（draggable 還在，只是外觀不再像是能拖） */
-.mach-linkbox {
-  background: transparent;
-  border: none;
-  box-shadow: none;
-  cursor: pointer;
-  padding: 2px 2px;
-}
-.mach-linkbox:hover {
-  background: transparent;
-  border: none;
-  box-shadow: none;
-  transform: none;
-}
-td.mach-drag[draggable="true"]{ cursor: default; }
-td.mach-drag[draggable="true"]:active{ cursor: default; }
-
-/* 6) 右側動作按鈕縮小：更緊湊、不擋畫面 */
-.proj-card .t .btn.small {
-  padding: 2px 8px;
-  font-size: 10.5px;
-  font-weight: 500;
-}
-
