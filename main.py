@@ -14,6 +14,7 @@ import asyncio
 import json
 import kvm_bridge
 import os
+import re
 import subprocess
 import threading
 import base64
@@ -941,6 +942,7 @@ _HW_CMD = (
     "echo '__IPLINK__'; ip -o link show 2>/dev/null | awk -F': ' '{print $2}' | grep -Ev '^(lo|dummy|docker|virbr|veth|br-|vlan)' | sed 's/@.*//' ; "
     "echo '__GPU__'; nvidia-smi --query-gpu=index,name,memory.total,utilization.gpu --format=csv,noheader 2>/dev/null ; "
     "echo '__AMDGPU__'; rocm-smi --showproductname 2>/dev/null ; rocm-smi --showmeminfo vram 2>/dev/null ; "
+    "echo '__GPULSPCI__'; lspci -nn 2>/dev/null | grep -Ei '3D controller|Processing accelerators' | grep -Ei 'NVIDIA|Advanced Micro Devices|AMD' ; "
     "echo '__AMD_ROCM__' ; rocm-smi --showuse 2>/dev/null ; rocm-smi --showtemp 2>/dev/null ; rocm-smi --showpower 2>/dev/null ; "
     "echo '__FW__'; dmidecode -t bios 2>/dev/null | grep -E 'Vendor:|Version:|Release Date:' | sed 's/^[[:space:]]*//' ; "
     "echo '__FW_SSD__'; for n in /sys/class/nvme/nvme[0-9]/firmware_rev; do [ -f \"$n\" ] && fw=$(cat \"$n\" | tr -d '[:space:]') && [ -n \"$fw\" ] && echo \"$(basename $(dirname $n)): $fw\"; done ; "
@@ -1046,6 +1048,23 @@ def parse_hw(text):
         if am_count:
             memtxt = str(am_mem_mib) if am_mem_mib else ""
             gpus = [{"name": am_name or "AMD GPU", "mem": memtxt, "util": ""} for _ in range(am_count)]
+    if not gpus:
+        # 第三級備案：nvidia-smi / rocm-smi 皆無輸出（如 GPU driver 未 load）→
+        # 用 lspci -nn 辨識「誰家的卡、幾張」（只有型別/張數，無 mem/util）。
+        # NVIDIA：3D controller；AMD Instinct：Processing accelerators。
+        lpcis = _section("__GPULSPCI__", "__AMD_ROCM__")
+        pcis = []
+        for l in lpcis:
+            vendor = "NVIDIA" if ("NVIDIA" in l.upper()) else ("AMD" if ("AMD" in l.upper() or "Advanced Micro Devices" in l) else None)
+            if not vendor:
+                continue
+            # -nn 格式：裝置名稱後附 [vendor:device ID]
+            idm = re.search(r"\[([0-9a-fA-F]{4}):([0-9a-fA-F]{4})\]\s*$", l)
+            pcis.append({"vendor": vendor, "dev_id": idm.group(2).upper() if idm else "", "raw": l})
+        if pcis:
+            for i, p in enumerate(pcis):
+                nm = p["vendor"] + (" Device " + p["dev_id"] if p["dev_id"] else "")
+                gpus.append({"name": nm, "mem": "", "util": "", "note": "lspci 偵測（GPU 工具無輸出，可能未載入 driver/工具鏈）"})
     if gpus:
         hw["gpu"] = gpus
 
