@@ -1089,7 +1089,7 @@ function devicesHtml(members, pinged) {
           <button class="btn small" title="換位/類型" onclick="rackMoveDialog('${esc(m.name)}')">⇅</button>
           ${hasOs ? `<button class="btn small" onclick="openTerm('${esc(m.name)}')">▶ Terminal</button>` : ""}
           ${hasOs ? `<button class="btn small" onclick="machControlDialog('${esc(m.name)}')" title="開關機 / Reboot / AC cycle">⏻ 開關機</button>` : ""}
-          <button class="btn small btn-del" title="從機櫃拿掉（不影響 System Manager 的 L11）" onclick="rackUnmount('${esc(m.name)}')">✕ 移除</button>
+          <button class="btn small" title="從機櫃拿掉（System Manager 的 L11 不受影響）" onclick="rackUnmount('${esc(m.name)}')">刪除</button>
         </td>
       </tr>`;
     }).join("") + `</tbody></table></div></div>`;
