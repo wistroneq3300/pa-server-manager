@@ -1077,6 +1077,8 @@ function devicesHtml(members, pinged) {
       const bmcCell = !isServerLike
         ? `<span class="hint" style="color:var(--text-faint)">—</span>`
         : (m.bmc_ip ? `${lamp(bmcUp)} <span class="ping-ip mono">${esc(m.bmc_ip)}</span>` : `<span style="color:var(--text-faint)">—</span>`);
+      // 只有「有 OS IP」的系統才有 Terminal + 開關機（跟 System Manager 清單同一套邏輯）
+      const hasOs = !!m.os_ip;
       return `<tr>
         <td class="mono">U${m.rack_u || "—"}${(m.rack_size||1)>1?`<span class="hint"> (+${(m.rack_size||1)-1})</span>`:""}</td>
         <td class="mono"><a href="#" class="mach-link" onclick="event.preventDefault();openMachine('${esc(m.name)}')"><b>${esc(m.name)}</b></a></td>
@@ -1085,6 +1087,9 @@ function devicesHtml(members, pinged) {
         <td class="mono">${bmcCell}</td>
         <td style="white-space:nowrap">
           <button class="btn small" title="換位/類型" onclick="rackMoveDialog('${esc(m.name)}')">⇅</button>
+          ${hasOs ? `<button class="btn small" onclick="openTerm('${esc(m.name)}')">▶ Terminal</button>` : ""}
+          ${hasOs ? `<button class="btn small" onclick="machControlDialog('${esc(m.name)}')" title="開關機 / Reboot / AC cycle">⏻ 開關機</button>` : ""}
+          <button class="btn small btn-del" title="從機櫃拿掉（不影響 System Manager 的 L11）" onclick="rackUnmount('${esc(m.name)}')">✕ 移除</button>
         </td>
       </tr>`;
     }).join("") + `</tbody></table></div></div>`;

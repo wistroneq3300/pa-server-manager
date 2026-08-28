@@ -30,23 +30,21 @@
     0 16px 34px rgba(0,0,0,.36);
 }
 
-/* 2) 按鈕：內高光(上) + 內暗(下) + 外陰影 → 有厚度；按下時「陷下去」 */
+/* 2) 按鈕：內高光(上) + 內暗(下) + 外陰影 → 有厚度；按下時「陷下去」
+      ⚠ 只用 box-shadow，**不要** 碰 background-image —— 否則會蓋掉
+      .btn.primary / .btn-good / .btn-warn / .btn-danger 的彩色底，
+      讓白色字消失（就是上一次被發現的 bug） */
 .btn {
-  background-image: linear-gradient(180deg, rgba(255,255,255,.34) 0%, rgba(255,255,255,0) 48%);
   box-shadow:
-    inset 0 1px 0 rgba(255,255,255,.40),
-    inset 0 -1px 0 rgba(10,37,64,.13),
-    0 1px 2px rgba(10,37,64,.16);
+    inset 0 1px 0 rgba(255,255,255,.35),
+    inset 0 -1px 0 rgba(10,37,64,.12),
+    0 1px 2px rgba(10,37,64,.15);
 }
 :root[data-theme="dark"] .btn {
-  background-image: linear-gradient(180deg, rgba(255,255,255,.05) 0%, rgba(255,255,255,0) 48%);
   box-shadow:
-    inset 0 1px 0 rgba(255,255,255,.08),
-    inset 0 -1px 0 rgba(0,0,0,.28),
+    inset 0 1px 0 rgba(255,255,255,.07),
+    inset 0 -1px 0 rgba(0,0,0,.26),
     0 1px 2px rgba(0,0,0,.42);
-}
-.btn.primary {
-  background-image: linear-gradient(180deg, rgba(255,255,255,.28) 0%, rgba(255,255,255,0) 55%);
 }
 .btn:active {
   transform: translateY(1px);
