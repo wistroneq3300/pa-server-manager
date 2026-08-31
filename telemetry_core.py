@@ -63,6 +63,8 @@ def init_db():
         cols = [r[1] for r in c.execute("PRAGMA table_info(os_metrics)").fetchall()]
         if "mem_used_pct" not in cols:
             c.execute("ALTER TABLE os_metrics ADD COLUMN mem_used_pct REAL")
+        if "cpu_temp_c" not in cols:
+            c.execute("ALTER TABLE os_metrics ADD COLUMN cpu_temp_c REAL")
 
         # Rack 元件類型 telemetry：EAV 泛型表（依 kind/metric 存各類型指標）
         # server/switch/powershelf/pdu/cdu 各自收集器寫入不同的 metric
@@ -323,8 +325,32 @@ def store_gpu(ts, name, rows):
 _OS_CMD = ("uptime; grep -E 'MemTotal|MemAvailable|MemFree' /proc/meminfo; "
            "echo '===DISK==='; df -B1M -x tmpfs -x devtmpfs -x overlay --total 2>/dev/null; "
            "echo '===NET==='; cat /proc/net/dev; "
+           "echo '===CPUTEMP==='; for z in /sys/class/thermal/thermal_zone*; do [ -f \"$z/type\" ] && [ -f \"$z/temp\" ] && echo \"$(cat \"$z/type\" 2>/dev/null) $(cat \"$z/temp\" 2>/dev/null)\"; done; sensors 2>/dev/null | grep -Ei 'package id|Tdie|Tctl|CPU[T_ ]|temp' | head -6; "
            "echo '===CPU1==='; grep 'cpu ' /proc/stat; sleep 1; "
            "echo '===CPU2==='; grep 'cpu ' /proc/stat; nproc")
+
+
+def _cpu_temp_c(lines):
+    """從 ===CPUTEMP=== 區塊解析 CPU 溫度（°C）。
+    優先 thermal_zone type=x86_pkg_temp（Intel 包裝溫度），其次
+    soc_thermal/cpu_thermal；都不符再用 lm-sensors 的 Package id/Tdie。
+    解析不到回 None（圖表該點留空）。"""
+    for ln in lines:
+        s = ln.strip()
+        parts = s.split()
+        if len(parts) >= 2 and parts[0] in ("x86_pkg_temp", "soc_thermal", "cpu_thermal", "cpu-thermal"):
+            try:
+                return int(parts[1]) / 1000.0
+            except Exception:
+                continue
+    import re as _re_s
+    # lm-sensors 格式：`coretemp  - package id 68.6°C (high = ...)` 或 `Tdie +53 degC`
+    # 取第一行含「數字 + °C/degC」的行
+    for ln in lines:
+        m = _re_s.search(r"([\d.]+)\s*(?:°C|degC)", ln)
+        if m and _re_s.search(r"(?i)temp|Tdie|Tctl|package|id", ln):
+            return float(m.group(1))
+    return None
 
 
 def _section(text, start, end=None):
@@ -478,10 +504,11 @@ def collect_os(m):
             cpu_b = s.split()
     if cpu_a and cpu_b:
         cpu_used = _cpu_used(cpu_a, cpu_b)
+    cpu_temp = _cpu_temp_c(_section(out, "===CPUTEMP===", "===CPU1==="))
     mem_used_pct = (mem_used_gb / mem_total_gb * 100.0) if mem_total_gb else None
     os_row = (load1, load5, load15, cpu_cores, cpu_used,
               mem_total_gb, mem_used_gb, mem_avail_gb, mem_used_pct,
-              disk_total or None, disk_used or None)
+              disk_total or None, disk_used or None, cpu_temp)
     return ts, os_row, net_rows, disk_rows
 
 
@@ -490,8 +517,8 @@ def store_os(ts, name, row):
         return 0
     with _conn() as c:
         c.execute("INSERT INTO os_metrics(ts,machine,load1,load5,load15,cpu_cores,cpu_used,"
-                  "mem_total_gb,mem_used_gb,mem_avail_gb,mem_used_pct,disk_total_gb,disk_used_gb)"
-                  " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)", (ts, name, *row))
+                  "mem_total_gb,mem_used_gb,mem_avail_gb,mem_used_pct,disk_total_gb,disk_used_gb,cpu_temp_c)"
+                  " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)", (ts, name, *row))
     return 1
 
 
@@ -623,7 +650,7 @@ def get_os_series(name, minutes):
     since = time.time() - minutes * 60
     with _conn() as c:
         os_rows = c.execute("SELECT ts,load1,load5,load15,cpu_cores,cpu_used,mem_total_gb,mem_used_gb,"
-                            "mem_avail_gb,mem_used_pct,disk_total_gb,disk_used_gb FROM os_metrics WHERE machine=? AND ts>=? ORDER BY ts",
+                            "mem_avail_gb,mem_used_pct,disk_total_gb,disk_used_gb,cpu_temp_c FROM os_metrics WHERE machine=? AND ts>=? ORDER BY ts",
                             (name, since)).fetchall()
         net_rows = c.execute("SELECT ts,iface,rx_bytes,tx_bytes FROM net_metrics WHERE machine=? AND ts>=? ORDER BY iface,ts",
                              (name, since)).fetchall()

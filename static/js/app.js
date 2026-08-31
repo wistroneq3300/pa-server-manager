@@ -2182,6 +2182,10 @@ async function loadTelemetry() {
   let ch = telChart("tel-cpu", "%");
   telSet(ch, oLabels, [{ key: "cpu", data: oarr.map(r => r.cpu_used) }], { cpu: { label: "CPU 使用率", color: "#2563eb" } });
 
+  // CPU：溫度 °C
+  ch = telChart("tel-cputemp", "°C");
+  telSet(ch, oLabels, [{ key: "temp", data: oarr.map(r => r.cpu_temp_c) }], { temp: { label: "CPU 溫度", color: "#f97316" } });
+
   // CPU Load（1/5/15 min）
   ch = telChart("tel-load", "load");
   telSet(ch, oLabels, [
@@ -2653,6 +2657,7 @@ function pageMachine() {
           <div class="tel-block-head"><span class="tel-label">CPU <em>（中央處理器）</em></span></div>
           <div class="tel-block-body">
             <div class="chart-box"><div class="chart-title">CPU 使用率 <span class="unit">＝ 各核心忙碌比例的平均，0~100%</span></div><canvas id="tel-cpu"></canvas></div>
+            <div class="chart-box"><div class="chart-title">CPU 溫度 <span class="unit">＝ 包裝溫度（x86_pkg_temp / lm-sensors），無感測器時留空</span></div><canvas id="tel-cputemp"></canvas></div>
             <div class="chart-box"><div class="chart-title">CPU Load（平均負載） <span class="unit">＝ 排隊等待的核心任務數，超過核心數代表過載</span></div><canvas id="tel-load"></canvas></div>
           </div>
         </div>
