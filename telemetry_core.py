@@ -325,7 +325,7 @@ def store_gpu(ts, name, rows):
 _OS_CMD = ("uptime; grep -E 'MemTotal|MemAvailable|MemFree' /proc/meminfo; "
            "echo '===DISK==='; df -B1M -x tmpfs -x devtmpfs -x overlay --total 2>/dev/null; "
            "echo '===NET==='; cat /proc/net/dev; "
-           "echo '===CPUTEMP==='; for z in /sys/class/thermal/thermal_zone*; do [ -f \"$z/type\" ] && [ -f \"$z/temp\" ] && echo \"$(cat \"$z/type\" 2>/dev/null) $(cat \"$z/temp\" 2>/dev/null)\"; done; sensors 2>/dev/null | grep -Ei 'package id|Tdie|Tctl|CPU[T_ ]|temp' | head -6; "
+           "echo '===CPUTEMP==='; for z in /sys/class/thermal/thermal_zone*; do [ -f \"$z/type\" ] && [ -f \"$z/temp\" ] && echo \"Z $(cat \"$z/type\" 2>/dev/null) $(cat \"$z/temp\" 2>/dev/null)\"; done; for h in /sys/class/hwmon/hwmon*; do [ -f \"$h/name\" ] && n=$(cat \"$h/name\" 2>/dev/null) && case \"$n\" in k10temp|coretemp) for i in $h/temp1_input; do [ -f \"$i\" ] && echo \"H $n $(cat \"$i\") $(cat \"${i%_input}_label\" 2>/dev/null)\"; done;; esac; done; sensors 2>/dev/null | grep -Ei 'Tctl|package id|Tdie' | head -8; "
            "echo '===CPU1==='; grep 'cpu ' /proc/stat; sleep 1; "
            "echo '===CPU2==='; grep 'cpu ' /proc/stat; nproc")
 
@@ -342,6 +342,14 @@ def _cpu_temp_c(lines):
             parts = s.split()
             if len(parts) < 2:
                 continue
+            # hwmon：`H k10temp <temp_milli°C> [label=Tctl]`（CPU 溫度常在此而非 thermal_zone）
+            if parts[0] == "H" and len(parts) >= 3 and parts[1] in ("k10temp", "coretemp"):
+                try:
+                    v = int(parts[2]) / 1000.0
+                except Exception:
+                    continue
+                return v if 0.0 <= v <= 150.0 else None
+            # thermal_zone：`Z <type> <temp_milli°C>`
             name, raw = parts[0], parts[-1]
             if not raw.isdigit():
                 continue
@@ -349,14 +357,10 @@ def _cpu_temp_c(lines):
                 v = int(raw) / 1000.0
             except Exception:
                 continue
-            low = parts[0].split("/")[-1]  # 取 zone 名稱（/sys/class/thermal/thermal_zone0）
-            if low in ("x86_pkg_temp", "k10temp", "soc_thermal", "cpu_thermal", "cpu-thermal"):
+            low = parts[0].split("/")[-1]
+            zt = " ".join(parts[1:-1]) if len(parts) > 2 else (parts[1] if len(parts) > 1 else "")
+            if low in ("Z",) and any(k in zt.lower() for k in ("x86_pkg_temp", "k10temp", "soc_thermal", "cpu_thermal", "cpu-thermal", "soc", "cpu", "temp", "package")):
                 return v
-            # 白名單外：先記住第一個「合理」的值當備用，最後判斷該 zone type 是否含 cpu/soc/pkg/temp
-            if 0.0 <= v <= 120.0:
-                zt = parts[1] if len(parts) > 1 else ""
-                if any(k in (zt or "").lower() for k in ("cpu", "soc", "temp", "package", "x86", "k10", "pkg")):
-                    return v
         return None
     v = _zone()
     if v is not None:
