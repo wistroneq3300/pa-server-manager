@@ -627,6 +627,31 @@ def change_os_ip(name: str, body: ChangeOsIp):
             "machine": m}
 
 
+class ChangeBmcIp(BaseModel):
+    new_bmc_ip: str
+
+
+@app.post("/api/machines/{name}/change-bmc-ip")
+def change_bmc_ip(name: str, body: ChangeBmcIp):
+    """變更機台的 BMC IP。只要新 IP ping 得通就允許變更（無hostname驗證）。"""
+    if name not in machines:
+        raise HTTPException(404, f"機台不存在: {name}")
+    m = machines[name]
+    new_ip = (body.new_bmc_ip or "").strip()
+    if not new_ip:
+        raise HTTPException(400, "請輸入新的 BMC IP")
+    if new_ip == m.get("bmc_ip"):
+        return {"ok": True, "changed": False, "msg": "IP 與原本相同，未變更。"}
+    if not ping_check(new_ip, timeout=3):
+        return {"ok": False, "changed": False,
+                "msg": f"Ping 不到新 BMC IP {new_ip}，未變更。請確認該 IP 現在是線上。"}
+    old_ip = m.get("bmc_ip") or "(無)"
+    m["bmc_ip"] = new_ip
+    _save_data()
+    return {"ok": True, "changed": True, "msg": f"已將 BMC IP 由 {old_ip} 更新為 {new_ip}。",
+            "machine": m}
+
+
 # ---- 線上狀態快取（TTL），避免大量機台時每次 API 都同步 ping 卡住 ----
 _status_cache = {}
 _STATUS_TTL = 5          # 5 秒內不重複 ping 同一台

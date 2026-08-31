@@ -855,6 +855,7 @@ function showDialog(title, bodyHtml, actions) {
   (actions || []).forEach(a => {
     const btn = document.createElement("button");
     btn.textContent = a.txt; btn.className = "btn " + (a.cls || "");
+    if (a.id) btn.id = a.id;
     btn.onclick = () => a.fn();
     foot.appendChild(btn);
   });
@@ -1762,7 +1763,7 @@ function machineRowSortable(m, pi, mi, total) {
       <td style="white-space:nowrap">
         ${lvlBtn}
         ${canTerm ? `<button class="btn small" onclick="openTerm('${esc(m.name)}')">▶ Terminal</button>` : ""}
-        <button class="btn small" onclick="changeOsIp('${esc(m.name)}')" title="變更 OS IP（需 ping 通 + hostname 相符）">⚙ 設定</button>
+        <button class="btn small" onclick="changeOsIp('${esc(m.name)}')" title="變更 OS IP / BMC IP（OS 需 ping 通 + hostname 相符；BMC 需 ping 通）">⚙ 設定</button>
         <button class="btn small" onclick="deleteMachine('${esc(m.name)}')">刪除</button>
       </td>
     </tr>`;
@@ -1800,7 +1801,7 @@ function machineRowUnassigned(m) {
       <td style="white-space:nowrap">
         ${lvlBtn}
         ${canTerm ? `<button class="btn small" onclick="openTerm('${esc(m.name)}')">▶ Terminal</button>` : ""}
-        <button class="btn small" onclick="changeOsIp('${esc(m.name)}')" title="變更 OS IP（需 ping 通 + hostname 相符）">⚙ 設定</button>
+        <button class="btn small" onclick="changeOsIp('${esc(m.name)}')" title="變更 OS IP / BMC IP（OS 需 ping 通 + hostname 相符；BMC 需 ping 通）">⚙ 設定</button>
         <button class="btn small" onclick="deleteMachine('${esc(m.name)}')">刪除</button>
       </td>
     </tr>`;
@@ -3140,39 +3141,71 @@ function openTerm(name) {
     (m.os_ip && m.os_user && m.os_pass) ? { host: m.os_ip, user: m.os_user, pass: m.os_pass, port: m.os_port || 22 } : null,
     (m.bmc_ip && m.bmc_user && m.bmc_pass) ? { host: m.bmc_ip, user: m.bmc_user, pass: m.bmc_pass, port: m.bmc_port || 623 } : null);
 }
-// ⚙ 設定：變更 OS IP（只改 OS IP，BMC 不給改），先驗證 ping 通 + hostname 相符
+// ⚙ 設定：變更 OS IP / BMC IP（各自獨立，未更動的欄位後端不會動）。
+// OS IP 需 ping 通 + hostname 相符；BMC IP 只要 ping 通即可。
 function changeOsIp(name) {
   const m = machines.find(x => x.name === name);
   if (!m) return;
-  const cur = m.os_ip || "";
-  showDialog(`⚙ 設定 OS IP — ${esc(name)}`, `
+  const curOs = m.os_ip || "";
+  const curBmc = m.bmc_ip || "";
+  showDialog(`⚙ 設定 — ${esc(name)}`, `
     <div class="rm-modal-body">
       <p style="font-size:12px;color:var(--text-faint);margin-bottom:8px">
-        將變更此機台的 <b>OS IP</b>（BMC IP 不給改）。為避免 DHCP 漂移誤配，新 IP 必須：
-        <b>(1) ping 得通</b>、<b>(2) SSH 抓到的 hostname 與此機台名稱相同</b>，才允許變更。
+        變更此機台的 IP。填了新的才會改、與原值相同會跳過。<br>
+        <b>OS IP</b>：ping 得通 + SSH 抓到的 hostname 與機台名稱相同才受理。<br>
+        <b>BMC IP</b>：ping 得通即可受理。
       </p>
-      <label style="display:block;font-size:12px;color:var(--text-faint);margin:8px 0 4px">新 OS IP</label>
-      <input class="input" id="new-os-ip-input" style="width:100%;padding:8px;font-family:monospace" value="${esc(cur)}" placeholder="例如 INTERNAL_IP_10">
-      <div id="osip-msg" style="margin-top:10px;font-size:12px"></div>
+      <label style="display:block;font-size:12px;color:var(--text-faint);margin:8px 0 4px">OS IP</label>
+      <input class="input" id="new-os-ip-input" style="width:100%;padding:8px;font-family:monospace" value="${esc(curOs)}" placeholder="例如 INTERNAL_IP_10">
+      <label style="display:block;font-size:12px;color:var(--text-faint);margin:8px 0 4px">BMC IP</label>
+      <input class="input" id="new-bmc-ip-input" style="width:100%;padding:8px;font-family:monospace" value="${esc(curBmc)}" placeholder="例如 INTERNAL_IP_11">
+      <div id="osip-msg" style="margin-top:10px;font-size:12px;white-space:pre-line"></div>
     </div>`,
     [
       { txt: "取消", cls: "", fn: () => closeDialog() },
-      { txt: "變更 OS IP", cls: "primary", fn: () => submitChangeOsIp(name) },
+      { txt: "變更 IP", cls: "primary", id: "ip-submit-btn", fn: () => submitChangeOsIp(name) },
     ]);
 }
+function _ipSetBusy(busy) { const btn = $("ip-submit-btn"); if (btn) { btn.disabled = busy; btn.textContent = busy ? "變更中…" : "變更 IP"; } }
+function _ipSetDone() {
+  // 結果已顯示在下方的 osip-msg：把按鈕換成「知道了」，按下才關窗並重新載入清單
+  const foot = $("rm-dialog-foot");
+  if (foot) {
+    foot.innerHTML = "";
+    const ok = document.createElement("button");
+    ok.textContent = "知道了"; ok.className = "btn primary";
+    ok.onclick = () => { closeDialog(); loadMachines().then(() => setView(state.view)); };
+    foot.appendChild(ok);
+  }
+}
 async function submitChangeOsIp(name) {
-  const input = $("new-os-ip-input");
   const msgEl = $("osip-msg");
-  const ip = input ? input.value.trim() : "";
-  if (!ip) { if (msgEl) { msgEl.textContent = "請輸入新 OS IP"; msgEl.style.color = "var(--red)"; } return; }
+  const ip = $("new-os-ip-input") ? $("new-os-ip-input").value.trim() : "";
+  const bmcIp = $("new-bmc-ip-input") ? $("new-bmc-ip-input").value.trim() : "";
+  if (!ip && !bmcIp) { msgEl.textContent = "OS IP 跟 BMC IP 至少填一個"; msgEl.style.color = "var(--red)"; return; }
+  const results = [];
+  const failed = [];
+  _ipSetBusy(true);
   try {
-    const d = await api(`/api/machines/${encodeURIComponent(name)}/change-os-ip`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ new_os_ip: ip }) });
-    if (msgEl) { msgEl.textContent = d.msg || (d.changed === false ? "IP 與原本相同，未變更。" : "變更成功。"); msgEl.style.color = d.ok === false || d.changed === false ? "var(--amber)" : "var(--green)"; }
-    if (d.changed) { const mm = machines.find(x => x.name === name); if (mm) { mm.os_ip = d.machine ? d.machine.os_ip : ip; } loadMachines().then(() => setView(state.view)); }
-    if (d.ok === false) return;   // 拒絕變更時不關 dialog，方便看原因
-    closeDialog();
+    if (ip) {
+      const d = await api(`/api/machines/${encodeURIComponent(name)}/change-os-ip`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ new_os_ip: ip }) });
+      results.push(`OS IP：${d.msg || (d.changed === false ? "與原本相同，未變更。" : "變更成功。")}`);
+      if (d.ok === false) failed.push("OS IP");
+    }
+    if (bmcIp) {
+      const d = await api(`/api/machines/${encodeURIComponent(name)}/change-bmc-ip`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ new_bmc_ip: bmcIp }) });
+      results.push(`BMC IP：${d.msg || (d.changed === false ? "與原本相同，未變更。" : "變更成功。")}`);
+      if (d.ok === false) failed.push("BMC IP");
+    }
+    // 成功/失敗結果都留在窗口內顯示，按「知道了」才關窗並重新載入清單
+    msgEl.textContent = (failed.length ? "⚠️ " : "✅ ") + results.join("\n");
+    msgEl.style.color = failed.length ? "var(--amber)" : "var(--green)";
+    _ipSetDone();
   } catch (e) {
-    if (msgEl) { msgEl.textContent = e.message; msgEl.style.color = "var(--red)"; }
+    if (results.length) msgEl.textContent = results.join("\n") + "\n";
+    msgEl.textContent += "❌ " + e.message;
+    msgEl.style.color = "var(--red)";
+    _ipSetBusy(false);   // 失敗保持原按鈕，可改值重試
   }
 }
 function setupTermPane(id) { $(id).innerHTML = ""; }
