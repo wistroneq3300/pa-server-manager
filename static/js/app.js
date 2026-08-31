@@ -273,6 +273,7 @@ function rackCopAppend(role, html, raw) {
   </div>`);
   box.scrollTop = box.scrollHeight;
 }
+let _rackCopBusy = false;
 function rackCopTyping(on) {
   const box = document.getElementById("rackcop-box");
   if (!box) return;
@@ -294,22 +295,42 @@ async function rackCopSend() {
   const proj = rackView.project || "";
   rackCopAppend("user", text);
   if (inp) inp.value = autoGrow(inp);
-  _rackCopBusy = true;
   if (send) { send.disabled = true; send.textContent = "…"; }
+
+  // 後端 copilot 是同步叫 Ollama，遇 Ollama 忙碌可能達 60s 以上。
+  // 用 AbortController 設上限，避免按鈕永久卡在 disabled。
+  const COPTIMEOUT = 90000;
+  async function ask() {
+    const ctl = new AbortController();
+    const t = setTimeout(() => ctl.abort(), COPTIMEOUT);
+    try {
+      const r = await fetch("/api/copilot", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: text, project: proj }),
+        signal: ctl.signal,
+      });
+      return await r.json();
+    } finally { clearTimeout(t); }
+  }
+
+  _rackCopBusy = true;
   rackCopTyping(true);
   try {
-    const r = await fetch("/api/copilot", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message: text, project: proj }),
-    });
-    const j = await r.json();
+    let j;
+    try { j = await ask(); }
+    catch (e) {
+      // 逾時/繁忙：重試一次（Ollama 常因並發長請求暫時無回應）
+      if (e && e.name === "AbortError") { rackCopAppend("ai", "⏳ Ollama 較慢，再試一次…"); try { j = await ask(); } catch (e2) { throw e2; } }
+      else throw e;
+    }
     rackCopTyping(false);
     if (j.ok) rackCopAppend("ai", j.reply, true);
     else rackCopAppend("ai", `⨠ ${j.error || "呼叫失敗"}`);
   } catch (e) {
     rackCopTyping(false);
-    rackCopAppend("ai", `⨠ 無法連線到後端： ${e.message}`);
+    const msg = (e && e.name === "AbortError") ? "Ollama 逾時（90 秒）。目前可能有其他分析任務佔用，請稍後再試。" : `無法連線到後端： ${e && e.message ? e.message : e}`;
+    rackCopAppend("ai", `⨠ ${msg}`);
   } finally {
     _rackCopBusy = false;
     if (send) { send.disabled = false; send.textContent = "➤"; }

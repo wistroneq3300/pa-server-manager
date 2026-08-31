@@ -332,24 +332,44 @@ _OS_CMD = ("uptime; grep -E 'MemTotal|MemAvailable|MemFree' /proc/meminfo; "
 
 def _cpu_temp_c(lines):
     """從 ===CPUTEMP=== 區塊解析 CPU 溫度（°C）。
-    優先 thermal_zone type=x86_pkg_temp（Intel 包裝溫度），其次
-    soc_thermal/cpu_thermal；都不符再用 lm-sensors 的 Package id/Tdie。
-    解析不到回 None（圖表該點留空）。"""
-    for ln in lines:
-        s = ln.strip()
-        parts = s.split()
-        if len(parts) >= 2 and parts[0] in ("x86_pkg_temp", "soc_thermal", "cpu_thermal", "cpu-thermal"):
+    thermal_zone 優先：只要 type 是常見 CPU 來源（x86_pkg_temp/k10temp/
+    soc_thermal/cpu_thermal/cpu-thermal）就直接用；都不符時，退而找
+    任一 thermal_zone 的 temp 值落在合理範圍（0~120°C）者，並配合
+    lm-sensors 的 Package id/Tdie/Tctl 補位。解析不到回 None。"""
+    def _zone():
+        for ln in lines:
+            s = ln.strip()
+            parts = s.split()
+            if len(parts) < 2:
+                continue
+            name, raw = parts[0], parts[-1]
+            if not raw.isdigit():
+                continue
             try:
-                return int(parts[1]) / 1000.0
+                v = int(raw) / 1000.0
             except Exception:
                 continue
+            low = parts[0].split("/")[-1]  # 取 zone 名稱（/sys/class/thermal/thermal_zone0）
+            if low in ("x86_pkg_temp", "k10temp", "soc_thermal", "cpu_thermal", "cpu-thermal"):
+                return v
+            # 白名單外：先記住第一個「合理」的值當備用，最後判斷該 zone type 是否含 cpu/soc/pkg/temp
+            if 0.0 <= v <= 120.0:
+                zt = parts[1] if len(parts) > 1 else ""
+                if any(k in (zt or "").lower() for k in ("cpu", "soc", "temp", "package", "x86", "k10", "pkg")):
+                    return v
+        return None
+    v = _zone()
+    if v is not None:
+        return v
     import re as _re_s
-    # lm-sensors 格式：`coretemp  - package id 68.6°C (high = ...)` 或 `Tdie +53 degC`
-    # 取第一行含「數字 + °C/degC」的行
+    # lm-sensors 格式：`coretemp  - package id +68.6 degC ...` 或 `Tctl 53 degC`
     for ln in lines:
-        m = _re_s.search(r"([\d.]+)\s*(?:°C|degC)", ln)
-        if m and _re_s.search(r"(?i)temp|Tdie|Tctl|package|id", ln):
-            return float(m.group(1))
+        if _re_s.search(r"(?i)package|Tdie|Tctl|temp", ln):
+            m = _re_s.search(r"([\d.]+)\s*(?:°C|degC)", ln)
+            if m:
+                v = float(m.group(1))
+                if 0.0 <= v <= 150.0:
+                    return v
     return None
 
 
