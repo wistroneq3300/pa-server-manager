@@ -941,8 +941,19 @@ function pageRack() {
   // 已從機櫃移除(rack_u<=0)的 L11 只留在 System Manager，不繪製在機櫃上
   const racksAll = machines.filter(m => m.level === "rack" && (m.rack_u||0) > 0);
   const projSet = [...new Set(racksAll.map(m => m.project).filter(Boolean))];
-  if (!projSet.includes(rackView.project)) rackView.project = projSet[0] || "";
+  // 「暫存」專案：有 L11 機台但全部未放上機櫃（rack_u=0）→ 讓它能被選到並提示放置
+  const pendingByProj = {};
+  machines.forEach(m => { if (m.level === "rack" && m.project && (m.rack_u||0) <= 0) (pendingByProj[m.project] = pendingByProj[m.project]||[]).push(m); });
+  const pendingSet = Object.keys(pendingByProj);
+  const selAll = [...projSet, ...pendingSet.filter(p => !projSet.includes(p))];
+  const selKey = rackView.project || (selAll[0] || "");
+  rackView.project = selAll.includes(rackView.project) ? rackView.project : selKey;
   const proj = rackView.project;
+  const selOpts = selAll.map(pn => {
+    const nOn = racksAll.filter(m => m.project === pn).length;
+    const nP = (pendingByProj[pn] || []).length;
+    return `<option value="${esc(pn)}" ${pn === proj ? "selected" : ""}>${esc(pn)}（${nOn} 台已上櫃${nP ? ` / ${nP} 台未放置` : ""}）</option>`;
+  }).join("");
   const members = racksAll.filter(m => m.project === proj);
   const pinged = rackView.pinged || [];
   const pobj = projects.find(p => p.name === proj);
@@ -953,8 +964,7 @@ function pageRack() {
     loadLinks().then(() => { if (state.view === "rack") setView("rack"); });
   }
 
-  // 只列「有 L11（Rack）機台」的專案
-  const selOpts = projSet.map(pn => `<option value="${esc(pn)}" ${pn === proj ? "selected" : ""}>${esc(pn)}（${racksAll.filter(m=>m.project===pn).length} 台）</option>`).join("");
+  // 只列「有 L11（Rack）機台」的專案（含「已上櫃」與「暫存未放置」的專案）
   const toolbar = `
     <span class="spacer"></span>
     <label class="rack-sel">機櫃專案
@@ -982,6 +992,11 @@ function pageRack() {
       <button class="btn" onclick="rackBulkAux()">⚡ AUX 整櫃</button>
       <button class="btn primary" onclick="rackBroadcastDialog('${esc(rackView.project)}')">📡 廣播終端</button>` : ""}
     </div>
+    ${proj && (pendingByProj[proj]||[]).length && !members.length ? `
+    <div class="rack-pending-hint">
+      ⏳ <b>${esc(proj)}</b> 有 <b>${(pendingByProj[proj]||[]).length}</b> 台 L11 機台還沒放上機櫃。
+      到「🖥 System Manager → 該專案 → L11 分頁」選一台 →「📍 放到機櫃」選 U 值，就會出現在這裡。
+    </div>` : ""}
     <div class="rack-status-legend">
       ${Object.values(MGX_TYPES).filter((v, i, a) => a.findIndex(x => x.cls === v.cls) === i).map(v => `<span class="mgx-legend"><span class="mgx-dot ${v.cls}"></span>${esc(v.label)}</span>`).join("")}
       &nbsp;·&nbsp; ${rackStatusCounts(members, pinged)}

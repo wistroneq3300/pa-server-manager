@@ -281,9 +281,15 @@ table.t{width:100%;border-collapse:collapse}
 .section-h .hint{color:var(--text-faint);font-size:12px}
 
 .empty{
+  position:relative;
   border:1px dashed var(--border);border-radius:10px;padding:22px 20px;text-align:center;color:var(--text-faint);background:var(--bg-panel)
 }
 .empty b{color:var(--text)}
+/* 机柜空态：左右两条发光竖缝，像空的机柜立柱 */
+.empty::before{content:"";position:absolute;left:16px;top:16px;bottom:16px;width:3px;border-radius:2px;pointer-events:none;
+  background:linear-gradient(180deg,transparent,color-mix(in srgb,var(--w-green) 70%, transparent) 28%,color-mix(in srgb,var(--w-green) 70%, transparent) 72%,transparent)}
+.empty::after{content:"";position:absolute;right:16px;top:16px;bottom:16px;width:3px;border-radius:2px;pointer-events:none;
+  background:linear-gradient(180deg,transparent,color-mix(in srgb,var(--w-green) 70%, transparent) 28%,color-mix(in srgb,var(--w-green) 70%, transparent) 72%,transparent)}
 
 /* ===== Modal ===== */
 .modal-backdrop{position:fixed;inset:0;background:rgba(8,20,32,.5);backdrop-filter:blur(3px);display:flex;align-items:center;justify-content:center;z-index:50}
