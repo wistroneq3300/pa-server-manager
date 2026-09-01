@@ -1003,3 +1003,11 @@ tr.mach-over td{box-shadow:inset 0 2px 0 0 #4aa8ff}
 .ug-window.ug-minimized .ug-grip{display:none}
 
 .guide-btn-color{color:var(--text)} .guide-btn-color:hover{color:var(--text);transform:scale(1.06)}
+
+/* [AI AGENT 已停用] CSS 區塊保留啟用時用，取消以下註解即可 */
+/* ---- 機器 AI Agent modal ---- */
+/* .agent-modal-body{display:flex;flex-direction:column;gap:10px;min-width:380px;max-width:560px} */
+/* .agent-box{display:flex;flex-direction:column;gap:10px;padding:12px;height:340px;min-height:240px;overflow-y:auto;background:var(--bg-panel, rgba(18,20,28,.9));border:1px solid var(--border-soft);border-radius:14px} */
+/* .agent-input{display:flex;gap:8px;align-items:flex-end} */
+/* .agent-input textarea{flex:1;resize:none;min-height:38px;max-height:120px;border:1px solid var(--border-soft);border-radius:10px;background:var(--input-bg, rgba(0,0,0,.25));color:var(--text);padding:9px 12px;font-family:inherit;font-size:13px;outline:none} */
+/* .agent-input button{height:38px;width:44px;border-radius:10px;font-size:16px} */

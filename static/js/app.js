@@ -2627,6 +2627,7 @@ function pageMachine() {
           <button class="btn small btn-danger" onclick="machinePower('${esc(name)}',false)">⏻ 關機</button>
           <button class="btn small btn-warn" onclick="machineRebootDetail('${esc(name)}')">⟳ Reboot</button>
           <button class="btn small" onclick="machineAuxDetail('${esc(name)}')">⚡ AC cycle</button>
+          // [AI AGENT 已停用] 按鈕已移除（原：<button ... openMachineAgent ...>🤖 AI Agent</button>）
         </div>
         ` : ""}
       </div>
@@ -2783,6 +2784,157 @@ async function machineAuxDetail(name) {
     setTimeout(() => alert(`${name} ${r.ok ? "AC cycle 已送出 ⚡" : "操作失敗：" + (r.info||"")}`), 250);
   } catch (e) { alert("操作失敗：" + e.message); }
 }
+// [AI AGENT 已停用] /* ---- 機器 AI Agent（單機）----
+// [AI AGENT 已停用]    安全核心：LLM 永遠不直接執行動作；它只能提出「提案」，由使用者確認後才執行。
+// [AI AGENT 已停用]    對話狀態存於閉包（每次重開 modal 重來一段 session）。 */
+// [AI AGENT 已停用] const _agentSession = { messages: [], name: "", busy: false };
+// [AI AGENT 已停用] const _AGENT_ACTION_LABEL = {
+// [AI AGENT 已停用]   reboot: "Reboot（OS 重新開機）",
+// [AI AGENT 已停用]   poweron: "開機（電源開啟）",
+// [AI AGENT 已停用]   poweroff: "關機（電源關閉）",
+// [AI AGENT 已停用]   aux: "AC cycle（完整斷電重上電）",
+// [AI AGENT 已停用] };
+// [AI AGENT 已停用] function openMachineAgent(name) {
+// [AI AGENT 已停用]   _agentSession.messages = [];
+// [AI AGENT 已停用]   _agentSession.name = name;
+// [AI AGENT 已停用]   _agentSession.busy = false;
+// [AI AGENT 已停用]   showDialog(`🤖 AI Agent — ${esc(name)}`, `
+// [AI AGENT 已停用]     <div class="agent-modal-body">
+// [AI AGENT 已停用]       <div class="agent-box" id="agent-box">
+// [AI AGENT 已停用]         <div class="cop-msg ai">
+// [AI AGENT 已停用]           <span class="cop-avatar ai">🤖</span>
+// [AI AGENT 已停用]           <div class="cop-bubble ai">👋 我是這台機器的 AI Agent。你可以問我〈狀態 / 診斷〉，或請我〈重開機 / 開關機 / AC cycle〉。任何會改變狀態的操作，我會先提出提案，由你確認後才真的執行。</div>
+// [AI AGENT 已停用]         </div>
+// [AI AGENT 已停用]       </div>
+// [AI AGENT 已停用]       <div class="agent-input">
+// [AI AGENT 已停用]         <textarea id="agent-input" rows="1" placeholder="例如：幫我重開機 / 目前狀態？ / 幫我看一下診斷" autocomplete="off"></textarea>
+// [AI AGENT 已停用]         <button class="btn primary" id="agent-send">➤</button>
+// [AI AGENT 已停用]       </div>
+// [AI AGENT 已停用]     </div>`,
+// [AI AGENT 已停用]     [{ txt: "關閉", cls: "", fn: () => closeDialog() }]);
+// [AI AGENT 已停用]   const inp = $("agent-input"), send = $("agent-send");
+// [AI AGENT 已停用]   const doSend = () => agentSend();
+// [AI AGENT 已停用]   inp.addEventListener("keydown", (ev) => { if (ev.key === "Enter" && !ev.shiftKey) { ev.preventDefault(); doSend(); } });
+// [AI AGENT 已停用]   send.addEventListener("click", doSend);
+// [AI AGENT 已停用] }
+// [AI AGENT 已停用] async function agentSend() {
+// [AI AGENT 已停用]   if (_agentSession.busy) return;
+// [AI AGENT 已停用]   const inp = $("agent-input");
+// [AI AGENT 已停用]   const text = (inp ? inp.value.trim() : "");
+// [AI AGENT 已停用]   if (!text) return;
+// [AI AGENT 已停用]   _agentSession.messages.push({ role: "user", content: text });
+// [AI AGENT 已停用]   agentAppend("user", esc(text));
+// [AI AGENT 已停用]   if (inp) { inp.value = ""; }
+// [AI AGENT 已停用]   _agentSession.busy = true;
+// [AI AGENT 已停用]   agentSetBusy(true);
+// [AI AGENT 已停用]   agentTyping(true);
+// [AI AGENT 已停用]   try {
+// [AI AGENT 已停用]     const r = await api(`/api/machine/${encodeURIComponent(_agentSession.name)}/agent`, {
+// [AI AGENT 已停用]       method: "POST", headers: { "Content-Type": "application/json" },
+// [AI AGENT 已停用]       body: JSON.stringify({ messages: _agentSession.messages }),
+// [AI AGENT 已停用]     });
+// [AI AGENT 已停用]     if (r.proposal) {
+// [AI AGENT 已停用]       _agentSession.messages.push({ role: "assistant", content: `提案：${r.proposal.reason}` });
+// [AI AGENT 已停用]       agentAppend("ai", esc(`提案請求——請確認後才執行：`));
+// [AI AGENT 已停用]       agentRenderProposal(r.proposal);
+// [AI AGENT 已停用]     } else if (r.ok) {
+// [AI AGENT 已停用]       _agentSession.messages.push({ role: "assistant", content: r.reply });
+// [AI AGENT 已停用]       agentAppend("ai", esc(r.reply));
+// [AI AGENT 已停用]       // 使用者若已要求操作但 LLM 用文字回應沒走 propose_action → 提醒需明確指令
+// [AI AGENT 已停用]       if (/(重開機|開機|關機|ac cycle|電源|重新啟動)/i.test(r.reply) && !r.reply.includes("提案")) {
+// [AI AGENT 已停用]         agentAppend("ai", '<div class="cop-bubble ai' + '" style="color:var(--amber)">提示：若你要我執行開關機/重開機，請直接說「幫我重開機」等，我會提出提案待你確認。</div>');
+// [AI AGENT 已停用]       }
+// [AI AGENT 已停用]     } else {
+// [AI AGENT 已停用]       agentAppend("ai", `⨠ ${esc(r.error || "呼叫失敗")}`);
+// [AI AGENT 已停用]     }
+// [AI AGENT 已停用]     agentTyping(false);
+// [AI AGENT 已停用]   } catch (e) {
+// [AI AGENT 已停用]     agentTyping(false);
+// [AI AGENT 已停用]     agentAppend("ai", `⨠ ${esc("無法連線到後端：" + e.message)}`);
+// [AI AGENT 已停用]     if (/無法連線|Failed|fetch/i.test(e.message)) {
+// [AI AGENT 已停用]       // 可能是 Ollama 忙碌或連線中斷，提示可重試
+// [AI AGENT 已停用]     }
+// [AI AGENT 已停用]   } finally {
+// [AI AGENT 已停用]     _agentSession.busy = false;
+// [AI AGENT 已停用]     agentSetBusy(false);
+// [AI AGENT 已停用]   }
+// [AI AGENT 已停用] }
+// [AI AGENT 已停用] function agentAppend(role, html) {
+// [AI AGENT 已停用]   const box = $("agent-box");
+// [AI AGENT 已停用]   if (!box) return;
+// [AI AGENT 已停用]   box.insertAdjacentHTML("beforeend", `<div class="cop-msg ${role}">
+// [AI AGENT 已停用]     <span class="cop-avatar ${role}">${role === "user" ? "🧑" : "🤖"}</span>
+// [AI AGENT 已停用]     <div class="cop-bubble ${role}">${html}</div>
+// [AI AGENT 已停用]   </div>`);
+// [AI AGENT 已停用]   box.scrollTop = box.scrollHeight;
+// [AI AGENT 已停用] }
+// [AI AGENT 已停用] function agentTyping(on) {
+// [AI AGENT 已停用]   const box = $("agent-box");
+// [AI AGENT 已停用]   if (!box) return;
+// [AI AGENT 已停用]   let t = $("agent-typing");
+// [AI AGENT 已停用]   if (on) {
+// [AI AGENT 已停用]     if (t) return;
+// [AI AGENT 已停用]     box.insertAdjacentHTML("beforeend", `<div class="cop-msg ai" id="agent-typing">
+// [AI AGENT 已停用]       <span class="cop-avatar ai">🤖</span><div class="cop-bubble ai typing">正在思考…</div></div>`);
+// [AI AGENT 已停用]   } else if (t) { t.remove(); }
+// [AI AGENT 已停用]   box.scrollTop = box.scrollHeight;
+// [AI AGENT 已停用] }
+// [AI AGENT 已停用] function agentSetBusy(bool) {
+// [AI AGENT 已停用]   const send = $("agent-send");
+// [AI AGENT 已停用]   const inp = $("agent-input");
+// [AI AGENT 已停用]   if (send) { send.disabled = bool; send.textContent = bool ? "…" : "➤"; }
+// [AI AGENT 已停用]   if (inp) { inp.disabled = bool; }
+// [AI AGENT 已停用] }
+// [AI AGENT 已停用] // 呈現「提案確認卡」：執行／取消。執行才呼叫 /agent-execute（同既有按鈕權限）。
+// [AI AGENT 已停用] function agentRenderProposal(p) {
+// [AI AGENT 已停用]   const label = _AGENT_ACTION_LABEL[p.action] || p.action;
+// [AI AGENT 已停用]   const box = $("agent-box");
+// [AI AGENT 已停用]   if (!box) return;
+// [AI AGENT 已停用]   box.insertAdjacentHTML("beforeend", `
+// [AI AGENT 已停用]     <div class="cop-msg ai">
+// [AI AGENT 已停用]       <span class="cop-avatar ai">🤖</span>
+// [AI AGENT 已停用]       <div class="cop-bubble ai" style="border:1px solid var(--amber);background:color-mix(in srgb,var(--amber) 10%, transparent)">
+// [AI AGENT 已停用]         <div style="font-weight:600;color:var(--amber);margin-bottom:6px">⚠️ 提案確認</div>
+// [AI AGENT 已停用]         <div>動作：<b>${esc(label)}</b></div>
+// [AI AGENT 已停用]         <div style="margin-top:4px;color:var(--text-dim)">原因：${esc(p.reason || "（無說明）")}</div>
+// [AI AGENT 已停用]         <div style="margin-top:10px;display:flex;gap:8px">
+// [AI AGENT 已停用]           <button class="btn primary" onclick="agentExecute('${esc(p.action)}','${esc(p.reason||"")}')">✅ 確認執行</button>
+// [AI AGENT 已停用]           <button class="btn" onclick="agentDecline()">取消</button>
+// [AI AGENT 已停用]         </div>
+// [AI AGENT 已停用]       </div>
+// [AI AGENT 已停用]     </div>`);
+// [AI AGENT 已停用]   box.scrollTop = box.scrollHeight;
+// [AI AGENT 已停用]   // 把提案記錄到 session，供執行後回填結果
+// [AI AGENT 已停用]   _agentSession.pending = p;
+// [AI AGENT 已停用] }
+// [AI AGENT 已停用] async function agentExecute(action, reason) {
+// [AI AGENT 已停用]   if (!_agentSession.pending || _agentSession.pending.action !== action) return;
+// [AI AGENT 已停用]   const name = _agentSession.name;
+// [AI AGENT 已停用]   const confirmOk = confirm(`確定要對「${name}」執行「${(_AGENT_ACTION_LABEL[action]||action)}」嗎？`);
+// [AI AGENT 已停用]   if (!confirmOk) return;
+// [AI AGENT 已停用]   const btn = document.querySelector('#agent-box .btn.primary');
+// [AI AGENT 已停用]   if (btn) { btn.disabled = true; btn.textContent = "執行中…"; }
+// [AI AGENT 已停用]   try {
+// [AI AGENT 已停用]     const r = await api(`/api/machine/${encodeURIComponent(name)}/agent-execute`, {
+// [AI AGENT 已停用]       method: "POST", headers: { "Content-Type": "application/json" },
+// [AI AGENT 已停用]       body: JSON.stringify({ action }),
+// [AI AGENT 已停用]     });
+// [AI AGENT 已停用]     const okText = (action === "reboot" ? "已送出 reboot" : action === "aux" ? "AC cycle 已送出" : action === "poweron" ? "已開機" : "已關機");
+// [AI AGENT 已停用]     agentAppend("ai", r.ok
+// [AI AGENT 已停用]       ? `✅ <b>${okText}</b><br><span class="hint">${esc(r.info || "")}</span>`
+// [AI AGENT 已停用]       : `❌ 操作失敗：${esc(r.info || "")}`);
+// [AI AGENT 已停用]     _agentSession.pending = null;
+// [AI AGENT 已停用]     // 執行成功後重新載入詳情，讓狀態燈更新
+// [AI AGENT 已停用]     machineLoadDetail(name).catch(() => {});
+// [AI AGENT 已停用]   } catch (e) {
+// [AI AGENT 已停用]     agentAppend("ai", `❌ ${esc("操作失敗：" + e.message)}`);
+// [AI AGENT 已停用]     if (btn) { btn.disabled = false; btn.textContent = "確認執行"; }
+// [AI AGENT 已停用]   }
+// [AI AGENT 已停用] }
+// [AI AGENT 已停用] function agentDecline() {
+// [AI AGENT 已停用]   _agentSession.pending = null;
+// [AI AGENT 已停用]   agentAppend("ai", '已取消，未執行任何動作。');
+// [AI AGENT 已停用] }
 /* ---------- 新增系統 ---------- */
 async function fillProjectSelect(selId) {
   const sel = $(selId);
@@ -3362,7 +3514,7 @@ function openBroadcast(names) {
     pane.innerHTML = `<div class="bc-pane-label"><span>${esc(nm)}</span><span class="mono" style="color:var(--text-dim);font-size:10px">${esc((machines.find(m=>m.name===nm)||{}).os_ip||"")}</span></div><div class="bc-box" id="bc-box-${nm}"></div>`;
     panesEl.appendChild(pane);
     // xterm
-    const t = new Terminal({ cursorBlink: true, fontSize: 12.5, fontFamily: '"Cascadia Mono","Consolas","Noto Sans Mono CJK TC",monospace', theme: { background: "#0b0f14", foreground: "#e6edf3", cursor: "#0a7d78" }, scrollback: 2000 });
+    const t = new Terminal({ ...XTERM_COMMON, fontSize: 12.5 });
     const fit = new FitAddon.FitAddon();
     t.loadAddon(fit);
     t.open($("bc-box-" + nm));
@@ -3507,6 +3659,30 @@ function resetBcGeometry() {
   box.classList.remove("maximized"); box.style.left = ""; box.style.top = ""; box.style.transform = "";
 }
 
+// 終端機共用外觀（MobaXterm 風近黑深色 + 完整 16 色板 + 粗體/行距/實心光標）
+// 單機 Term 與廣播 openBroadcast 都共用，保持一致。改這裡即可整體換色。
+const XTERM_COMMON = {
+  cursorBlink: true,
+  cursorStyle: "block",
+  fontFamily: '"Cascadia Mono","Consolas","Noto Sans Mono CJK TC","Noto Sans Mono",monospace',
+  fontWeight: "400",
+  fontWeightBold: "700",
+  lineHeight: 1.2,
+  letterSpacing: 0,
+  scrollback: 2000,
+  theme: {
+    background: "#0c0c0c",
+    foreground: "#d4d4d4",
+    cursor: "#aeafad",
+    cursorAccent: "#000000",
+    selectionBackground: "#264f78",
+    black: "#000000", red: "#cd3131", green: "#0dbc79", yellow: "#e5e510",
+    blue: "#2472c8", magenta: "#bc3fbc", cyan: "#11a8cd", white: "#e5e5e5",
+    brightBlack: "#666666", brightRed: "#f14c4c", brightGreen: "#23d18b", brightYellow: "#f5f543",
+    brightBlue: "#3b8eea", brightMagenta: "#d670d6", brightCyan: "#29b8db", brightWhite: "#ffffff",
+  },
+};
+
 class Term {
 
   constructor(containerId, url, statusId) {
@@ -3514,13 +3690,8 @@ class Term {
     this.term = null; this.ws = null; this.fitAddon = null;
   }
   connect() {
-    if (!window.Terminal) { this.setStatus("程式娫未載兘", "err"); return; }
-    this.term = new Terminal({
-      cursorBlink: true, fontSize: 13,
-      fontFamily: '"Cascadia Mono","Consolas","Noto Sans Mono CJK TC",monospace',
-      theme: { background: "#0b0f14", foreground: "#e6edf3", cursor: "#0a7d78" },
-      scrollback: 2000,
-    });
+    if (!window.Terminal) { this.setStatus("終端未載入", "err"); return; }
+    this.term = new Terminal({ ...XTERM_COMMON, fontSize: 13 });
     this.fitAddon = new FitAddon.FitAddon();
     this.term.loadAddon(this.fitAddon);
     this.term.open(this.container);

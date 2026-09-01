@@ -1718,6 +1718,240 @@ def copilot_chat(body: CopilotReq):
         return {"ok": False, "error": f"ollama 呼叫失敗: {e}"}
 
 
+# # ---- 機器 Agent（單機）：LLM 只做「提案」，控制動作一律由前端人工確認後才執行 ----
+# # 關鍵設計：Ollama 的 tool 白名單內「會變更狀態的動作」只有 propose_action，
+# # 它不會真的執行，只會回傳一份提案物件；前端顯示確認 UI，使用者按下執行才呼叫
+# # /api/machine/{name}/agent-execute 去跑真正的 reboot / power / aux。
+# # 唯二的唯讀工具 get_status / diagnose 才能由 agent 自行呼叫。
+#
+# _AGENT_MAX_STEPS = 6
+# _AGENT_ACTIONS = ("reboot", "poweron", "poweroff", "aux")
+# _AGENT_ACTION_LABEL = {
+#     "reboot": "Reboot（OS 重新開機）",
+#     "poweron": "開機（電源開啟）",
+#     "poweroff": "關機（電源關閉）",
+#     "aux": "AC cycle（完整斷電重上電）",
+# }
+#
+#
+# def _agent_tools(name: str) -> list:
+#     """本機可用的 tool 清單（白名單）。只有唯讀工具可被 agent 直接呼叫。"""
+#     return [
+#         {
+#             "type": "function",
+#             "function": {
+#                 "name": "get_status",
+#                 "description": "取得此機台目前的線上狀態與健康度（唯讀）。",
+#                 "parameters": {"type": "object", "properties": {}, "required": []},
+#             },
+#         },
+#         {
+#             "type": "function",
+#             "function": {
+#                 "name": "diagnose",
+#                 "description": "收集此機台的診斷資訊（OS 日誌 / GPU / BMC SEL）並回傳摘要（唯讀，較慢，約 10-30 秒）。",
+#                 "parameters": {"type": "object", "properties": {}, "required": []},
+#             },
+#         },
+#         {
+#             "type": "function",
+#             "function": {
+#                 "name": "propose_action",
+#                 "description": (
+#                     "當使用者要求對這台機器做會改變狀態的操作（重開機 / 開關機 / AC cycle）時，"
+#                     "呼叫這個 tool 提出『提案』。此 tool 不會真的執行，只會回傳提案。"
+#                     "可選的 action：" + ", ".join(f"{k}={v}" for k, v in _AGENT_ACTION_LABEL.items())
+#                 ),
+#                 "parameters": {
+#                     "type": "object",
+#                     "properties": {
+#                         "action": {"type": "string", "enum": list(_AGENT_ACTIONS)},
+#                         "reason": {"type": "string", "description": "以繁中簡短說明為何要執行此操作"},
+#                     },
+#                     "required": ["action", "reason"],
+#                 },
+#             },
+#         },
+#     ]
+#
+#
+# def _agent_system(name: str) -> str:
+#     m = machines.get(name, {})
+#     h = _health_cache.get(name, ("unknown", 0))[0]
+#     alive = _status_cache.get(("os", name))
+#     fleet = "\n".join(
+#         f"- {k} | level={machines[k].get('level')} | project={machines[k].get('project')} | "
+#         f"os_ip={machines[k].get('os_ip')} | bmc_ip={machines[k].get('bmc_ip') or '-'} "
+#         f"| os_alive={_status_cache.get(('os', k))} | health={_health_cache.get(k, ('unknown', 0))[0]}"
+#         for k in sorted(machines, key=lambda x: machines[x].get("order", 0))
+#     )
+#     return (
+#         "You are the AI Agent for a single machine in a Wistron GPU server management system. "
+#         "Answer in Traditional Chinese (zh-TW), concise and practical.\n"
+#         f"You are now focused on machine: \nname={name}\n"
+#         f"os_ip={m.get('os_ip')}\nbmc_ip={m.get('bmc_ip') or '-'}\n"
+#         f"os_alive={alive}\nhealth={h}\n\n"
+#         "CURRENT FLEET (context, do not act on others):\n" + fleet + "\n\n"
+#         "RULES:\n"
+#         "- You can only affect THIS machine (" + name + "). Never propose actions on other machines.\n"
+#         "- Use get_status / diagnose to gather info. Never invent data.\n"
+#         "- When the user asks to reboot / power on / power off / AC-cycle this machine, call "
+#         "propose_action with the matching action and a brief Traditional Chinese reason. "
+#         "propose_action does NOT execute anything; it just proposes. Stop after proposing.\n"
+#         "- Be explicit: after proposing, tell the user it needs their confirmation before execution.\n"
+#         "- If the request is ambiguous (machine names, action), ask for clarification rather than guessing.\n"
+#     )
+#
+#
+# def _agent_get_status(name: str) -> str:
+#     h = _health_cache.get(name, ("unknown", 0))[0]
+#     alive = _status_cache.get(("os", name))
+#     return (f"machine={name} os_alive={alive} health={h}\n"
+#             f"os_ip={machines.get(name, {}).get('os_ip')} "
+#             f"bmc_ip={machines.get(name, {}).get('bmc_ip') or '-'}")
+#
+#
+# def _agent_diagnose(name: str) -> str:
+#     m = machines.get(name)
+#     if not m:
+#         return "機台不存在"
+#     rec = _collect_diag(m)
+#     if rec.get("note"):
+#         return rec["note"]
+#     out = rec.get("collect", {})
+#     return "OS:\n" + (out.get("os") or "(無)") + "\n\nBMC SEL:\n" + (out.get("bmc") or "(無)")
+#
+#
+# def _agent_parse_tool_call(tc: dict):
+#     """把 Ollama tool_call 轉成 (name, args)。回傳 None 表示格式無法解析。"""
+#     fn = tc.get("function") or {}
+#     name = fn.get("name")
+#     if not name:
+#         return None
+#     args = fn.get("arguments")
+#     if isinstance(args, str):
+#         import json as _json
+#         try:
+#             args = _json.loads(args)
+#         except Exception:
+#             args = {}
+#     if not isinstance(args, dict):
+#         args = {}
+#     return name, args
+#
+#
+# class AgentReq(BaseModel):
+#     messages: list          # [{role, content}...]，前端維護的整段對話
+#
+#
+# class AgentExecuteReq(BaseModel):
+#     action: str
+#
+#
+# @app.post("/api/machine/{name}/agent")
+# def machine_agent_chat(name: str, body: AgentReq):
+#     """單機 Agent 對話。LLM 只能做提案與唯讀查詢；控制動作用 propose_action 提出，
+#     由前端確認後呼叫 /agent-execute 執行。"""
+#     _refresh_status()
+#     if name not in machines:
+#         raise HTTPException(404, f"機台不存在: {name}")
+#     msgs = list(body.messages or [])
+#     # 去掉可能傳進來的 system，改用我們自己的
+#     msgs = [m for m in msgs if m.get("role") != "system"]
+#     ollama_msgs = [{"role": "system", "content": _agent_system(name)}] + msgs
+#     payload = {
+#         "model": OLLAMA_MODEL,
+#         "messages": ollama_msgs,
+#         "tools": _agent_tools(name),
+#         "stream": False,
+#         "options": {"temperature": 0.3, "num_predict": 800},
+#     }
+#     import requests
+#     try:
+#         for _ in range(_AGENT_MAX_STEPS):
+#             r = requests.post(OLLAMA_URL + "/api/chat", json=payload, timeout=180)
+#             r.raise_for_status()
+#             msg = r.json().get("message") or {}
+#             content = (msg.get("content") or "").strip()
+#             tool_calls = msg.get("tool_calls") or []
+#
+#             # 沒有 tool call → 這是最終回答
+#             if not tool_calls:
+#                 if content:
+#                     return {"ok": True, "reply": content}
+#                 return {"ok": False, "error": "ollama 回傳空白"}
+#
+#             # 逐個處理 tool calls（只允許白名單）
+#             tool_results = []
+#             proposal = None
+#             for tc in tool_calls:
+#                 parsed = _agent_parse_tool_call(tc)
+#                 if not parsed:
+#                     tool_results.append({
+#                         "role": "tool", "content": "工具呼叫格式無法解析，請改用純文字回答。"
+#                     })
+#                     continue
+#                 tname, targs = parsed
+#                 if tname == "propose_action":
+#                     action = (targs.get("action") or "").strip()
+#                     reason = (targs.get("reason") or "").strip()
+#                     if action not in _AGENT_ACTIONS:
+#                         tool_results.append({
+#                             "role": "tool",
+#                             "content": f"不支援的 action「{action}」。可用的只有：{', '.join(_AGENT_ACTIONS)}",
+#                         })
+#                         continue
+#                     # 只允許對「目前這台」提案：action 白名單 + 由前端做最終確認
+#                     proposal = {"action": action, "reason": reason, "machine": name}
+#                     break   # 提出提案就停止，不繼續跑
+#                 elif tname == "get_status":
+#                     tool_results.append({"role": "tool", "content": _agent_get_status(name)})
+#                 elif tname == "diagnose":
+#                     tool_results.append({"role": "tool", "content": _agent_diagnose(name)})
+#                 else:
+#                     tool_results.append({
+#                         "role": "tool", "content": f"未知工具「{tname}」，被拒絕。"
+#                     })
+#
+#             if proposal is not None:
+#                 return {"ok": True, "proposal": proposal}
+#
+#             # 把 tool 結果接回對話，繼續下一輪
+#             payload = {
+#                 "model": OLLAMA_MODEL,
+#                 "messages": ollama_msgs + [{"role": "assistant", "content": content,
+#                                             "tool_calls": [tc for tc in tool_calls]}]
+#                                 + tool_results,
+#                 "tools": _agent_tools(name),
+#                 "stream": False,
+#                 "options": {"temperature": 0.3, "num_predict": 800},
+#             }
+#         return {"ok": False, "error": "agent 步驟過多，已停止"}
+#     except Exception as e:
+#         return {"ok": False, "error": f"ollama 呼叫失敗: {e}"}
+#
+#
+# @app.post("/api/machine/{name}/agent-execute")
+# def machine_agent_execute(name: str, body: AgentExecuteReq):
+#     """前端確認提案後，執行真正的控制動作（與既有按鈕同權限）。"""
+#     if name not in machines:
+#         raise HTTPException(404, f"機台不存在: {name}")
+#     m = machines[name]
+#     action = (body.action or "").strip()
+#     if action == "reboot":
+#         ok, info = _reboot_machine(m)
+#         return {"ok": ok, "action": "reboot", "info": info}
+#     if action == "aux":
+#         ok, info = run_control_cmd(m, "aux")
+#         return {"ok": ok, "action": "aux", "info": info}
+#     if action in ("poweron", "poweroff"):
+#         ok, info = run_control_cmd(m, action)
+#         _, status = ipmi_power(m, "status")
+#         return {"ok": ok, "action": ("on" if action == "poweron" else "off"),
+#                 "info": info, "power_status": (status or "").strip()}
+#     raise HTTPException(400, f"不支援的動作: {action}")
+#
+#
 # ---- 系統診斷（收集 OS/BMC 問題 → 串 Ollama qwen 自動分析）----
 class DiagReq(BaseModel):
     include_bmc: bool = True
