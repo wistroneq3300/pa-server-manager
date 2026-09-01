@@ -866,7 +866,7 @@ function rackAddDialog(presetU) {
       <label style="display:block;font-size:12px;color:var(--text-faint);margin-bottom:6px">選擇機台</label>
       <select class="input" id="rm-add-m" style="width:100%;padding:8px;margin-bottom:12px" onchange="rackAddPickMachine()">${selOpts}</select>
       <label style="display:block;font-size:12px;color:var(--text-faint);margin-bottom:6px">占用高度（U 數）<span class="hint" id="rm-add-size-hint"></span></label>
-      <select class="input" id="rm-add-size" style="width:100%;padding:8px;margin-bottom:12px" disabled onchange="rackAddRefreshU()">
+      <select class="input" id="rm-add-size" style="width:100%;padding:8px;margin-bottom:12px" onchange="rackAddRefreshU()">
         ${RACK_SIZES.map(s => `<option value="${s}" ${s===1?"selected":""}>${s}U${s>1 ? "（需連續空位）" : ""}</option>`).join("")}
       </select>
       <label style="display:block;font-size:12px;color:var(--text-faint);margin-bottom:6px">選擇起始 U 槽</label>
@@ -881,7 +881,7 @@ function rackAddDialog(presetU) {
       { txt: "加入", cls: "primary", fn: () => {
         const nm = $("rm-add-m").value, u = +$("rm-add-u").value, ty = $("rm-add-type").value;
         const __m = machines.find(x=>x.name===nm);
-        rackAssign(nm, { project: proj, level: "rack", rack_u: u, rack_size: (__m && __m.rack_size > 0 ? __m.rack_size : 1), mgx_type: ty })
+        rackAssign(nm, { project: proj, level: "rack", rack_u: u, rack_size: (+$("rm-add-size").value || (__m && __m.rack_size > 0 ? __m.rack_size : 1)), mgx_type: ty })
           .then(() => { closeDialog(); setView("rack"); })
           .catch(e => alert("加入失敗：" + e.message));
       } },
@@ -988,8 +988,7 @@ function pageRack() {
     </div>
     ${proj && (pendingByProj[proj]||[]).length && !members.length ? `
     <div class="rack-pending-hint">
-      ⏳ <b>${esc(proj)}</b> 有 <b>${(pendingByProj[proj]||[]).length}</b> 台 L11 機台還沒放上機櫃。
-      到「🖥 System Manager → 該專案 → L11 分頁」選一台 →「📍 放到機櫃」選 U 值，就會出現在這裡。
+      ⏳ <b>${esc(proj)}</b> 有 <b>${(pendingByProj[proj]||[]).length}</b>台 L11 系統還沒上櫃。到 System Manager 的 L11 分頁按「＋ 新增至機櫃」挑一台、選 U 數，就會出現在這裡。
     </div>` : ""}
     <div class="rack-status-legend">
       ${Object.values(MGX_TYPES).filter((v, i, a) => a.findIndex(x => x.cls === v.cls) === i).map(v => `<span class="mgx-legend"><span class="mgx-dot ${v.cls}"></span>${esc(v.label)}</span>`).join("")}
@@ -1141,26 +1140,21 @@ function rackAddPassiveAt(u) {
 // 依「L11 分頁只能加 L11 專案」：只列出 L11 專案（純 L10 專案被擋掉；空/混合/未標 level 放行）
 function addRackComponentDialog() {
   const rackProjects = projectsForLevel("rack").map(p => p.name);
-  if (!rackProjects.length) return alert("目前沒有 L11（整櫃）專案可用，請先在專案管理建立 L11 專案、或將既有專案改標為 L11。");
+  if (!rackProjects.length) return alert("請先選擇專案。");
   const opts = rackProjects.map(p => `<option value="${esc(p)}">${esc(p)}</option>`).join("");
-  showDialog("➕ 新增元件 — 選擇要加入的專案", `
+  showDialog("新增至機櫃 — 選擇專案", `
     <div class="rm-modal-body">
-      <p style="margin-bottom:12px;font-size:12px;color:var(--text-faint)">
-        新增的機櫃元件（switch / power shelf / CDU / PDU 等）會加入你選擇的整櫃專案，之後可在 Rack Manager 放上機櫃。
-      </p>
-      <label style="display:block;font-size:12px;color:var(--text-faint);margin-bottom:6px">目標專案 *</label>
-      <select class="input" id="rcp-proj" style="width:100%;padding:8px">${opts}</select>
+      <p style="margin-bottom:12px;font-size:12px;color:var(--text-faint)">選一台還沒上櫃的 L11 系統，掛上機櫃後即可使用。</p>
+      <select class="input" id="rcp-proj" style="width:100%;padding:8px;margin-bottom:4px">${opts}</select>
     </div>`,
     [
       { txt: "取消", cls: "", fn: () => closeDialog() },
-      { txt: "下一步：新增元件", cls: "primary", fn: () => {
-        const proj = $("rcp-proj").value;
-        closeDialog();
-        if (!proj) return alert("請先選擇目標專案。");
-        rackAddPassiveWithU(undefined, proj);
-      } },
+      { txt: "L11 " + "系統", cls: "primary", fn: () => { const proj = $("rcp-proj").value; if (!proj) return alert("請先選擇專案。"); closeDialog(); rackView.project = proj; rackAddDialog(); } },
+      { txt: "SW / PDU / CDU " + "元件", cls: "", fn: () => { const proj = $("rcp-proj").value; if (!proj) return alert("請先選擇專案。"); closeDialog(); rackAddPassiveWithU(undefined, proj); } },
     ]);
 }
+
+
 
 let devicesView = "plane";   // "plane" | "cards" | "list" | "telemetry"
 function devicesSetView(v) { devicesView = v; setView("rack"); }
@@ -3075,10 +3069,9 @@ async function fillProjectSelect(selId, lv) {
   sel.value = cur;
 }
 function onAddLevelChange() {
+  // L11 new: do not ask rack size here; the U-slot is picked (and editable) at mount time.
   const wrap = $("f-rack-size-wrap");
-  if (!wrap) return;
-  const isRack = $("f-level").value === "rack";
-  wrap.style.display = isRack ? "flex" : "none";
+  if (wrap) wrap.style.display = "none";
 }
 function openAdd(lockedLevel) {
   // 需求：L10 分頁只能加 L10，L11 分頁只能加 L11（依目前分頁鎖定層級）
@@ -3164,7 +3157,6 @@ async function saveMachine() {
     if (!body.bmc_user || !body.bmc_pass) { showErr("BMC 帳號和密碼為必填（供開關機/遠端管理用）— 欄位已標示紅色 *。"); return; }
   } else if (body.bmc_ip && (!body.bmc_user || !body.bmc_pass)) { showErr("有填 BMC IP 時，BMC 帳號和密碼為必填。"); return; }
   if (!body.project) { showErr("請選擇專案（沒有案子的請先開專案分類）"); return; }
-  if (body.level === "rack" && (!body.rack_size || body.rack_size < 1)) { showErr("L11 機櫃系統必須選擇占用高度（幾 U）"); return; }
   const btn = $("save-btn");
   btn.disabled = true; btn.textContent = "連線中…"; showErr("");
   try {
