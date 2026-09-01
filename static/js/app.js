@@ -898,15 +898,9 @@ function rackAddPickMachine() {
   const m = machines.find(x => x.name === nm);
   const sizeSel = $("rm-add-size"), hintEl = $("rm-add-size-hint");
   if (!sizeSel) return;
-  const fixed = m && m.rack_size && m.rack_size > 0;
-  // U 數固定：只顯示該 L11 系統自身的 rack_size，不讓使用者調整
-  for (const opt of sizeSel.options) opt.disabled = (opt.value !== String(m.rack_size || 1));
-  if (fixed) {
-    sizeSel.value = String(m.rack_size);
-    if (hintEl) hintEl.textContent = `（已固定 ${m.rack_size}U）`;
-  } else if (hintEl) {
-    hintEl.textContent = "";
-  }
+  // U is now user-editable. Default to the machine's own rack_size; every option stays enabled.
+  sizeSel.value = String(m && m.rack_size && m.rack_size > 0 ? m.rack_size : 1);
+  if (hintEl) hintEl.textContent = "";
   rackAddRefreshU();
 }
 function rackAddDialogAt(u) { closeDialog(); rackAddDialog(u); }
@@ -1827,7 +1821,7 @@ function pageProjects() {
       <button class="btn" onclick="openProjectModal()">📁 專案管理</button>
       <button class="btn" onclick="refreshStatus()" id="refresh-btn">⟳ 重新掃描</button>
       <button class="btn primary" onclick="openAdd()">＋ 新增系統</button>
-      <button class="btn" id="sys-btn-addcomp" style="display:${projectLevelFilter.val==="rack"?"":"none"}" onclick="addRackComponentDialog()" title="新增可放入機櫃的元件（switch / power shelf / CDU / PDU 等），會加入選定的整櫃專案">＋ 新增元件</button>
+      <button class="btn" id="sys-btn-addcomp" style="display:${projectLevelFilter.val==="rack"?"":"none"}" onclick="addRackComponentDialog()" title="新增可放入機櫃的元件（switch / power shelf / CDU / PDU 等），會加入選定的整櫃專案">＋ 新增至機櫃</button>
       <button class="btn" id="sys-btn-broadcast" style="display:${projectLevelFilter.val==="system"?"":"none"}" onclick="systemBroadcastDialog()" title="對多台 L10 系統同時下指令（廣播終端）">📡 系統廣播</button>
     </div>
     ${renderProjectsList()}
