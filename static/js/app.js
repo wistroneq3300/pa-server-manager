@@ -1144,9 +1144,10 @@ function rackAddPassiveAt(u) {
   rackAddPassiveWithU(u);
 }
 // System Manager 的 L11 分頁「＋ 新增元件」：先選目標專案，再進新增機櫃元件 dialog
+// 依「L11 分頁只能加 L11 專案」：只列出 L11 專案（純 L10 專案被擋掉；空/混合/未標 level 放行）
 function addRackComponentDialog() {
-  const rackProjects = [...new Set(machines.filter(m => isRackItem(m) && m.project).map(m => m.project))];
-  if (!rackProjects.length) return alert("目前沒有 L11（整櫃）專案，請先建立專案或把機台設為 L11。");
+  const rackProjects = projectsForLevel("rack").map(p => p.name);
+  if (!rackProjects.length) return alert("目前沒有 L11（整櫃）專案可用，請先在專案管理建立 L11 專案、或將既有專案改標為 L11。");
   const opts = rackProjects.map(p => `<option value="${esc(p)}">${esc(p)}</option>`).join("");
   showDialog("➕ 新增元件 — 選擇要加入的專案", `
     <div class="rm-modal-body">
@@ -1833,7 +1834,9 @@ function pageProjects() {
   `;
 }
 function machineRowSortable(m, pi, mi, total) {
-  const targetOpts = projects.filter(p => p.name !== m.project).map(p =>
+  // 依機台本身的 L10/L11 過濾可移動目標（純 L11 專案對 L10 機台隱藏、反之亦然）
+  const mLv = isRackItem(m) ? "rack" : "system";
+  const targetOpts = projects.filter(p => p.name !== m.project && projectAllowsLevel(p.name, mLv)).map(p =>
     `<option value="${esc(p.name)}">${esc(p.name)}</option>`).join("");
   const lvlBadge = isRackItem(m)
     ? `<span class="badge badge-rack">L11 · Rack</span>`
@@ -1874,7 +1877,9 @@ function machineRowSortable(m, pi, mi, total) {
     </tr>`;
 }
 function machineRowUnassigned(m) {
-  const opts = projects.map(p => `<option value="${esc(p.name)}">${esc(p.name)}</option>`).join("");
+  // 依機台本身的 L10/L11 過濾可移動目標
+  const mLv = isRackItem(m) ? "rack" : "system";
+  const opts = projectsForLevel(mLv).map(p => `<option value="${esc(p.name)}">${esc(p.name)}</option>`).join("");
   const lvlBadge = isRackItem(m)
     ? `<span class="badge badge-rack">L11 · Rack</span>`
     : `<span class="badge badge-system">L10 · Sys</span>`;
@@ -2027,6 +2032,16 @@ async function swapMachineOrder(a, b) {
   await api("/api/machines/" + encodeURIComponent(b), { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ order: ea }) });
 }
 async function moveMachineTo(name, project) {
+  if (project) {
+    const m = machines.find(x => x.name === name);
+    if (m) {
+      const lv = isRackItem(m) ? "rack" : "system";
+      if (!projectAllowsLevel(project, lv)) {
+        alert(`⚠️ 「${name}」是 ${lv === "rack" ? "L11" : "L10"} 系統，不能移到「${project}」專案。\n（L10 只能掛 L10 專案、L11 只能掛 L11 專案）`);
+        return;
+      }
+    }
+  }
   const targetMembers = (project || "" ? machines.filter(m => m.project === project) : unassignedMachines()).filter(m => m.name !== name);
   const targetOrder = targetMembers.length ? Math.max(...targetMembers.map(m => m.order||0)) + 1 : 0;
   await api("/api/machines/" + encodeURIComponent(name), { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ project, order: targetOrder }) });
@@ -3041,11 +3056,28 @@ async function machineAuxDetail(name) {
 // [AI AGENT 已停用]   agentAppend("ai", '已取消，未執行任何動作。');
 // [AI AGENT 已停用] }
 /* ---------- 新增系統 ---------- */
-async function fillProjectSelect(selId) {
+// 專案是否「只允許該層級」：純 L10 專案不進 L11 下拉、純 L11 專案不進 L10 下拉；
+// 空專案 / 混合專案 / 未標 level 的專案都放行（避免鎖死後續加機）。
+function projectAllowsLevel(pname, lv) {
+  const p = projects.find(x => x.name === pname);
+  const members = projectMembers(pname);
+  if (!p || (p.level !== "rack" && p.level !== "system")) {
+    const hasL10 = members.some(m => !isRackItem(m));
+    const hasL11 = members.some(m => isRackItem(m));
+    if (lv === "rack" && hasL10 && !hasL11) return false;     // 純 L10 專案：擋 L11
+    if (lv === "system" && hasL11 && !hasL10) return false;    // 純 L11 專案：擋 L10
+    return true;                                                // 空 / 混合 / 未標 level：放行
+  }
+  return p.level === lv;
+}
+function projectsForLevel(lv) { return projects.filter(p => projectAllowsLevel(p.name, lv)); }
+async function fillProjectSelect(selId, lv) {
   const sel = $(selId);
   if (!sel) return;
   const cur = sel.value;
-  sel.innerHTML = `<option value="">— 未分類 —</option>` + projects.map(p => `<option value="${esc(p.name)}">${esc(p.name)}</option>`).join("");
+  const list = lv ? projectsForLevel(lv) : projects;
+  sel.innerHTML = `<option value="">— 未分類 —</option>` +
+    list.map(p => `<option value="${esc(p.name)}">${esc(p.name)}${p.level ? `（${p.level === "rack" ? "L11" : "L10"}）` : ""}</option>`).join("");
   sel.value = cur;
 }
 function onAddLevelChange() {
@@ -3061,7 +3093,8 @@ function openAdd(lockedLevel) {
   lvlSel.value = locked;
   lvlSel.disabled = !!locked;   // 從 System Manager 分頁進來就鎖死層級，不能切換
   if (locked) onAddLevelChange();   // L11 時顯示「必選 U 數」
-  fillProjectSelect("f-project");
+  // L10 分頁只能選 L10 專案（純 L11 專案被擋掉）、L11 分頁反之。
+  fillProjectSelect("f-project", locked);
   resetBmcProbe();
   $("add-modal").style.display = "flex";
   $("add-err").style.display = "none";
