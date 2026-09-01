@@ -661,6 +661,8 @@ _STATUS_TIME = None
 # ---- 健康度快取（依 BMC 回報，綠/橘/紅/unknown/offline）----
 _health_cache = {}
 _HEALTH_TTL = 30      # 健康度較慢，快取久一點
+_POWER = {}              # name -> {"v": "ON"/"OFF"/None, "t": epoch}
+_POWER_TTL = 30         # 電源狀態快取 30s
 
 
 def _detect_health(m):
@@ -711,6 +713,42 @@ def _detect_health(m):
     return "unknown"
 
 
+def _parse_power(raw):
+    """從 ipmitool chassis power status 輸出解析 ON / OFF。"""
+    if not raw:
+        return None
+    m = re.search(r"Power\s+is\s+(on|off)|Power\s*:\s*(on|off)|\b(on|off)\b", raw, re.I)
+    if m:
+        v = (m.group(1) or m.group(2) or m.group(3)).lower()
+        return "ON" if v == "on" else "OFF"
+    if "on" in raw.lower() and "off" not in raw.lower():
+        return "ON"
+    return None
+
+
+def _collect_power():
+    """並行抓所有機台的 BMC 電源狀態，寫入 _POWER（name → {"v","t"}）。
+    已在 TTL 內的不重複抓（避免 ipmitool 併發爆掉）。"""
+    now = time.time()
+    targets = [
+        n for n, m in machines.items()
+        if not m.get("passive")
+        and (m.get("bmc_ip") or m.get("os_ip"))
+        and (m.get("bmc_ip") or _status_cache.get(("os", n)))
+        and (n not in _POWER or (now - _POWER[n].get("t", 0)) > _POWER_TTL)
+    ]
+    if not targets:
+        return
+    with ThreadPoolExecutor(max_workers=16) as ex:
+        def pjob(n):
+            try:
+                ok, st = ipmi_power(machines[n], "status")
+            except Exception:
+                ok, st = False, ""
+            _POWER[n] = {"v": _parse_power(st) if ok else None, "t": time.time()}
+        list(ex.map(pjob, targets))
+
+
 def _refresh_status(force=False):
     """並行掃描所有機台的 OS / BMC 線上狀態與健康度，寫入快取。"""
     global _STATUS_TIME
@@ -731,6 +769,9 @@ def _refresh_status(force=False):
 
     with ThreadPoolExecutor(max_workers=32) as ex:
         list(ex.map(lambda h: scan(*h), list(hosts)))
+    # 電源狀態：OS/BMC 至少一端在線才抓（較慢，排在 ping 之後）
+    _collect_power()
+    # 電源抓完再跑健康度深度偵測
     # 健康度：僅對 BMC 可達的機台做深度偵測（較慢，獨立快取）
     hnow = time.time()
     with ThreadPoolExecutor(max_workers=12) as ex:
@@ -775,11 +816,12 @@ def list_machines(force_scan: bool = False):
         c["os_pass"] = "****" if c.get("os_pass") else ""
         c["bmc_pass"] = "****" if c.get("bmc_pass") else ""
         c["os_alive"] = _status_cache.get(("os", name), False)
+        c["power"] = (_POWER.get(name) or {}).get("v")
         c["bmc_alive"] = _status_cache.get(("bmc", name)) if m.get("bmc_ip") else None
         c["health"] = _health_cache.get(name, ("unknown", 0))[0]
         c.pop("status", None)
         safe.append(c)
-    return {"machines": safe}
+    return {"machines": safe, "last_scan": _STATUS_TIME}
 
 
 @app.delete("/api/machines/{name}")
@@ -901,6 +943,7 @@ def machine_power(name: str, body: dict):
     """對機台開/關機。body: {on: bool}。優先使用該機台的自訂 power 指令。"""
     if name not in machines:
         raise HTTPException(404, f"機台不存在: {name}")
+    _POWER.pop(name, None)  # 開/關機後狀態作廢
     m = machines[name]
     action = "poweron" if body.get("on") else "poweroff"
     ok, info = run_control_cmd(m, action)
@@ -916,6 +959,7 @@ def machine_aux_cycle(name: str, body: dict = None):
     """對機台執行 AUX / AC cycle（ac cycle）。優先使用自訂 aux_cmd。"""
     if name not in machines:
         raise HTTPException(404, f"機台不存在: {name}")
+    _POWER.pop(name, None)  # AC cycle 後狀態作廢
     m = machines[name]
     ok, info = run_control_cmd(m, "aux")
     return {"ok": ok, "action": "aux", "info": info}

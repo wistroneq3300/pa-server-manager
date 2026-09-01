@@ -4,12 +4,13 @@
 
   <section class="ug-sec" id="ug-intro">
     <h2>1　功能總覽</h2>
-    <p>這是 Wistron <b>PA Server Manager</b> 的 Web 主控台，專為 AI / GPU 機房打造：</p>
+    <p>這是 Wistron <b>PA Server Manager</b> 的 Web 主控台，專為 AI / GPU 機房打造，一頁看到全機房狀態：</p>
     <ul>
       <li><b>無 Agent</b> — 全程走 SSH / IPMI / Redfish / noVNC，被管機台不用裝任何東西</li>
+      <li><b>首頁（Dashboard）</b> — KPI 卡（受管 / Rack / System / 在線率 / 電源 / 離線）+ SUT Health 大數字 + 專案狀態環餅圖 + 專案卡片</li>
       <li><b>L10 單機層級</b> — OS 資訊、硬體盤點（含 GPU / FW）、感測器、遙測、電源、KVM、網頁終端機</li>
-      <li><b>L11 機櫃層級</b> — U-slot 平面圖、拓樸圖、依元件類型的整櫃遙測與 AI 分析</li>
-      <li><b>AI</b> — 本機 Ollama：Copilot + 感測器 / 遙測 / 整櫃的簡短中文分析</li>
+      <li><b>L11 機櫃層級</b> — 48U 機櫃平面圖（LED 狀態燈 + U 刻度 + 風扇口面板）、拓樸圖、依元件類型的整櫃遙測與 AI 分析</li>
+      <li><b>AI</b> — 本機 Ollama：首頁 / 機櫃 Copilot + 感測器 / 遙測 / 整櫃的簡短中文分析</li>
     </ul>
     <p class="ug-hint">快速導航：
       <a href="#ug-nav">§2 導覽</a> ·
@@ -27,7 +28,7 @@
     <h2>2　導覽與深連結</h2>
     <h3>主要視圖</h3>
     <ul>
-      <li><b>Dashboard（首頁）</b>：全機台在線狀態、GPU 健康環圖、分組 Ping、專案卡片</li>
+      <li><b>Dashboard（首頁）</b>：全機台 KPI（在線率 / 電源 ON·OFF / 離線數）、SUT Health 大數字、專案狀態環餅圖（在線 / BMC 亮機 / 離線 / 未知）、專案卡片（點卡進專案）</li>
       <li><b>專案卡片</b>：點開進入 L10 / L11 分頁；卡片上有 KVM 同步、系統廣播等快捷鈕</li>
       <li><b>L11 機櫃頁</b>：平面圖 / 清單 / 整櫃 Telemetry 三種子檢視（上方 tab 切換）</li>
       <li><b>單機詳情</b>：OS、硬體、感測器、遙測、電源、KVM、終端機</li>
@@ -106,8 +107,9 @@
 
     <h3>5.1　平面圖（Floor Plan）</h3>
     <ul>
-      <li>48U 標準機櫃，U 位由下往上編號</li>
-      <li>每格顯示：元件名、類型圖示、OS/BMC Ping 燈</li>
+      <li>48U 標準機櫃，U 位由下往上編號，每 8U 一道刻度線；左側金屬 U 標籤條</li>
+      <li>每格顯示：<b>OS / BMC LED 狀態燈</b>（綠呼吸 = 在線、紅 = 離線、灰 = 未知）、元件名、類型底色</li>
+      <li>櫃頂名牌：專案名 + 「已用 X/48 U · 空 Y U」使用率統計</li>
       <li>空 U 「＋」加入同專案 L11；佔用檢查避免重疊與非連續槽位</li>
     </ul>
 
@@ -170,7 +172,7 @@
     <h2>8　AI 功能（本機 Ollama）</h2>
     <table class="ug-table">
       <tr><th>功能</th><th>位置</th></tr>
-      <tr><td>Ai Copilot（對話）</td><td>右側欄「🤖 AI Copilot」</td></tr>
+      <tr><td>Ai Copilot（對話）</td><td>首頁右下 / 機櫃頁右欄「🤖 AI Copilot」</td></tr>
       <tr><td>感測器 AI 診斷</td><td>L10 感測器頁</td></tr>
       <tr><td>Telemetry AI 分析</td><td>L10 遙測頁（選範圍自動跑）</td></tr>
       <tr><td>整櫃 AI 分析</td><td>L11 遙測頁範圍列下方</td></tr>
@@ -210,9 +212,9 @@
 
     <h3>常用快捷鍵</h3>
     <ul>
-      <li><b>？（問號鍵）</b>：開啟這個說明窗口；再按一次就關掉</li>
+      <li><b>？（問號鍵）</b>：開啟這個說明窗口</li>
       <li><b>F5</b>：重新整理頁面時，會停留在你目前的專案與分頁，不會跳回首頁</li>
-      <li><b>Esc（逃跑鍵）</b>：關閉 KVM 畫面、彈出的視窗</li>
+      <li><b>Esc</b>：關閉彈出的對話框（新增系統、專案設定等）</li>
       <li><b>Ctrl + Shift + R</b>：強制重新整理（更新前端程式用，一般不用按）</li>
     </ul>
 

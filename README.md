@@ -15,7 +15,7 @@ A centralized **web management console** for **AI GPU servers** (and racks). It 
 ## 1. Feature Overview
 
 ### 1.1 Unified Overview Dashboard
-- Aggregate view of all managed systems: online/offline status, grouped by project, GPU server health at a glance, ping status lights.
+- Aggregate view of all managed systems: KPI cards (managed / Rack / System / online rate / power ON·OFF / offline), a SUT Health big-number panel, and a donut chart of the 4 machine states (OS-online / BMC-only / offline / unknown), plus project cards.
 
 ### 1.2 L10 System Level (single node)
 - Add / manage individual servers over OS SSH (IP / user / password / port); hostname auto-probed on add.

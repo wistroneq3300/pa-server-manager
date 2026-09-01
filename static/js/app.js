@@ -40,6 +40,7 @@ async function api(path, options) {
 async function loadMachines(assignMissingU) {
   const data = await api("/api/machines");
   machines = data.machines || [];
+  if (data.last_scan) window.__lastScan = data.last_scan;
   // 一次性：為尚未有 rack_u 的 rack 機台指派 U（依專案內既有 order，由上往下 48→…）
   if (assignMissingU !== false) {
     const racks = machines.filter(m => m.level === "rack");
@@ -64,6 +65,14 @@ async function loadProjects() {
   const data = await api("/api/projects");
   projects = data.projects || [];
 }
+// BMC 電源狀態 cell（System Manager 表格用）
+function powerCell(m) {
+  const p = m.power;
+  if (p === "ON")  return `<span class="badge green"><span class="dot"></span>開機 <b>ON</b></span>`;
+  if (p === "OFF") return `<span class="badge" style="background:var(--bg-panel-2);color:var(--text-dim)"><span class="dot" style="background:var(--text-faint)"></span>關機 <b>OFF</b></span>`;
+  // 未知：BMC 離線 / 無 BMC / 尚未抓到
+  return `<span style="color:var(--text-faint)">—</span>`;
+}
 function statusBadge(alive) {
   if (alive === true) return `<span class="badge green"><span class="dot"></span>在線</span>`;
   if (alive === false) return `<span class="badge red"><span class="dot"></span>離線</span>`;
@@ -81,6 +90,19 @@ function projectMembers(pname) {
   return machines.filter(m => m.project === pname).sort((a, b) => (a.order||0) - (b.order||0));
 }
 function unassignedMachines() { return machines.filter(m => !m.project).sort((a,b)=>(a.order||0)-(b.order||0)); }
+/* ---- 狀態分類（矩陣 / 堆疊條共用） ---- */
+function mState(m) {
+  if (m.os_alive === true) return "on";                                   // OS 在線
+  if (m.bmc_alive === true || m.power === "ON") return "bmc";             // 有機/ BMC 在線，OS 未回
+  if (m.os_alive === false || m.power === "OFF") return "off";            // 离线 / 電源关
+  return "unk";                                                           // 未知
+}
+const _STATE_META = {
+  on:  { label: "OS 在線", color: "var(--green)" },
+  bmc: { label: "有機/無OS", color: "var(--amber)" },
+  off: { label: "離線/斷電", color: "var(--red)" },
+  unk: { label: "未知", color: "var(--text-faint)" },
+};
 function pageDashboard() {
   const total = machines.length;
   const online = machines.filter(m => m.os_alive === true).length;
@@ -88,6 +110,20 @@ function pageDashboard() {
   const unknown = total - online - offline;
   const racks = machines.filter(m => isRackItem(m)).length;
   const systems = machines.filter(m => !isRackItem(m)).length;
+  const pwrOff = machines.filter(m => m.power === "OFF").length;          // BMC 電源關機中
+  const pwrOn  = machines.filter(m => m.power === "ON").length;           // BMC 電源開機中
+  const rate = total ? Math.round(online / total * 100) : 0;
+  const lastScan = window.__lastScan;
+  const lastScanTxt = lastScan
+    ? new Date(lastScan * 1000).toLocaleString("zh-TW", { hour12: false })
+    : "";
+  const lastAgo = lastScan
+    ? Math.max(0, Math.round((Date.now() / 1000) - lastScan))
+    : null;
+  const agoTxt = lastAgo === null ? ""
+    : lastAgo < 60 ? lastAgo + " 秒前"
+    : lastAgo < 3600 ? Math.round(lastAgo / 60) + " 分鐘前"
+    : Math.round(lastAgo / 3600) + " 小時前";
   const ring = total ? `
     <svg viewBox="0 0 120 120" class="donut">
       <circle class="donut-track" cx="60" cy="60" r="48"/>
@@ -114,9 +150,9 @@ function pageDashboard() {
       : `<span class="dash-proj-badge bad" title="${abnormal} 台異常">⚠ ${abnormal} 異常</span>`;
     return `
       <div class="dash-proj ${statusCls} ${sizeCls}" onclick="viewProject(${JSON.stringify(p.name)})" title="點我看此專案">
-        ${badge}
         <div class="dash-proj-head">
           <span class="dash-proj-name">📁 ${esc(p.name)}</span>
+          ${badge}
           <span class="dash-proj-count">${n} 台</span>
         </div>
         ${p.desc ? `<div class="dash-proj-desc">${esc(p.desc)}</div>` : ""}
@@ -134,18 +170,56 @@ function pageDashboard() {
       <div class="stat"><div class="k">受管系統</div><div class="v">${total}</div></div>
       <div class="stat"><div class="k">Rack / L11</div><div class="v" style="color:var(--accent-blue)">${racks}</div></div>
       <div class="stat"><div class="k">System / L10</div><div class="v" style="color:var(--w-green)">${systems}</div></div>
-      <div class="stat"><div class="k">線上</div><div class="v" style="color:var(--green)">${online}</div></div>
+      <div class="stat"><div class="k">在線率</div><div class="v" style="color:${rate >= 80 ? "var(--green)" : rate >= 50 ? "var(--amber)" : "var(--red)"}">${rate}<span style="font-size:14px;margin-left:2px">%</span></div></div>
+      <div class="stat"><div class="k">電源 ON / OFF</div><div class="v"><span style="color:var(--green)">${pwrOn}</span><span style="color:var(--text-faint);font-size:18px"> / </span><span style="color:var(--red)">${pwrOff}</span></div></div>
       <div class="stat"><div class="k">離線</div><div class="v" style="color:var(--red)">${offline}</div></div>
     </div>
+    ${lastScanTxt ? `<div class="dash-lastscan">📡 最後掃描 <b>${lastScanTxt}</b>（${agoTxt}）· 狀態為快取值，到系統管理頁點「⟳ 重新掃描」可即時重抓</div>` : ""}
     <div class="dash-mid">
       <div class="glass-panel health-panel">
         <div class="card-title">SUT Health Overview</div>
         <div class="health-body">
-          ${ring}
-          <div class="health-legend">
-            <div class="hl"><span class="dot dot-g"></span> Healthy ${online}</div>
-            <div class="hl"><span class="dot dot-r"></span> Critical ${offline}</div>
-            <div class="hl"><span class="dot dot-y"></span> Unknown ${unknown}</div>
+          <div class="hero-num">
+            <span class="hero-big" style="color:${rate >= 80 ? "var(--green)" : rate >= 50 ? "var(--amber)" : "var(--red)"}">${rate}<span class="hero-unit">%</span></span>
+            <span class="hero-cap">在線率</span>
+          </div>
+          <div class="hero-detail">
+            <span class="mini green">● ${online} 在線</span>
+            <span class="mini red">● ${offline} 離線</span>
+            <span class="mini">● ${unknown} 未知</span>
+          </div>
+        </div>
+      </div>
+      <div class="glass-panel bars-panel">
+        <div class="card-title">專案狀態分布 <span class="hint">全 ${total} 台 · 按狀態</span></div>
+        <div class="donut-wrap">
+          <svg viewBox="0 0 120 120" class="donut2">
+            <circle cx="60" cy="60" r="42" fill="none" stroke="var(--bg-panel-2)" stroke-width="14"/>
+            ${(() => {
+              const c = { on: 0, bmc: 0, off: 0, unk: 0 };
+              machines.forEach(m => c[mState(m)]++);
+              const order = ["on", "bmc", "off", "unk"];
+              const total2 = machines.length || 1;
+              let acc = 0;
+              const C = 2 * Math.PI * 42;
+              return order.map(k => {
+                if (!c[k]) return "";
+                const frac = c[k] / total2;
+                const dash = (frac * C).toFixed(3);
+                const off = acc;
+                acc += frac * C;
+                return `<circle class="donut2-seg" cx="60" cy="60" r="42" fill="none" stroke="${_STATE_META[k].color}" stroke-width="14" stroke-dasharray="${dash} ${(C - dash).toFixed(3)}" stroke-dashoffset="${(-off).toFixed(3)}" style="transform:rotate(-90deg);transform-origin:60px 60px" title="${_STATE_META[k].label} ${c[k]} 台（${(frac * 100).toFixed(0)}%）"/>`;
+              }).join("");
+            })()}
+            <text x="60" y="56" class="donut2-n">${total}</text>
+            <text x="60" y="72" class="donut2-l">台系統</text>
+          </svg>
+          <div class="donut2-legend">
+            ${["on", "bmc", "off", "unk"].map(k => {
+              const n = machines.filter(m => mState(m) === k).length;
+              const pct = total ? Math.round(n / total * 100) : 0;
+              return `<div class="dl"><span class="dl-dot" style="background:${_STATE_META[k].color}"></span><span class="dl-label">${_STATE_META[k].label}</span><span class="dl-n">${n} <span class="dl-pct">${pct}%</span></span></div>`;
+            }).join("")}
           </div>
         </div>
       </div>
@@ -989,9 +1063,19 @@ function rackmapHtml(members, pinged) {
     rows += `<div class="rm-row" style="grid-row:${ROW_TOP-u} / ${ROW_TOP+1-u}"><span class="rm-u"><span class="mono">U${u}</span></span><div class="rm-empty-slot" onclick="rackEmptyClick(${u})" title="點擊放置機台">＋</div></div>`;
     u--;
   }
+  // 頂部名牌：已用 U 統計（每台佔 rack_size 個連續槽）
+  const usedSet = new Set();
+  members.forEach(m => {
+    const { u, s } = occupied(m);
+    for (let k = u; k > u - s && k >= 1; k--) usedSet.add(k);
+  });
+  // 頂部 U 統計
   return `
   <div class="rm-rack">
-    <div class="rm-head"><span></span><span>${esc(rackView.project)} — ${RACK_U}U 標準機櫃</span></div>
+    <div class="rm-head">
+      <span class="rm-head-name">${esc(rackView.project)} <span class="rm-head-sep">/</span> ${RACK_U}U</span>
+      <span class="rm-head-stat">${usedSet.size}/${RACK_U} U 已用 · 空 ${RACK_U - usedSet.size}U</span>
+    </div>
     <div class="rm-body">
     ${rows}
     </div>
@@ -1001,8 +1085,13 @@ function rackmapHtml(members, pinged) {
 function rackBlockRow(m, u, size, pinged) {
   const n = pinged.find(x => x.name === m.name);
   const up = n ? n.os_alive : null;
+  const bmcUp = n ? n.bmc_alive : null;
   const info = mgxInfo(m);
-  const cls = up === true ? "green" : up === false ? "red" : "none";
+  const osTitle = up === true ? "OS 在線" : up === false ? "OS 離線" : "OS 未知";
+  const led = `<span class="led ${up === true ? "on" : up === false ? "off" : "unk"}" title="${osTitle}"></span>`;
+  const ledBmc = m.bmc_ip
+    ? `<span class="led sm ${bmcUp === true ? "on" : bmcUp === false ? "off" : "unk"}" title="BMC ${bmcUp === true ? "在線" : bmcUp === false ? "離線" : "未知"}"></span>`
+    : "";
   // 點機櫃元件本身一律進「單機詳情」；換位/類型請按右側「⇅」按鈕
   const click = `openMachine('${esc(m.name)}')`;
   const delBtn = `<button class="btn small btn-del" title="從機櫃移除" onclick="rackUnmount('${esc(m.name)}')">✕</button>`;
@@ -1016,9 +1105,9 @@ function rackBlockRow(m, u, size, pinged) {
   return `
   <div class="rm-row ${size > 1 ? "rm-block" : ""}" data-u="${u}" ${span}>
     <span class="rm-u ${size > 1 ? "rm-u-block" : ""}">${uStack}</span>
-    <div class="rm-cell ${cls} ${info.cls}" onclick="${click}" style="align-items:${size > 1 ? "center" : "stretch"}">
+    <div class="rm-cell ${info.cls}" onclick="${click}" style="align-items:${size > 1 ? "center" : "stretch"}">
       <div class="rm-cell-inner">
-        <span class="rm-lamp">${up === true ? "🟢" : up === false ? "🔴" : "⨪"}</span>
+        <span class="rm-lamps">${led}${ledBmc}</span>
         <span class="rm-name">${nm}</span>
         <span class="rm-ip mono">${esc(m.bmc_ip || m.os_ip || "")}</span>
         <span class="rm-actions" onclick="event.stopPropagation()">
@@ -1685,8 +1774,8 @@ function renderProjectsList() {
           <button class="btn small proj-collapse-btn" onclick="event.stopPropagation();toggleProject('${esc(p.name)}')" title="${collapsed ? "展開此專案" : "收合此專案（隱藏機台清單）"}">${collapsed ? "▼ 展開" : "▲ 收合"}</button>
         </div>
         ${!collapsed && members.length ? `<div class="proj-table-scroll"><table class="t">
-            <colgroup><col class="cw-name"><col class="cw-lvl"><col class="cw-ip"><col class="cw-ip"><col class="cw-st"><col class="cw-st"><col class="cw-move"><col class="cw-act"></colgroup>
-            <thead><tr><th>系統名稱</th><th>層級</th><th>OS IP</th><th>BMC IP</th><th>OS 狀態</th><th>BMC 狀態</th><th>移動</th><th>操作</th></tr></thead>
+            <colgroup><col class="cw-name"><col class="cw-lvl"><col class="cw-ip"><col class="cw-ip"><col class="cw-st"><col class="cw-st"><col class="cw-pwr"><col class="cw-move"><col class="cw-act"></colgroup>
+            <thead><tr><th>系統名稱</th><th>層級</th><th>OS IP</th><th>BMC IP</th><th>OS 狀態</th><th>BMC 狀態</th><th>BMC 電源</th><th>移動</th><th>操作</th></tr></thead>
             <tbody>${rows.join("")}</tbody></table></div>`
           : `${!collapsed ? `<div style="padding:10px 14px;color:var(--text-faint)">此專案在此層級內沒有機台</div>` : ""}`}
       </div>`;
@@ -1698,7 +1787,7 @@ function renderProjectsList() {
           <div class="proj-card-grip" style="opacity:.35">⠿</div>
           <div class="proj-card-info"><span class="proj-card-name">未分類</span><span class="proj-card-count">${un.length} 台</span></div>
         </div>
-        <div class="proj-table-scroll"><table class="t"><colgroup><col class="cw-name"><col class="cw-lvl"><col class="cw-ip"><col class="cw-ip"><col class="cw-st"><col class="cw-st"><col class="cw-move"><col class="cw-act"></colgroup><thead><tr><th>系統名稱</th><th>層級</th><th>OS IP</th><th>BMC IP</th><th>OS 狀態</th><th>BMC 狀態</th><th>移動</th><th>操作</th></tr></thead>
+        <div class="proj-table-scroll"><table class="t"><colgroup><col class="cw-name"><col class="cw-lvl"><col class="cw-ip"><col class="cw-ip"><col class="cw-st"><col class="cw-st"><col class="cw-pwr"><col class="cw-move"><col class="cw-act"></colgroup><thead><tr><th>系統名稱</th><th>層級</th><th>OS IP</th><th>BMC IP</th><th>OS 狀態</th><th>BMC 狀態</th><th>BMC 電源</th><th>移動</th><th>操作</th></tr></thead>
         <tbody>${un.map(m => machineRowUnassigned(m)).join("")}</tbody></table></div>
       </div>`;
   }
@@ -1753,6 +1842,7 @@ function machineRowSortable(m, pi, mi, total) {
       <td class="mono bmc-ip-cell">${esc(m.bmc_ip || "—")}</td>
       <td>${statusBadge(m.os_alive)}</td>
       <td>${m.bmc_ip ? statusBadge(m.bmc_alive) : `<span style="color:var(--text-faint)">—</span>`}</td>
+      <td>${powerCell(m)}</td>
       <td>
         <select class="input move-sel" onchange="moveMachineTo('${esc(m.name)}', this.value)">
           <option value="">移至…</option>
@@ -1792,6 +1882,7 @@ function machineRowUnassigned(m) {
       <td class="mono bmc-ip-cell">${esc(m.bmc_ip || "—")}</td>
       <td>${statusBadge(m.os_alive)}</td>
       <td>${m.bmc_ip ? statusBadge(m.bmc_alive) : `<span style="color:var(--text-faint)">—</span>`}</td>
+      <td>${powerCell(m)}</td>
       <td>
         <select class="input move-sel" onchange="moveMachineTo('${esc(m.name)}', this.value)">
           <option value="">移至…</option>
@@ -2627,7 +2718,6 @@ function pageMachine() {
           <button class="btn small btn-danger" onclick="machinePower('${esc(name)}',false)">⏻ 關機</button>
           <button class="btn small btn-warn" onclick="machineRebootDetail('${esc(name)}')">⟳ Reboot</button>
           <button class="btn small" onclick="machineAuxDetail('${esc(name)}')">⚡ AC cycle</button>
-          // [AI AGENT 已停用] 按鈕已移除（原：<button ... openMachineAgent ...>🤖 AI Agent</button>）
         </div>
         ` : ""}
       </div>
@@ -3072,11 +3162,16 @@ async function rackUnmount(name) {
     setView("rack");
   } catch (e) { alert("移除失敗：" + e.message); }
 }
-/* ---------- 重新掃描 ---------- */
+/* ---------- 重新掃描（同步強制 ping 所有 OS + BMC + 健康度，返回最新真實值）---------- */
 async function refreshStatus() {
   const btn = $("refresh-btn");
-  if (btn) { btn.disabled = true; btn.textContent = "掃描中…"; }
-  try { await loadMachines(); setView(state.view); }
+  if (btn) { btn.disabled = true; btn.textContent = "⏳ 掃描中…"; }
+  try {
+    const data = await api("/api/machines?force_scan=1");
+    machines = data.machines || [];
+    if (data.last_scan) window.__lastScan = data.last_scan;
+    setView(state.view);
+  }
   catch (e) { alert("重新掃描失敗：" + e.message); }
   finally { if (btn) { btn.disabled = false; btn.textContent = "⟳ 重新掃描"; } }
 }

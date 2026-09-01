@@ -157,11 +157,11 @@ body {
 .dash-proj::before{content:"";position:absolute;left:0;right:0;top:0;height:2px;background:var(--logo-grad);opacity:0;transition:opacity .15s}
 .dash-proj:hover{transform:translateY(-3px);border-color:var(--w-green);box-shadow:var(--shadow-lg)}
 .dash-proj:hover::before{opacity:1}
-.dash-proj-head{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;padding-right:54px}
-.dash-proj-name{font-size:14px;font-weight:700;color:var(--text)}
+.dash-proj-head{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}
+.dash-proj-name{font-size:14px;font-weight:700;color:var(--text);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .dash-proj-count{font-size:11px;color:var(--text-faint);white-space:nowrap}
 .dash-proj-desc{font-size:11px;color:var(--text-faint);margin-top:4px;line-height:1.4}
-.dash-proj-stats{margin-top:10px;display:flex;gap:12px;font-size:11.5px}
+.dash-proj-stats{margin-top:10px;display:flex;flex-wrap:wrap;gap:6px 12px;font-size:11.5px}
 .dash-proj-stats .green{color:var(--green)}
 .dash-proj-stats .red{color:var(--red)}
 
@@ -170,7 +170,7 @@ body {
 .dash-proj.lg{border-left:3px solid var(--accent-blue)}
 .dash-proj.mid{border-left:3px solid color-mix(in srgb,var(--w-green) 55%, transparent)}
 .dash-proj.lg .dash-proj-count{color:var(--accent-blue);font-weight:700}
-.dash-proj-badge{position:absolute;top:12px;right:12px;font-size:10.5px;font-weight:700;padding:3px 8px;border-radius:20px;line-height:1}
+.dash-proj-badge{position:static;flex-shrink:0;font-size:10.5px;font-weight:700;padding:3px 8px;border-radius:20px;line-height:1;white-space:nowrap}
 .dash-proj-badge.ok{background:var(--green-bg);color:var(--green)}
 .dash-proj-badge.bad{background:var(--red-bg);color:var(--red)}
 .dash-proj.ok{border-color:color-mix(in srgb,var(--green) 35%, var(--border))}
@@ -226,15 +226,16 @@ body {
 
 table.t{width:100%;border-collapse:collapse}
 .proj-table-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;width:100%}
-.proj-table-scroll table.t{min-width:1110px;width:100%;table-layout:fixed}
+.proj-table-scroll table.t{min-width:1180px;width:100%;table-layout:fixed}
 .proj-table-scroll table.t th,.proj-table-scroll table.t td{white-space:nowrap}
 /* 系統管理表格：固定各欄寬度，讓每個專案卡片(含 L10/L11/未分類)的欄位 X 位置完全一致 */
-.proj-table-scroll table.t col.cw-name{width:250px}
-.proj-table-scroll table.t col.cw-lvl{width:88px}
-.proj-table-scroll table.t col.cw-ip{width:126px}
-.proj-table-scroll table.t col.cw-st{width:82px}
-.proj-table-scroll table.t col.cw-move{width:136px}
-.proj-table-scroll table.t col.cw-act{width:220px}
+.proj-table-scroll table.t col.cw-name{width:220px}
+.proj-table-scroll table.t col.cw-lvl{width:78px}
+.proj-table-scroll table.t col.cw-ip{width:118px}
+.proj-table-scroll table.t col.cw-st{width:74px}
+.proj-table-scroll table.t col.cw-pwr{width:90px}
+.proj-table-scroll table.t col.cw-move{width:124px}
+.proj-table-scroll table.t col.cw-act{width:210px}
 .proj-card .t td.os-ip-cell,.proj-card .t td.bmc-ip-cell{white-space:nowrap;min-width:110px}
 .t th{text-align:left;font-size:11px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.4px;border-bottom:1px solid var(--border);padding:8px;white-space:nowrap}
 .t td{border-bottom:1px solid var(--border-soft);padding:8px;font-size:12px}
@@ -489,6 +490,7 @@ input#f-bmc-pass:autofill{
    Dashboard 新總覽（SUT 健康、GPU 狀態、告警、架構、AI Copilot)
    ============================================================ */
 .dash-kpis{display:flex;gap:14px;flex-wrap:wrap;margin-bottom:16px}
+.dash-lastscan{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--text-faint);margin:-6px 0 14px}
 .dash-kpis .stat{flex:1;min-width:130px}
 
 .glass-panel{
@@ -500,7 +502,10 @@ input#f-bmc-pass:autofill{
 }
 
 /* 中部三欄：健康 / 狀態表 / 告警+架構 */
-.dash-mid{display:flex;justify-content:center;margin-bottom:16px}.dash-mid .health-panel{width:340px}
+/* 中部兩欄：健康 + 狀態圓餅 */
+.dash-mid{display:grid;grid-template-columns:340px 1fr;gap:16px;margin-bottom:16px;align-items:stretch}
+/* 燈光貼 absolute 頂/左，需 overflow:hidden 才會跟圓角彎，不然直角會凸出圓角外 */
+.dash-mid .glass-panel{display:flex;flex-direction:column;min-width:0;overflow:hidden}
 .dash-mid .card-title{font-size:13px;font-weight:800;letter-spacing:.3px;color:var(--text);margin-bottom:14px}
 
 .health-body{display:flex;flex-direction:column;align-items:center;gap:16px}
@@ -788,34 +793,73 @@ input#f-bmc-pass:autofill{
   border-top:1px solid rgba(255,255,255,.07);border-bottom:1px solid rgba(255,255,255,.07)}
 .rm-rack::before{left:0;border-right:1px solid rgba(0,0,0,.5)}
 .rm-rack::after{right:0;border-left:1px solid rgba(0,0,0,.5)}
-.rm-head{background:linear-gradient(135deg,#0b3d2e,#0a7a4d);
-  color:#fff;font-weight:700;padding:9px 16px;display:flex;gap:40px;align-items:center;
-  border-radius:8px 8px 0 0;letter-spacing:.4px;margin:0 -34px;
-  box-shadow:inset 0 1px 0 rgba(255,255,255,.12)}
+/* 櫃頂 → 黑色資產名牌：與櫃體同系深灰，左綠LED + 專案名 + 右側 U 使用率 */
+.rm-head{
+  background:linear-gradient(180deg,#1c2129,#12151b);
+  color:#cfd9ea;font-weight:600;padding:7px 14px;display:flex;gap:10px;align-items:center;
+  border-radius:8px 8px 0 0;letter-spacing:.5px;margin:0 -34px;font-size:12.5px;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.08),inset 0 -1px 0 rgba(0,0,0,.6)}
+.rm-head-name{font-weight:700;color:#e8f0ff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;margin-left:20px}
+.rm-head-sep{color:rgba(255,255,255,.3);margin:0 2px}
+.rm-head-stat{margin-left:auto;flex-shrink:0;font-size:10.5px;font-family:monospace;
+  color:rgba(255,255,255,.55);background:rgba(0,0,0,.35);
+  padding:2px 8px;border-radius:4px;border:1px solid rgba(255,255,255,.08);
+  box-shadow:inset 0 1px 2px rgba(0,0,0,.5)}
 .rm-body{display:grid;grid-template-rows:repeat(48,var(--rack-row-h));grid-auto-rows:var(--rack-row-h);grid-auto-flow:row;
   background:radial-gradient(ellipse at 20% 0%, rgba(255,255,255,.03), transparent 60%),linear-gradient(180deg,#101318,#111418);
   border-radius:0 0 10px 10px;margin:8px -28px 0}
-.rm-row{display:grid;grid-template-columns:50px minmax(0,1fr);align-items:stretch}
+.rm-row{display:grid;grid-template-columns:50px minmax(0,1fr);align-items:stretch;position:relative}
 .rm-row.rm-block{grid-column:1 / -1;grid-template-columns:50px minmax(0,1fr);overflow:hidden}
-.rm-u{display:flex;align-items:center;justify-content:flex-start;min-width:0;overflow:hidden;font-size:13px;font-weight:700;color:rgba(255,255,255,.95);
-  background:repeating-linear-gradient(180deg,transparent 0 9px,rgba(255,255,255,.04) 9px 14px);
-  border-right:1px solid rgba(255,255,255,.07);text-shadow:0 1px 0 #000;padding:0 2px 0 20px}
-.rm-u>span{display:inline-flex;align-items:center;justify-content:center;font-family:monospace;letter-spacing:0;white-space:nowrap;font-size:13px;font-weight:700;line-height:1;min-width:0;max-width:100%}
+/* ---- LED 狀態燈（取代 🟢🔴 emoji）：OS燈 + BMC燈 ---- */
+.rm-lamps{display:inline-flex;align-items:center;gap:4px;flex-shrink:0}
+.led{width:7px;height:7px;border-radius:50%;flex-shrink:0;
+  background:radial-gradient(circle at 35% 30%,rgba(255,255,255,.85),transparent 40%),#3a4149;
+  box-shadow:inset 0 0 1px rgba(0,0,0,.8);position:relative}
+.led.sm{width:5px;height:5px;background:radial-gradient(circle at 35% 30%,rgba(255,255,255,.7),transparent 40%),#31363d}
+.led.on{background:radial-gradient(circle at 35% 30%,#b6ffd0,#22c55e 65%)}
+.led.sm.on{background:radial-gradient(circle at 35% 30%,#b6ffd0,#16a34a 65%)}
+.led.off{background:radial-gradient(circle at 35% 30%,#ffb4b4,#dc2626 65%)}
+.led.sm.off{background:radial-gradient(circle at 35% 30%,#ffb4b4,#b91c1c 65%)}
+@keyframes ledBreathe{
+  0%,100%{box-shadow:0 0 2px rgba(34,197,94,.5)}
+  50%{box-shadow:0 0 7px rgba(34,197,94,.95)}
+}
+.led.on{animation:ledBreathe 2.6s ease-in-out infinite}
+.led.sm.on{animation:ledBreathe 2.6s ease-in-out infinite;animation-delay:.4s}
+@media (prefers-reduced-motion:reduce){.led{animation:none}}
+/* 左側 U 欄 → 金屬標籤條：數字細小、每 8U 有一道刻線 */
+.rm-u{display:flex;align-items:center;justify-content:flex-start;min-width:0;overflow:hidden;font-size:10px;font-weight:600;color:rgba(255,255,255,.6);
+  background:
+    repeating-linear-gradient(180deg,transparent 0 137px,rgba(0,0,0,.55) 137px 139px),
+    linear-gradient(90deg,#2c313b,#1d2129 70%,#171a20);
+  border-right:2px solid #0a0c10;box-shadow:inset 1px 0 0 rgba(255,255,255,.06);
+  text-shadow:0 1px 1px #000;padding:0 2px 0 8px;letter-spacing:.3px}
+.rm-u>span{display:inline-flex;align-items:center;justify-content:center;font-family:monospace;letter-spacing:0;white-space:nowrap;font-size:10px;font-weight:600;line-height:1;min-width:0;max-width:100%}
 .rm-u>span::before,.rm-u>span::after{display:none}
 
 /* >1U block：U 欄由「U4–1」單一字串改成獨立的 U4/U3/U2/U1 上下堆疊，與機櫃 U 尺對齊 */
-.rm-u.rm-u-block{flex-direction:column;justify-content:stretch;gap:0;padding:2px 2px 2px 20px}
+.rm-u.rm-u-block{flex-direction:column;justify-content:stretch;gap:0;padding:2px 2px 2px 8px}
 .rm-u.rm-u-block>span{flex:1 1 0%;width:100%;min-height:0;justify-content:flex-start}
 .rm-u.rm-u-block>span:not(:last-child){border-bottom:1px solid rgba(255,255,255,.07)}
-.rm-empty-slot{display:flex;align-items:center;justify-content:center;font-size:14px;color:rgba(255,255,255,.75);cursor:pointer;
-  transition:background .15s;border-left:1px solid transparent}
-.rm-empty-slot:hover{background:rgba(45,120,255,.14);color:#6ea8ff}
+/* 每 8U 一道刻線（U48/40/32/24/16/8 下緣） */
+.rm-row::before{content:"";position:absolute;left:0;right:0;bottom:0;height:1px;background:rgba(0,0,0,.55);pointer-events:none}
+.rm-row[data-u="48"]::before,.rm-row[data-u="40"]::before,.rm-row[data-u="32"]::before,
+.rm-row[data-u="24"]::before,.rm-row[data-u="16"]::before,.rm-row[data-u="8"]::before{
+  background:linear-gradient(90deg,rgba(0,0,0,.7) 0 52px,transparent 52px)}
+.rm-empty-slot{display:flex;align-items:center;justify-content:center;font-size:12px;color:rgba(255,255,255,.35);cursor:pointer;
+  transition:background .15s,color .15s,border-color .15s;
+  border:1px dashed rgba(255,255,255,.13);border-radius:3px}
+.rm-empty-slot:hover{background:rgba(45,120,255,.12);color:#6ea8ff;border-color:rgba(110,168,255,.5)}
 .rm-cell{display:flex;align-items:stretch;gap:8px;padding:0;cursor:pointer;transition:transform .12s,box-shadow .12s;
   white-space:nowrap;overflow:hidden;position:relative;border:1px solid rgba(255,255,255,.09);
   border-radius:4px 3px 0 0;box-shadow:0 1px 2px rgba(0,0,0,.4);margin:1px 1px}
 .rm-cell:hover{transform:translateY(-1px);box-shadow:0 3px 8px rgba(0,0,0,.5), inset 0 0 0 1px rgba(255,255,255,.12);z-index:2}
 .rm-cell::after{content:"";position:absolute;top:0;left:0;right:0;height:3px;background:radial-gradient(circle at 30% -40%,rgba(255,255,255,.35),transparent 70%)}
 .rm-cell-inner{display:flex;align-items:center;gap:7px;padding:2px 10px 2px 8px;width:100%;min-height:0;position:relative;overflow:hidden}
+/* 前面板風扇口紋（右端）：細豎紋，像真設備前面板 */
+.rm-cell-inner::after{content:"";position:absolute;right:0;top:3px;bottom:3px;width:14px;
+  background:repeating-linear-gradient(90deg,rgba(0,0,0,.45) 0 1px,transparent 1px 3px);
+  border-left:1px solid rgba(0,0,0,.35);pointer-events:none}
 .rm-u-tag{font-size:8px;color:rgba(255,255,255,.55);border:1px solid rgba(255,255,255,.14);border-radius:3px;padding:0 4px;flex-shrink:0;font-family:monospace}
 .rm-cell.green{box-shadow:inset 3px 0 0 #22c55e, 0 1px 2px rgba(0,0,0,.4)}
 .rm-cell.red{box-shadow:inset 3px 0 0 var(--red), 0 1px 2px rgba(0,0,0,.4)}
@@ -828,7 +872,6 @@ input#f-bmc-pass:autofill{
 .rm-cell.mgx-network{background:linear-gradient(120deg,#3d2b18,#2e2112)}
 .rm-cell.mgx-blanking{background:repeating-linear-gradient(45deg,#181b1f,#181b1f 6px,#20242a 6px,#20242a 12px);
   border:1px dashed #4b5563;border-left:none;color:#9ca3af}
-.rm-lamp{font-size:12px;width:16px;text-align:center;filter:drop-shadow(0 0 3px currentColor)}
 .rm-name{font-weight:700;font-size:12px;color:#e8f0ff;min-width:0;flex:1 1 auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-shadow:0 1px 0 #000}
 .rm-ip{display:none;font-size:9px;color:rgba(255,255,255,.6);flex-shrink:0;font-family:monospace}
 .rm-actions{display:flex;gap:4px;white-space:nowrap;flex-shrink:0;margin-left:auto;margin-right:10px}
@@ -1011,3 +1054,26 @@ tr.mach-over td{box-shadow:inset 0 2px 0 0 #4aa8ff}
 /* .agent-input{display:flex;gap:8px;align-items:flex-end} */
 /* .agent-input textarea{flex:1;resize:none;min-height:38px;max-height:120px;border:1px solid var(--border-soft);border-radius:10px;background:var(--input-bg, rgba(0,0,0,.25));color:var(--text);padding:9px 12px;font-family:inherit;font-size:13px;outline:none} */
 /* .agent-input button{height:38px;width:44px;border-radius:10px;font-size:16px} */
+
+/* ---- 在線率大數字（取代圓環） ---- */
+.hero-num{display:flex;flex-direction:column;align-items:center;line-height:1}
+.hero-big{font-size:52px;font-weight:800;letter-spacing:1px;font-variant-numeric:tabular-nums}
+.hero-unit{font-size:22px;font-weight:700;margin-left:3px;opacity:.8}
+.hero-cap{font-size:11px;color:var(--text-faint);letter-spacing:2px;margin-top:6px;text-transform:uppercase}
+.hero-detail{display:flex;flex-wrap:wrap;justify-content:center;gap:6px 14px;font-size:12px}
+
+
+/* ---- 狀態圓餅圖（取代專案堆疊條） ---- */
+.donut-wrap{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;flex:1;padding:6px 0}
+.donut2{width:190px;height:190px}
+.donut2-seg{transition:stroke-dasharray .5s ease}
+.donut2-seg:hover{stroke-width:17}
+.donut2 text{text-anchor:middle}
+.donut2-n{font-size:30px;font-weight:800;fill:var(--text)}
+.donut2-l{font-size:9px;fill:var(--text-faint);letter-spacing:1px}
+.donut2-legend{display:flex;flex-direction:column;gap:7px;width:100%;max-width:230px}
+.donut2-legend .dl{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text-dim)}
+.dl-dot{width:10px;height:10px;border-radius:3px;flex-shrink:0}
+.dl-label{flex:1}
+.dl-n{font-weight:700;color:var(--text);font-variant-numeric:tabular-nums}
+.dl-pct{font-weight:400;color:var(--text-faint);font-size:10.5px;margin-left:3px}
