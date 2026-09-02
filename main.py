@@ -2122,7 +2122,10 @@ def rack_telemetry(project: str, minutes: int = 60):
     # 只撈「在此專案 Rack（L11 機櫃）平面圖上」的元件（level=="rack"）：排除 L10 單機（level=="system"）如 proj_k-app-1
     # 專案名大小寫不敏感（proj_k/proj_k 視為同一專案）
     want_proj = (proj or "").casefold()
-    members = [m for m in machines.values() if (m.get("project") or "").casefold() == want_proj and m.get("level") == "rack"]
+    members = [m for m in machines.values()
+               if (m.get("project") or "").casefold() == want_proj
+               and m.get("level") == "rack"
+               and (m.get("rack_u") or 0) > 0]
     # 排除 blanking 擋板（passive 且無監控指標），不列入監控類型
     components = sorted([
         {"name": m.get("name", ""), "kind": telemetry_core.kind_of(m)}
