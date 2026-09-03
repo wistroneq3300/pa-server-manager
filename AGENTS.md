@@ -408,6 +408,9 @@ SP-X 的 KVM 是用 AMI 私有資料封包（頭 `23 00 00 00 06 00 00 02 00` �
 >   - /root/test-library/AI_TESTCASE_PROJECT_CONTEXT.md  (the plan, option C)
 >   - /root/sheng/manager/pa_manager/scripts/build_testlib_json.py  (build pipeline)
 >   - /srv/pa-manager-prod/data/tests.json  (current output, what to replace)
+>   - ORIGINAL Excel: /root/test-library/TestCaseLibrary_Wistron.xlsx (do NOT edit)
+>   - LAZY-review Excel: /root/test-library/AI_Simplified_Review_20260828/TestCaseLibrary_Wistron_Simplified_AI_Review_20260828.xlsx (do NOT edit)
+>     (build script RAW/REVIEW read these exact two paths; T4 re-review overlays a sidecar keyed by code)
 
 
 ## HOW to re-review (STRICT, case-by-case -- do NOT batch-template)
