@@ -2973,7 +2973,7 @@ function assignTaskMetaHtml() {
       </div>
     </div>`).join("");
   return head + `<div class="assign-sheet-grid">${cards}</div>
-    <div style="margin-top:12px;font-size:12px;color:var(--text-faint)">\u9ede\u9078\u5206\u985e\u5f8c\uff0c\u53ef\u8907\u9078\u6e2c\u9805\u5f85\u767c\u9001</div>`;
+    <div style="margin-top:12px;font-size:12px;color:var(--text-faint)">\u9ede\u9078\u5206\u985e\u5f8c\uff0c\u9078\u53d6\u4e00\u689D\u8981\u57f7\u884c\u7684\u6e2c\u9805</div>`;
 }
 
 const assignSheetCache = {};
@@ -3028,9 +3028,8 @@ function assignTaskListHtml() {
     <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px">
       <input id="assign-q" class="assign-search" type="text" placeholder="\u641c\u5c0b code / items / test set"
         value="${esc(_assignTask.q)}" oninput="assignTaskSearch()" />
-      <button class="btn small" onclick="assignTaskSelAll()">\u2713 \u5168\u9078\u672c\u9801</button>
       <button class="btn small" onclick="assignTaskSelClear()">\u7a7a \u6e05\u7a7a</button>
-      <span class="hint">\u5df2\u9078 <b id="assign-selcount">${selCount}</b> /\u5171 ${_assignTask.items.length}</span>
+      <span class="hint">\u5df2\u9078 <b id="assign-selcount">${selCount}</b></span>
     </div>
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;font-size:12px">
       <button class="btn small" ${pg<=0?"disabled":""} onclick="assignTaskPage(-1)">\u2039 \u4e0a\u4e00\u9801</button>
@@ -3050,7 +3049,7 @@ function assignTaskRow(r) {
   const pkg = r.ai_packages_needed ? `<span class="hint">\ud83d\udce6 ${esc(r.ai_packages_needed)}</span>` : "";
   return `
     <label class="assign-row">
-      <input type="checkbox" ${checked} onchange="assignTaskToggle('${esc(r.code)}', this.checked)" />
+      <input type="radio" name="assign-pick" ${checked} onchange="assignTaskToggle('${esc(r.code)}', this.checked)" />
       <div class="assign-row-body">
         <div class="assign-row-title">${badge} <span class="mono">${esc(r.code)}</span>
           <span class="assign-items">${esc(r.items)}</span></div>
@@ -3086,19 +3085,9 @@ function assignTaskPage(dir) {
   ]);
 }
 function assignTaskToggle(code, on) {
-  if (on) _assignTask.sel.add(code); else _assignTask.sel.delete(code);
+  if (on) { _assignTask.sel = new Set([code]); } else { _assignTask.sel = new Set(); }
   const c = $("assign-selcount");
   if (c) c.textContent = _assignTask.sel.size;
-}
-function assignTaskSelAll() {
-  const q = _assignTask.q.trim().toLowerCase();
-  const rows = _assignTask.items;
-  let filt = q ? rows.filter(r => String(r.code||"").toLowerCase().includes(q) ||
-      String(r.items||"").toLowerCase().includes(q) || String(r.test_set||"").toLowerCase().includes(q)) : rows;
-  const pg = _assignTask.page;
-  const slice = filt.slice(pg * _assignTask.perPage, (pg + 1) * _assignTask.perPage);
-  slice.forEach(r => _assignTask.sel.add(r.code));
-  assignTaskReRender();
 }
 function assignTaskSelClear() {
   _assignTask.sel.clear();

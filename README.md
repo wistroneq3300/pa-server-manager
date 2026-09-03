@@ -88,7 +88,7 @@ A centralized **web management console** for **AI GPU servers** (and racks). It 
   - **Anti-template check**: the build script warns whenever ≥2 cases share a byte-identical command text, so placeholder/template commands can't silently pass as reviewed.
 - **Assign Task UI (指派任務)**: a `📋 指派任務` button on the single-machine detail toolbar opens a multi-step dialog:
   1. Pick a **category card** (shows per-category auto / partial / manual counts from `/api/testlibrary/meta`).
-  2. Search + filter the paged case list (100/page), tick cases (auto=🟢, partial=🟡, manual=⚫ by `AI_Can_Execute`).
+  2. Search + filter the paged case list (100/page), then **select a single case** (single-select: one at a time; the radio button auto-switches when you pick another). Markers by `AI_Can_Execute` (auto=🟢, partial=🟡, manual=⚫).
   3. **Generate copy-to-OpenHands text** — a ready-made instruction block carrying the target machine IP / user (password masked as `<password>`), package installs, procedure and criteria; paste it back into OpenHands chat to have the assistant SSH in, run and collect evidence. **Pass/fail is left to the user** — the assistant never decides.
   - Clipboard copy with a textarea fallback.
 - **CSV export**: `GET /api/testlibrary/export` downloads the whole test library (or one category) as an UTF-8 BOM CSV, including the new `risk` column.
