@@ -82,6 +82,17 @@ A centralized **web management console** for **AI GPU servers** (and racks). It 
 - Pure frontend: content is an HTML template + `static/js/userguide.js` (no backend, no new dependencies).
 - Window position / size / minimize / last-close state persist in `localStorage`; built-in search filters sections.
 
+### 1.11 Test Library & Assign Task (semi-automated test runner)
+- **Test library**: a backend-generated `tests.json` (3112 cases, built by `scripts/build_testlib_json.py` from the raw source Excel + the AI review Excel) served to the UI. Cases are grouped by category (功能性 / 效能 / 可靠性 / 相容性 / 穩定性 / 無主功能), each carrying `AI_Can_Execute` (YES / PARTIAL / NO), commands, packages, procedure and criteria.
+  - Sidecar overlays (T4 re-review): `REVISED_commands.csv` (overlays AI fields + risk per case, keyed by `code`, without touching the workbooks) and `ADDITIONS.csv` (merges brand-new cases into the 功能性 sheet).
+  - **Anti-template check**: the build script warns whenever ≥2 cases share a byte-identical command text, so placeholder/template commands can't silently pass as reviewed.
+- **Assign Task UI (指派任務)**: a `📋 指派任務` button on the single-machine detail toolbar opens a multi-step dialog:
+  1. Pick a **category card** (shows per-category auto / partial / manual counts from `/api/testlibrary/meta`).
+  2. Search + filter the paged case list (100/page), tick cases (auto=🟢, partial=🟡, manual=⚫ by `AI_Can_Execute`).
+  3. **Generate copy-to-OpenHands text** — a ready-made instruction block carrying the target machine IP / user (password masked as `<password>`), package installs, procedure and criteria; paste it back into OpenHands chat to have the assistant SSH in, run and collect evidence. **Pass/fail is left to the user** — the assistant never decides.
+  - Clipboard copy with a textarea fallback.
+- **CSV export**: `GET /api/testlibrary/export` downloads the whole test library (or one category) as an UTF-8 BOM CSV, including the new `risk` column.
+
 ---
 
 ## 2. System Architecture (read before deploying)
@@ -326,6 +337,9 @@ sudo systemctl restart pa-manager pa-terminal-bridge
 | GET/POST/DELETE | `/api/projects` | Project management (+ `/api/projects/reorder`, `/api/machines/reorder`) |
 | POST | `/api/copilot` | AI Copilot |
 | GET | `/api/kvm/basecode` | Detect per-machine BMC basecode + whether KVM sync is possible |
+| GET | `/api/testlibrary` | Test library (all sheets, or `?sheet=` one category) — semi-automated test runner data |
+| GET | `/api/testlibrary/meta` | Category list with counts + YES/PARTIAL/NO stats |
+| GET | `/api/testlibrary/export` | Download test library (full or per sheet) as UTF-8 BOM CSV incl. `risk` column |
 
 WebSocket:
 - `/ws/terminal/{name}/{kind}` — OS/BMC terminal (kind = `os` | `bmc`), proxied two-way to the bridge.
