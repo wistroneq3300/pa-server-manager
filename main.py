@@ -18,7 +18,9 @@ import re
 import subprocess
 import threading
 import base64
+import csv
 import datetime
+import io
 import time
 import websockets
 import paramiko
@@ -28,7 +30,7 @@ import telemetry_core  # System Telemetry 核心（CPU/DIMM/SSD/NIC/GPU 歷史�
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from pydantic import BaseModel, Field
 
 app = FastAPI(title="Wistron PA Server Manager API")
@@ -881,6 +883,42 @@ def api_testlibrary_meta():
         out.append({"label": label, "sheet": s.get("name"), "count": s.get("count"),
                     "auto": cnt["YES"], "partial": cnt["PARTIAL"], "no": cnt["NO"]})
     return {"total": data.get("total", 0), "sheets": out}
+
+
+@app.get("/api/testlibrary/export")
+def api_testlibrary_export(sheet: str = ""):
+    """\u5c0e\u51fa\u6e2c\u8a66\u5eab CSV\uff08CSV \u4e0b\u8f09\uff09\u3002 sheet= \u53ef\u6307\u5b9a\u4e2d\u6587\u6a19\u7c64\u6216\u539f\u59cb sheet \u540d\uff1b\u7565\u7565\u5247\u5168\u90e8\u3002"""
+    data = _load_testlib()
+    if data is None:
+        raise HTTPException(404, "\u6e2c\u8a66\u5eab\u5c1a\u672a\u7522\u751f\uff08\u7f3a\u5c11 tests.json\uff09")
+    sheets = []
+    if sheet:
+        for label, s in data.get("sheets", {}).items():
+            if label == sheet or s.get("name") == sheet:
+                sheets.append(s)
+                break
+        if not sheets:
+            raise HTTPException(404, f"\u627e\u4e0d\u5230\u6e2c\u9805\u5206\u985e: {sheet}")
+    else:
+        sheets = list(data.get("sheets", {}).values())
+
+    fields = ["code", "sub_function", "test_set", "items", "procedure", "criteria",
+              "ai_can_execute", "ai_packages_needed", "ai_commands", "ai_logs_output", "risk"]
+    buf = io.StringIO()
+    w = csv.DictWriter(buf, fieldnames=fields, lineterminator="\n")
+    w.writeheader()
+    for s in sheets:
+        for it in s.get("items", []):
+            row = {k: (it.get(k) if it.get(k) is not None else "") for k in fields}
+            w.writerow(row)
+    payload = "\ufeff" + buf.getvalue()
+    if not sheet or len(sheets) != 1:
+        fname = "testlibrary.csv"
+    else:
+        sname = sheets[0].get("name") or ""
+        fname = "testlibrary_%s.csv" % sname
+    return PlainTextResponse(payload, media_type="text/csv; charset=utf-8",
+                             headers={"Content-Disposition": "attachment; filename=%s" % fname})
 
 
 # ---- 單機 / 整櫃 控制與詳細資訊 ----

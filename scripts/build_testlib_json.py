@@ -10,11 +10,18 @@ sequences so this file stays 7-bit clean (avoids LLM-output CJK corruption).
 
 Output: /srv/pa-manager-prod/data/tests.json
 """
-import openpyxl, json, os, sys
+import openpyxl, json, os, sys, csv
 
 RAW     = "/root/test-library/TestCaseLibrary_Wistron.xlsx"
 REVIEW  = "/root/test-library/AI_Simplified_Review_20260828/TestCaseLibrary_Wistron_Simplified_AI_Review_20260828.xlsx"
 OUT     = "/srv/pa-manager-prod/data/tests.json"
+
+# T4 re-review sidecar + user additions (keyed by code; do NOT touch the workbooks)
+REVISED = "/root/test-library/REVISED_commands.csv"
+ADDITIONS = "/root/test-library/ADDITIONS.csv"
+
+# anti-template check
+STRICT_NO_TEMPLATE = True
 
 SHEET_LABELS = {
     "Functionality": "\u529f\u80fd\u6027",        # Functional
@@ -27,6 +34,47 @@ SHEET_LABELS = {
 
 def col_map(hdr):
     return {str(h).strip(): i for i, h in enumerate(hdr) if h is not None}
+
+REVISED_FIELDS = ("ai_can_execute", "ai_commands", "ai_packages_needed",
+                  "ai_logs_output", "risk")
+
+def load_overlay(path):
+    """Load a sidecar CSV (REVISED_commands.csv / ADDITIONS.csv) into
+    {code: {field: value}}. Empty/missing file -> {}."""
+    out = {}
+    if not path or not os.path.exists(path):
+        return out
+    with open(path, "r", encoding="utf-8-sig", newline="") as f:
+        rd = csv.DictReader(f)
+        for row in rd:
+            code = (row.get("code") or "").strip()
+            if not code:
+                continue
+            rec = {}
+            for k in REVISED_FIELDS:
+                rec[k] = (row.get(k) or "").strip()
+            out[code] = rec
+    return out
+
+def overlay_item(item, revised):
+    """Apply sidecar overlay (by code) onto an item dict. Keeps raw fields except
+    the T4-reviewed ones + risk. Returns the (possibly new) item."""
+    code = str(item.get("code", "")).strip()
+    rec = revised.get(code)
+    if rec:
+        fields = list(rec)
+        for k in fields:
+            v = rec[k]
+            if k == "risk" and v == "":
+                item.pop("risk", None)
+                continue
+            if v == "":
+                item.pop(k, None)
+            else:
+                item[k] = v
+    elif "risk" not in item:
+        item["risk"] = None
+    return item
 
 def main():
     wb_raw = openpyxl.load_workbook(RAW, read_only=True)
@@ -53,6 +101,8 @@ def main():
             }
 
     wb_raw.close()
+
+    revised = load_overlay(REVISED)
 
     library = {"sheets": {}, "total": 0, "generated_at": None}
     for sn in wb_rev.sheetnames:
@@ -81,6 +131,8 @@ def main():
                 "ai_commands": r[idx["AI_Commands"]] if "AI_Commands" in idx else None,
                 "ai_logs_output": r[idx["AI_Logs_Output"]] if "AI_Logs_Output" in idx else None,
             })
+            overlay_item(items[-1], revised)
+            items[-1].setdefault("risk", None)
         if items:
             library["sheets"][SHEET_LABELS.get(sn, sn)] = {
                 "name": sn,
@@ -89,6 +141,70 @@ def main():
                 "items": items,
             }
             library["total"] += len(items)
+
+    # Merge user's ADDITIONS.csv (new test cases) into the "Functionality" sheet.
+    additions = load_overlay(ADDITIONS)
+    if additions:
+        # ADDITIONS rows carry code + all T4 fields; derive raw fields from
+        # sub_function/test_set/items columns if present.
+        add_rows = []
+        with open(ADDITIONS, "r", encoding="utf-8-sig", newline="") as af:
+            for row in csv.DictReader(af):
+                code = (row.get("code") or "").strip()
+                if not code:
+                    continue
+                ai = {}
+                for k in REVISED_FIELDS:
+                    ai[k] = (row.get(k) or "").strip()
+                add_rows.append({
+                    "code": code,
+                    "sub_function": (row.get("sub_function") or "").strip() or None,
+                    "test_set": (row.get("test_set") or "").strip() or None,
+                    "items": (row.get("items") or "").strip() or None,
+                    "procedure": (row.get("procedure") or "").strip() or None,
+                    "criteria": (row.get("criteria") or "").strip() or None,
+                    "ai_can_execute": ai["ai_can_execute"],
+                    "ai_packages_needed": ai["ai_packages_needed"],
+                    "ai_commands": ai["ai_commands"],
+                    "ai_logs_output": ai["ai_logs_output"],
+                    "risk": ai["risk"] or None,
+                })
+        if add_rows:
+            fn_sheet = library["sheets"].setdefault(
+                SHEET_LABELS["Functionality"], {
+                    "name": "Functionality",
+                    "label": SHEET_LABELS["Functionality"],
+                    "count": 0,
+                    "items": [],
+                })
+            seen = {it["code"] for it in fn_sheet["items"]}
+            added = 0
+            for a in add_rows:
+                if a["code"] in seen:
+                    continue
+                fn_sheet["items"].append(a)
+                seen.add(a["code"])
+                library["total"] += 1
+                added += 1
+            fn_sheet["count"] = len(fn_sheet["items"])
+            if added:
+                print("ADDITIONS merged:", added, "new cases")
+
+    # --- anti-template sanity: any two cases with byte-identical commands? ---
+    if STRICT_NO_TEMPLATE:
+        import collections
+        counter = collections.Counter()
+        for s in library["sheets"].values():
+            for it in s.get("items", []):
+                c = str(it.get("ai_commands") or "").strip()
+                if c:
+                    counter[c] += 1
+        dups = {k: v for k, v in counter.items() if v > 1}
+        if dups:
+            print("WARNING: %d distinct command texts shared by >=2 cases (first shown):"
+                  % len(dups))
+            for k, v in list(dups.items())[:5]:
+                print("   x%d: %r" % (v, k[:120]))
 
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
     with open(OUT, "w", encoding="utf-8") as f:
