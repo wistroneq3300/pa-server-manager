@@ -2718,6 +2718,7 @@ function pageMachine() {
       <span class="spacer"></span>
       <button class="btn small" onclick="openTermDialog('${esc(name)}')">▶ Terminal</button>
       ${m.passive ? "" : `<button class="btn small" onclick="runDiagnose('${esc(name)}')">🩺 系統診斷</button>`}
+      <button class="btn small btn-good" onclick="openAssignTask('${esc(name)}')">📋 指派任務</button>
       <button class="btn small" onclick="machineRefresh()">⟳ 重新整理</button>
     </div>
     <div class="mach-grid">
@@ -2892,6 +2893,297 @@ async function machineAuxDetail(name) {
     setTimeout(() => alert(`${name} ${r.ok ? "AC cycle 已送出 ⚡" : "操作失敗：" + (r.info||"")}`), 250);
   } catch (e) { alert("操作失敗：" + e.message); }
 }
+
+/* =================== Assign Task (test library) ===================
+   Pick test cases from the library on a machine detail view, then produce
+   a "copy to OpenHands" instruction text (Traditional Chinese UI strings are
+   emitted as \uXXXX escapes so this block stays 7-bit clean). The target
+   machine os_ip/user come from the machine; password is a placeholder. */
+const _assignTask = {
+  name: null,
+  machine: null,
+  meta: [],
+  sheet: null,
+  items: [],
+  sel: new Set(),
+  q: "",
+  page: 0,
+  perPage: 100,
+};
+
+function assignTaskMach() {
+  return (_assignTask.machine) || machines.find(x => x.name === _assignTask.name) || null;
+}
+
+async function openAssignTask(name) {
+  _assignTask.name = name;
+  const m = machines.find(x => x.name === name) || {};
+  _assignTask.machine = m;
+  _assignTask.sheet = null;
+  _assignTask.items = [];
+  _assignTask.sel = new Set();
+  _assignTask.q = "";
+  _assignTask.page = 0;
+  try {
+    const meta = await api("/api/testlibrary/meta");
+    _assignTask.meta = meta.sheets || [];
+  } catch (e) {
+    _assignTask.meta = [];
+  }
+  // use a wider modal to hold the list
+  const dlg = dialogBackdrop();
+  const modal = dlg.querySelector(".modal");
+  if (modal) modal.style.width = "880px";
+  showDialog("\u2705 \u6307\u6d3e\u4efb\u52d9", `<div id="assign-task-body">${assignTaskMetaHtml()}</div>`,
+    [{ txt: "\u95dc\u9589", cls: "btn", fn: () => { if (modal) modal.style.width = ""; closeDialog(); } }]);
+}
+function assignTaskBack() {
+  _assignTask.sheet = null;
+  _assignTask.items = [];
+  _assignTask.sel = new Set();
+  _assignTask.q = "";
+  _assignTask.page = 0;
+  const dlg = dialogBackdrop();
+  const modal = dlg.querySelector(".modal");
+  if (modal) modal.style.width = "880px";
+  showDialog("\u2705 \u6307\u6d3e\u4efb\u52d9", `<div id="assign-task-body">${assignTaskMetaHtml()}</div>`,
+    [{ txt: "\u95dc\u9589", cls: "btn", fn: () => { if (modal) modal.style.width = ""; closeDialog(); } }]);
+}
+
+function assignTaskMetaHtml() {
+  const target = assignTaskMach();
+  const ip = target && target.os_ip ? target.os_ip : "\u2014";
+  const user = (target && target.os_user) || "root";
+  const head = `
+    <div style="margin-bottom:14px;padding:12px 14px;background:var(--bg-panel-2);border-radius:10px;font-size:13px">
+      <b>\u76ee\u6a19\u6a5f\u53f0\uff1a</b> ${esc(_assignTask.name)} &nbsp;·&nbsp; <b>OS\u200bIP\uff1a</b>
+      <span class="mono">${esc(ip)}</span> &nbsp;·&nbsp; <b>\u5e33\u865f\uff1a</b><span class="mono">${esc(user)}</span>
+    </div>`;
+  if (!_assignTask.meta.length) {
+    return head + `<div class="empty">\u6e2c\u8a66\u5eab\u5c1a\u672a\u8f09\u5165\uff08\u6c92\u6709 tests.json \u6216\u5f8c\u7aef\u932f\u8aa4\uff09</div>`;
+  }
+  const cards = _assignTask.meta.map(s => `
+    <div class="assign-sheet-card" onclick="assignTaskOpenSheet('${s.sheet}')">
+      <div class="assign-sheet-label">${esc(s.label)} <span class="hint">${esc(s.sheet)}</span></div>
+      <div class="assign-sheet-count"><b>${s.count}</b> \u500b\u6e2c\u9805</div>
+      <div class="assign-sheet-badges">
+        <span class="badge" style="color:var(--green)">\u53ef\u81ea\u52d5 ${s.auto}</span>
+        <span class="badge" style="color:var(--w-green)">\u90e8\u5206 ${s.partial}</span>
+        <span class="badge" style="color:var(--red)">\u4eba\u5de5 ${s.no}</span>
+      </div>
+    </div>`).join("");
+  return head + `<div class="assign-sheet-grid">${cards}</div>
+    <div style="margin-top:12px;font-size:12px;color:var(--text-faint)">\u9ede\u9078\u5206\u985e\u5f8c\uff0c\u53ef\u8907\u9078\u6e2c\u9805\u5f85\u767c\u9001</div>`;
+}
+
+const assignSheetCache = {};
+async function assignTaskOpenSheet(sheetName) {
+  let s;
+  if (assignSheetCache[sheetName]) {
+    s = assignSheetCache[sheetName];
+  } else {
+    try {
+      s = await api("/api/testlibrary?sheet=" + encodeURIComponent(sheetName));
+      assignSheetCache[sheetName] = s;
+    } catch (e) {
+      alert("\u8f09\u5165\u5931\u6557\uff1a" + e.message); return;
+    }
+  }
+  const m = (_assignTask.meta || []).find(x => x.sheet === sheetName) ||
+            { sheet: sheetName, label: sheetName, count: (s.items || []).length };
+  _assignTask.sheet = m;
+  _assignTask.items = (s && s.items) || [];
+  _assignTask.page = 0;
+  _assignTask.q = "";
+  const dlg = dialogBackdrop();
+  const modal = dlg.querySelector(".modal");
+  if (modal) modal.style.width = "940px";
+  showDialog(`\u2705 \u6307\u6d3e\u4efb\u52d9 \u00b7 ${esc(m.label)}`, `<div id="assign-task-body">${assignTaskListHtml()}</div>`,
+    [
+      { txt: "\u25c0 \u56de\u5206\u985e", cls: "btn", fn: () => assignTaskBack() },
+      { txt: "\u95dc\u9589", cls: "btn", fn: () => { if (modal) modal.style.width = ""; closeDialog(); } },
+      { txt: `\ud83d\udccb \u8907\u88fd\u6e2c\u9805\u6539\u70ba\u6307\u4ee4 (${_assignTask.sel.size})`,
+        cls: "btn-primary primary", fn: () => assignTaskCopy() },
+    ]);
+}
+
+function assignTaskListHtml() {
+  const mm = _assignTask.sheet || {};
+  const rows = _assignTask.items;
+  const q = _assignTask.q.trim().toLowerCase();
+  let filt = q ? rows.filter(r =>
+      String(r.code||"").toLowerCase().includes(q) ||
+      String(r.items||"").toLowerCase().includes(q) ||
+      String(r.test_set||"").toLowerCase().includes(q)
+    ) : rows;
+  const totalPages = Math.max(1, Math.ceil(filt.length / _assignTask.perPage));
+  if (_assignTask.page >= totalPages) _assignTask.page = totalPages - 1;
+  const pg = _assignTask.page;
+  const slice = filt.slice(pg * _assignTask.perPage, (pg + 1) * _assignTask.perPage);
+  const filterMeta = filt.length !== _assignTask.items.length;
+  const selCount = _assignTask.sel.size;
+
+  const rowsHtml = slice.map(r => assignTaskRow(r)).join("");
+  const toolbar = `
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px">
+      <input id="assign-q" class="assign-search" type="text" placeholder="\u641c\u5c0b code / items / test set"
+        value="${esc(_assignTask.q)}" oninput="assignTaskSearch()" />
+      <button class="btn small" onclick="assignTaskSelAll()">\u2713 \u5168\u9078\u672c\u9801</button>
+      <button class="btn small" onclick="assignTaskSelClear()">\u7a7a \u6e05\u7a7a</button>
+      <span class="hint">\u5df2\u9078 <b id="assign-selcount">${selCount}</b> /\u5171 ${_assignTask.items.length}</span>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;font-size:12px">
+      <button class="btn small" ${pg<=0?"disabled":""} onclick="assignTaskPage(-1)">\u2039 \u4e0a\u4e00\u9801</button>
+      <span class="hint">\u7b2c ${pg+1} / ${totalPages} \u9801 \u00b7 ${filt.length} \u9805${filterMeta?` \u00b7 \u641c\u5c0b: ${esc(_assignTask.q)}`:""}</span>
+      <button class="btn small" ${pg>=totalPages-1?"disabled":""} onclick="assignTaskPage(1)">\u4e0b\u4e00\u9801 \u203a</button>
+    </div>`;
+
+  return toolbar + `<div class="assign-rows">${rowsHtml || `<div class="empty">\u6c92\u6709\u76f8\u7b26\u6e2c\u9805</div>`}</div>`;
+}
+
+function assignTaskRow(r) {
+  const checked = _assignTask.sel.has(r.code) ? "checked" : "";
+  const can = String(r.ai_can_execute || "NO").toUpperCase();
+  const badge = can === "YES" ? `<span class="badge green">YES</span>`
+    : can === "PARTIAL" ? `<span class="badge" style="color:var(--w-green)">PARTIAL</span>`
+    : `<span class="badge" style="color:var(--red)">NO</span>`;
+  const pkg = r.ai_packages_needed ? `<span class="hint">\ud83d\udce6 ${esc(r.ai_packages_needed)}</span>` : "";
+  return `
+    <label class="assign-row">
+      <input type="checkbox" ${checked} onchange="assignTaskToggle('${esc(r.code)}', this.checked)" />
+      <div class="assign-row-body">
+        <div class="assign-row-title">${badge} <span class="mono">${esc(r.code)}</span>
+          <span class="assign-items">${esc(r.items)}</span></div>
+        <div class="assign-row-sub">${esc(r.test_set || "")} ${pkg}</div>
+        <div class="assign-row-cmd"><span class="hint">\u547d\u4ee4\uff1a</span>${esc((r.ai_commands||"").split("\\n").slice(0,3).join(" "))}</div>
+      </div>
+    </label>`;
+}
+
+function assignTaskSearch() {
+  _assignTask.q = ($("assign-q").value || "");
+  _assignTask.page = 0;
+  const dlg = dialogBackdrop();
+  const modal = dlg.querySelector(".modal");
+  if (modal) modal.style.width = "940px";
+  showDialog(`\u2705 \u6307\u6d3e\u4efb\u52d9 \u00b7 ${esc(_assignTask.sheet ? _assignTask.sheet.label : "")}`, `<div id="assign-task-body">${assignTaskListHtml()}</div>`,
+    [
+      { txt: "\u25c0 \u56de\u5206\u985e", cls: "btn", fn: () => assignTaskBack() },
+      { txt: "\u95dc\u9589", cls: "btn", fn: () => { if (modal) modal.style.width = ""; closeDialog(); } },
+      { txt: `\ud83d\udccb \u8907\u88fd\u6e2c\u9805\u6539\u70ba\u6307\u4ee4 (${_assignTask.sel.size})`,
+        cls: "btn-primary primary", fn: () => assignTaskCopy() },
+    ]);
+}
+function assignTaskPage(dir) {
+  _assignTask.page += dir;
+  const dlg = dialogBackdrop();
+  const modal = dlg.querySelector(".modal");
+  if (modal) modal.style.width = "940px";
+  showDialog(`\u2705 \u6307\u6d3e\u4efb\u52d9 \u00b7 ${esc(_assignTask.sheet ? _assignTask.sheet.label : "")}`, `<div id="assign-task-body">${assignTaskListHtml()}</div>`, [
+    { txt: "\u25c0 \u56de\u5206\u985e", cls: "btn", fn: () => assignTaskBack() },
+    { txt: "\u95dc\u9589", cls: "btn", fn: () => { if (modal) modal.style.width = ""; closeDialog(); } },
+    { txt: `\ud83d\udccb \u8907\u88fd\u6e2c\u9805\u6539\u70ba\u6307\u4ee4 (${_assignTask.sel.size})`, cls: "btn-primary primary", fn: () => assignTaskCopy() },
+  ]);
+}
+function assignTaskToggle(code, on) {
+  if (on) _assignTask.sel.add(code); else _assignTask.sel.delete(code);
+  const c = $("assign-selcount");
+  if (c) c.textContent = _assignTask.sel.size;
+}
+function assignTaskSelAll() {
+  const q = _assignTask.q.trim().toLowerCase();
+  const rows = _assignTask.items;
+  let filt = q ? rows.filter(r => String(r.code||"").toLowerCase().includes(q) ||
+      String(r.items||"").toLowerCase().includes(q) || String(r.test_set||"").toLowerCase().includes(q)) : rows;
+  const pg = _assignTask.page;
+  const slice = filt.slice(pg * _assignTask.perPage, (pg + 1) * _assignTask.perPage);
+  slice.forEach(r => _assignTask.sel.add(r.code));
+  assignTaskReRender();
+}
+function assignTaskSelClear() {
+  _assignTask.sel.clear();
+  assignTaskReRender();
+}
+function assignTaskReRender() {
+  const dlg = dialogBackdrop();
+  const modal = dlg.querySelector(".modal");
+  if (modal) modal.style.width = "940px";
+  showDialog(`\u2705 \u6307\u6d3e\u4efb\u52d9 \u00b7 ${esc(_assignTask.sheet ? _assignTask.sheet.label : "")}`, `<div id="assign-task-body">${assignTaskListHtml()}</div>`, [
+    { txt: "\u25c0 \u56de\u5206\u985e", cls: "btn", fn: () => assignTaskBack() },
+    { txt: "\u95dc\u9589", cls: "btn", fn: () => { if (modal) modal.style.width = ""; closeDialog(); } },
+    { txt: `\ud83d\udccb \u8907\u88fd\u6e2c\u9805\u6539\u70ba\u6307\u4ee4 (${_assignTask.sel.size})`, cls: "btn-primary primary", fn: () => assignTaskCopy() },
+  ]);
+}
+
+async function assignTaskCopy() {
+  const sel = _assignTask.sel;
+  if (!sel.size) { alert("\u8acb\u5148\u52fe\u9078\u81f3\u5c11\u4e00\u9805\u6e2c\u9805\uff01"); return; }
+  const mm = _assignTask.sheet || {};
+  const m = assignTaskMach();
+  const ip = (m && m.os_ip) || "<OS_IP>";
+  const user = (m && m.os_user) || "root";
+  const pass = (m && m.os_pass && m.os_pass !== "****") ? m.os_pass : "<PASSWORD>";
+  const sname = mm.sheet || "";
+  const items = _assignTask.items;
+  const chosen = items.filter(r => sel.has(r.code));
+  if (!chosen.length) { alert("\u6e2c\u9805\u6e05\u55ae\u5df2\u5207\u63db\uff0c\u8acb\u91cd\u65b0\u52fe\u9078"); return; }
+
+  const lines = [];
+  lines.push(`\u76ee\u6a19\u6a5f\u53f0\uff1a${mm.label} \u00b7 ${sname} \u00b7 ${ip} \u00b7 ${user}`);
+  lines.push(`\u8acb\u5728 ${ip} \u9019\u53f0 ${user} \u4e3b\u6a5f\u4e0a\u57f7\u884c\u4ee5\u4e0b\u6e2c\u9805\uff08\u60a8\u8907\u88fd\u5f8c\u8cbc\u4e0a\u56de\u5230 OpenHands \u804a\u5929\uff0c\u8b93\u6211 SSH \u4e0a\u53bb\u5b89\u88dd/\u57f7\u884c/\u6536\u96c6\u8b49\u64da\uff1b\u5f97\u5931\u5224\u5b9a\u7531\u60a8\uff09\uff1a`);
+  chosen.forEach((r, i) => {
+    const can = String(r.ai_can_execute || "NO").toUpperCase();
+    const cmdRaw = (r.ai_commands || "").trim();
+    const tname = r.items ? String(r.items) : r.code;
+    const pkg = r.ai_packages_needed ? `\uff08\u5305\uff1a${r.ai_packages_needed}\uff09` : "";
+    if (can === "YES") {
+      lines.push(`${i + 1}. \ud83d\udfe2 ${tname} ${pkg}`);
+      if (cmdRaw && !cmdRaw.startsWith("\u2014") && cmdRaw.indexOf("<CMD>") === -1 && cmdRaw.indexOf("sshpass") === -1) {
+        lines.push(`    \u547d\u4ee4\uff1a${cmdRaw.split("\\n").join(" ")}`);
+      }
+    } else if (can === "PARTIAL") {
+      lines.push(`${i + 1}. \ud83d\udfe0 ${tname} ${pkg}`);
+      lines.push(`    \u90e8\u5206\u53ef\u81ea\u52d5\uff0c\u4f46\u9700\u4eba\u5de5/\u786c\u9ad4\u74b0\u5883\uff08\u6eab\u5ea6\u3001\u96fb\u58d3\u3001AC cycle\u3001\u63d2\u62d4\u7b49\uff09\uff0c\u8acb\u5148\u78ba\u8a8d\u518d\u57f7\u884c\uff1a${(r.ai_commands||"").split("\\n").slice(0,2).join(" ")}`);
+    } else {
+      lines.push(`${i + 1}. \u26ab ${tname} ${pkg}`);
+      lines.push(`    \u7121\u6cd5\u81ea\u52d5\u57f7\u884c\uff08\u9700\u4eba\u5de5\u64cd\u4f5c\u6216\u5371\u96aa\u64cd\u4f5c\uff09\uff0c\u53ea\u63d0\u4f9b\u53c3\u8003\uff0c\u4e0d\u5f37\u884c\u57f7\u884c\uff1a${(r.ai_commands||"").split("\\n").slice(0,2).join(" ")}`);
+    }
+    if (r.procedure) { const p = String(r.procedure).replace(/[\\n\\r]+/g, " ").trim(); if (p) lines.push(`    [\u6d41\u7a0b]\uff1a${p.slice(0,160)}`); }
+    if (r.criteria) { const c = String(r.criteria).replace(/[\\n\\r]+/g, " ").trim(); if (c) lines.push(`    [\u6a19\u6e96]\uff1a${c.slice(0,160)}`); }
+  });
+  const text = lines.join("\n");
+
+  const ok = await assignTaskClip(text);
+  if (ok) {
+    alert("\u5df2\u8907\u88fd\u5230\u526a\u8cbc\u7c3f\u3002\u8acb\u5c07\u4ee5\u4e0a\u6587\u5b57\u8cbc\u4e0a\u56de\u5230 OpenHands \u804a\u5929\uff1a\n\n" + text);
+  } else {
+    // fallback: show a textarea for manual copy
+    const dlg = dialogBackdrop();
+    const modal = dlg.querySelector(".modal");
+    if (modal) modal.style.width = "940px";
+    showDialog("\u5f85\u8907\u88fd\u7684\u6307\u4ee4\u6587\u5b57", `<textarea id="assign-copy-text" readonly class="assign-raw" style="width:100%;height:46vh;font-family:monospace;font-size:12px">${esc(text)}</textarea>`, [
+      { txt: "\u95dc\u9589", cls: "btn", fn: () => { if (modal) modal.style.width = ""; closeDialog(); } },
+      { txt: "\ud83d\udccb \u8907\u88fd", cls: "btn-primary primary", fn: () => { const t = $("assign-copy-text"); t.select(); document.execCommand("copy"); alert("\u5df2\u8907\u88fd (fallback)"); } },
+    ]);
+  }
+}
+
+async function assignTaskClip(text) {
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+    const ta = document.createElement("textarea");
+    ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
+    document.body.appendChild(ta); ta.select();
+    const ok = document.execCommand && document.execCommand("copy");
+    document.body.removeChild(ta);
+    return !!ok;
+  } catch (e) { return false; }
+}
+
+
 // [AI AGENT 已停用] /* ---- 機器 AI Agent（單機）----
 // [AI AGENT 已停用]    安全核心：LLM 永遠不直接執行動作；它只能提出「提案」，由使用者確認後才執行。
 // [AI AGENT 已停用]    對話狀態存於閉包（每次重開 modal 重來一段 session）。 */

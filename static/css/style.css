@@ -1083,3 +1083,23 @@ tr.mach-over td{box-shadow:inset 0 2px 0 0 #4aa8ff}
 .dl-label{flex:1}
 .dl-n{font-weight:700;color:var(--text);font-variant-numeric:tabular-nums}
 .dl-pct{font-weight:400;color:var(--text-faint);font-size:10.5px;margin-left:3px}
+
+/* ---- Assign Task (test library) ---- */
+.assign-sheet-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px}
+.assign-sheet-card{border:1px solid var(--border);border-radius:12px;padding:14px 16px;cursor:pointer;background:var(--bg-panel);transition:border-color .15s, box-shadow .15s}
+.assign-sheet-card:hover{border-color:var(--w-green);box-shadow:var(--shadow-lg)}
+.assign-sheet-label{font-size:14px;font-weight:700;display:flex;align-items:center;justify-content:space-between;gap:8px}
+.assign-sheet-count{font-size:12px;color:var(--text-dim);margin:6px 0;font-variant-numeric:tabular-nums}
+.assign-sheet-badges{display:flex;gap:6px;flex-wrap:wrap}
+.assign-search{min-width:240px;padding:7px 11px;border:1px solid var(--border);border-radius:8px;background:var(--bg-panel);color:var(--text);font-size:13px;outline:none}
+.assign-search:focus{border-color:var(--w-green)}
+.assign-rows{display:flex;flex-direction:column;gap:6px;max-height:52vh;overflow-y:auto;padding-right:4px}
+.assign-row{display:flex;align-items:flex-start;gap:10px;padding:9px 12px;border:1px solid var(--border);border-radius:9px;background:var(--bg-panel);cursor:pointer}
+.assign-row:hover{border-color:var(--w-green)}
+.assign-row input[type=checkbox]{margin-top:3px;accent-color:var(--w-green);transform:scale(1.15)}
+.assign-row-body{flex:1;min-width:0}
+.assign-row-title{font-size:12.5px;font-weight:600;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.assign-items{color:var(--text);font-weight:500}
+.assign-row-sub{font-size:11.5px;color:var(--text-faint);margin-top:3px;display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.assign-row-cmd{font-size:11px;color:var(--text-dim);margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.assign-raw{resize:vertical;padding:10px;background:var(--bg-panel);border:1px solid var(--border);border-radius:8px;color:var(--text)}

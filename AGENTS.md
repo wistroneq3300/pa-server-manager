@@ -386,3 +386,82 @@ SP-X 的 KVM 是用 AMI 私有資料封包（頭 `23 00 00 00 06 00 00 02 00` �
 ## 文件
 - docs/spx-kvm-auto-login-evaluation.md（機制評估/決策）
 - docs/runbook-spx-session-cap-15000.md、docs/rollback-spx-kvm-broker.md、docs/regression-spx-kvm-broker.md、docs/secret-store-deployment.md
+
+## 方案C：pa-manager GPU 伺服器半自動測試執行器（2026-09 啟動，Assign-task UI 完成）
+
+
+
+## [AI AGENT] Option C Step 2 -- RE-REVIEW the test library (REQUIRED NEXT TASK)
+## [AI AGENT] Option C Step 2 -- RE-REVIEW the entire test library (REQUIRED NEXT TASK)
+## Read THIS section first. It overrides any earlier notes about test review.
+
+> WHY: The current tests.json has 2400+ cases whose "AI_Commands" is a COMMON TEMPLATE
+> (a fixed sshpass+ipmitool comment block), not a per-case real command. 696 more cases
+> have "-" (no command). 0 cases have a real custom command yet. This is what the user
+> means by "not done".
+
+> GOAL of Step 2: make EVERY test case give a UNIQUE, directly executable command (or
+> an explicit, specific reason it cannot be automated). After re-review, regenerate
+> /srv/pa-manager-prod/data/tests.json with the same pipeline (no app-code change).
+
+> READ THESE FILES FIRST (source of truth):
+>   - /root/test-library/AI_TESTCASE_PROJECT_CONTEXT.md  (the plan, option C)
+>   - /root/sheng/manager/pa_manager/scripts/build_testlib_json.py  (build pipeline)
+>   - /srv/pa-manager-prod/data/tests.json  (current output, what to replace)
+
+
+## HOW to re-review (STRICT, case-by-case -- do NOT batch-template)
+
+For EACH of the 3112 cases (group: 2416 sshpass-template + 696 "-" + recheck the
+handful that already look custom), do this per case:
+
+(1) READ the cases "procedure" AND "criteria" fully. They are per-case and differ.
+(2) DECIDE ai_can_execute. One of YES / PARTIAL / NO only.
+     - YES  : agent can run it by SSH non-interactively, safe, no physical/destructive step.
+     - PARTIAL: some steps are runnable (info/collect/measure) but pass/fail still needs
+                human or the command needs a second host / special env the agent sets up.
+     - NO   : physically impossible for an unattended SSH agent (AC cycle, insert/remove
+              module, visual/mechanical inspect, requires a person at the machine).
+      DO NOT inflate YES. If it needs a human physically present, it is NO.
+(3) WRITE ai_commands as a UNIQUE real command for THIS case, wrapped for the DUT:
+     - SAFE/OS/runtime  : `sshpass -p "$DUT_PASS" ssh -o StrictHostKeyChecking=no $DUT_USER@$DUT_IP "<CMD>"`
+       and replace <CMD> with the actual tool+args for THIS case (e.g. `nvidia-smi`, `lspci | grep -i nvidia`, ...).
+     - BMC/IPMI        : `ipmitool raw 0x..` specific to THIS case (not a generic block).
+     - NEVER copy the old shared comment block as the command. The command must target
+       the one item named in "items".
+     - If ai_can_execute=NO, ai_commands may be replaced by an explicit 1-line reason,
+       e.g. `-- not runnable by agent: <specific physical reason>` (no fake ipmitool).
+(4) WRITE ai_packages_needed = the exact packages to install, or "none"/empty if bundled.
+(5) WRITE ai_logs_output = what evidence to capture and return (log path, command stdout, sensor read).
+     State clearly what the agent prints back and what the USER must judge.
+(6) Add a RISK line when relevant (prefix RISK:):
+     - requires setting env temp/voltage first, then run <cmd>
+     - deletes/removes GPU driver = HIGH danger, give command only, NEVER auto-run
+     - AC cycle / power off-on: needs a person at the machine (NO)
+     - blanking / physical insert-remove: human only (NO)
+     - MLPerf needs a container; NCCL/GDS needs multiple GPUs; iperf needs a 2nd host
+     - any destructive / data-loss / hardware-affecting step must be flagged RISK and never auto-run
+
+## WHERE to write the re-review
+Do NOT edit the original Excels. Write the per-case review into a NEW output
+table/file and feed it into the build pipeline so /srv/pa-manager-prod/data/tests.json
+is regenerated. Suggested: make scripts/build_testlib_json.py read a new sidecar
+file (e.g. /root/test-library/REVISED_commands.csv or a JSON map keyed by "code")
+and overlay ai_can_execute/ai_commands/ai_packages/ai_logs from it. Keep the
+original workbook untouched.
+
+## CJK SAFETY (HARD RULE, do not violate)
+- YOU (the LLM) must not type raw CJK into code. Write new CJK strings as \\uXXXX
+  escapes only, or reuse the byte source the user typed (/root/sheng/manager/pa_manager/123.txt).
+- The re-review NOTES may be in English (recommended, safe) or reuse user-provided CJK bytes.
+- After changes verify: added source regions have 0 raw-CJK lines and 0 cyrillic (0xD0-0xD2) bytes.
+  Run: python3 -c "d=open(<file>,""rb"").read();\n  print(sum(1 for i in range(len(d)-1) if 0xD0<=d[i]<=0xD2 and 0x80<=d[i+1]<=0xBF))"  -> must print 0.
+
+## DONE = (all of these)
+- every case has either a unique executable command OR an explicit human/physical reason (NO).
+- no case still uses the old shared sshpass template comment block as its command.
+- tests.json regenerated and loadable via GET http://127.0.0.1:6969/api/testlibrary (works).
+- sample-output sanity: pick ~5 cases across sheets (BIOS/BMC/GPU/Mechanical/Perf) and
+  show the user the new per-case command for approval BEFORE grinding through all 3112.
+  (The user explicitly wants format approval first; do NOT batch the whole library blind.)
+

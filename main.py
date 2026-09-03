@@ -832,6 +832,57 @@ def delete_machine(name: str):
     return {"ok": True}
 
 
+# ---- 測試庫 (test library) ----
+_TESTLIB_FILE = os.path.join(_data_dir(), "tests.json")
+_testlib_cache = {"mtime": None, "data": None}
+
+
+def _load_testlib():
+    try:
+        mt = os.path.getmtime(_TESTLIB_FILE)
+        if _testlib_cache["mtime"] == mt and _testlib_cache["data"] is not None:
+            return _testlib_cache["data"]
+        with open(_TESTLIB_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        _testlib_cache["mtime"] = mt
+        _testlib_cache["data"] = data
+        return data
+    except Exception as e:
+        print("\u8f09\u5165 tests.json \u5931\u6557\uff1a", e)
+        return None
+
+
+@app.get("/api/testlibrary")
+def api_testlibrary(sheet: str = ""):
+    """\u6e2c\u8a66\u5eab\u8cc7\u6599\u3002 sheet= \u53ef\u6307\u5b9a\u4e2d\u6587\u6a19\u7c64\u6216\u539f\u59cb sheet \u540d\u3002"""
+    data = _load_testlib()
+    if data is None:
+        raise HTTPException(404, "\u6e2c\u8a66\u5eab\u5c1a\u672a\u7522\u751f\uff08\u7f3a\u5c11 tests.json\uff09")
+    if sheet:
+        for label, s in data.get("sheets", {}).items():
+            if label == sheet or s.get("name") == sheet:
+                return s
+        raise HTTPException(404, f"\u627e\u4e0d\u5230\u6e2c\u9805\u5206\u985e: {sheet}")
+    return data
+
+
+@app.get("/api/testlibrary/meta")
+def api_testlibrary_meta():
+    """\u6e2c\u8a66\u5eab\u5206\u985e\u5217\u8868\uff08label + \u539f\u59cb sheet \u540d + \u7b46\u6578 + YES/PARTIAL/NO \u7d71\u8a08\uff09\u3002"""
+    data = _load_testlib()
+    if data is None:
+        raise HTTPException(404, "\u6e2c\u8a66\u5eab\u5c1a\u672a\u7522\u751f\uff08\u7f3a\u5c11 tests.json\uff09")
+    out = []
+    for label, s in data.get("sheets", {}).items():
+        cnt = {"YES": 0, "PARTIAL": 0, "NO": 0}
+        for it in s.get("items", []):
+            k = (it.get("ai_can_execute") or "NO").upper()
+            cnt[k if k in cnt else "NO"] += 1
+        out.append({"label": label, "sheet": s.get("name"), "count": s.get("count"),
+                    "auto": cnt["YES"], "partial": cnt["PARTIAL"], "no": cnt["NO"]})
+    return {"total": data.get("total", 0), "sheets": out}
+
+
 # ---- 單機 / 整櫃 控制與詳細資訊 ----
 # OS 系統資訊「最後一次成功抓取」的快取（關機時回給前端當歷史值）
 _os_info_cache = {}
