@@ -406,7 +406,8 @@ SP-X 的 KVM 是用 AMI 私有資料封包（頭 `23 00 00 00 06 00 00 02 00` �
 
 > READ THESE FILES FIRST (source of truth):
 >   - /root/test-library/AI_TESTCASE_PROJECT_CONTEXT.md  (the plan, option C)
->   - LATEST session handoff: /root/test-library/SESSION_HANDOFF_ASSIGN_TASK_20260903.md (read FIRST; it is the current progress + the strict T4 spec the user will paste into a fresh chat)
+>   - LATEST session handoff: /root/test-library/SESSION_HANDOFF_T4_REVIEW_START.md (read FIRST; approved 5-case sample format is LOCKED + file locations)
+>   - PRIOR handoff (strict T4 spec): /root/test-library/SESSION_HANDOFF_ASSIGN_TASK_20260903.md
 >   - /root/sheng/manager/pa_manager/scripts/build_testlib_json.py  (build pipeline)
 >   - /srv/pa-manager-prod/data/tests.json  (current output, what to replace)
 >   - ORIGINAL Excel: /root/test-library/TestCaseLibrary_Wistron.xlsx (do NOT edit)
