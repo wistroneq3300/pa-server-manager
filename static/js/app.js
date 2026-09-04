@@ -3128,28 +3128,64 @@ async function assignTaskCopy() {
   const chosen = items.filter(r => sel.has(r.code));
   if (!chosen.length) { alert("\u6e2c\u9805\u6e05\u55ae\u5df2\u5207\u63db\uff0c\u8acb\u91cd\u65b0\u52fe\u9078"); return; }
 
+  // \u6e05\u7406\u539f\u59cb\u8cc4\u6599\u91cc\u591a\u990a\u7684\u7a7a\u884c\uff082 \u500b\u4ee5\u4e0a\u9023\u7e8c blank line \u5168\u7e2e\u6210 1 \u500b\uff09\uff0c\u7559\u4e0b\u6b63\u5e38\u6bb5\u843d\u9593\u8ddd
+  const collapseBlank = (s) => String(s || "").replace(/\n{3,}/g, "\n\n");
   const lines = [];
   lines.push(`\u76ee\u6a19\u6a5f\u53f0\uff1a${mm.label} \u00b7 ${sname} \u00b7 ${ip} \u00b7 ${user}`);
   lines.push(`\u8acb\u5728 ${ip} \u9019\u53f0 ${user} \u4e3b\u6a5f\u4e0a\u57f7\u884c\u4ee5\u4e0b\u6e2c\u9805\uff08\u60a8\u8907\u88fd\u5f8c\u8cbc\u4e0a\u56de\u5230 OpenHands \u804a\u5929\uff0c\u8b93\u6211 SSH \u4e0a\u53bb\u5b89\u88dd/\u57f7\u884c/\u6536\u96c6\u8b49\u64da\uff1b\u5f97\u5931\u5224\u5b9a\u7531\u60a8\uff09\uff1a`);
   chosen.forEach((r, i) => {
     const can = String(r.ai_can_execute || "NO").toUpperCase();
-    const cmdRaw = (r.ai_commands || "").trim();
+    const cmdRaw = collapseBlank(r.ai_commands).trim();
     const tname = r.items ? String(r.items) : r.code;
     const pkg = r.ai_packages_needed ? `\uff08\u5305\uff1a${r.ai_packages_needed}\uff09` : "";
-    if (can === "YES") {
-      lines.push(`${i + 1}. \ud83d\udfe2 ${tname} ${pkg}`);
-      if (cmdRaw && !cmdRaw.startsWith("\u2014") && cmdRaw.indexOf("<CMD>") === -1 && cmdRaw.indexOf("sshpass") === -1) {
-        lines.push(`    \u547d\u4ee4\uff1a\n${cmdRaw.trim()}`);
-      }
-    } else if (can === "PARTIAL") {
-      lines.push(`${i + 1}. \ud83d\udfe0 ${tname} ${pkg}`);
-      lines.push(`    \u90e8\u5206\u53ef\u81ea\u52d5\uff0c\u4f46\u9700\u78ba\u8a8d\u786c\u9ad4\u74b0\u5883\/\u6307\u5b9a\u6e2c\u8a66\u76ee\u6a19\uff0c\u8acb\u5148\u78ba\u8a8d\u518d\u57f7\u884c\uff1a\n${cmdRaw.trim()}`);
-    } else {
-      lines.push(`${i + 1}. \u26ab ${tname} ${pkg}`);
-      lines.push(`    \u7121\u6cd5\u81ea\u52d5\u57f7\u884c\uff08\u9700\u4eba\u5de5\u64cd\u4f5c\u6216\u5371\u96aa\u64cd\u4f5c\uff09\uff0c\u53ea\u63d0\u4f9b\u53c3\u8003\uff0c\u4e0d\u5f37\u884c\u57f7\u884c\uff1a\n${cmdRaw.trim()}`);
+    const SEP = "   " + "\u2500".repeat(64);
+    const box = (s) => {
+      const L = s.split('\n');
+      const w = Math.max(40, ...L.map(l => l.length)) + 1;
+      const out = ["   \u250c" + "\u2500".repeat(w)];
+      L.forEach(l => out.push("   \u2502 " + l));
+      out.push("   \u2514" + "\u2500".repeat(w));
+      return out.join('\n');
+    };
+    const indent = (s, n) => s.split('\n').map(l => " ".repeat(n) + (l || "")).join('\n');
+
+    lines.push(`${i + 1}. ${can === "YES" ? "\ud83d\udfe2" : can === "PARTIAL" ? "\ud83d\udfe0" : "\u26ab"} ${tname}`);
+    if (pkg) lines.push(`   ${pkg}`);
+    const note = can === "YES"
+      ? "\u53ef\u81ea\u52d5\u57f7\u884c\u3002"
+      : can === "PARTIAL"
+        ? "\u90e8\u5206\u53ef\u81ea\u52d5\uff0c\u4f46\u9700\u78ba\u8a8d\u786c\u9ad4\u74b0\u5883\/\u6307\u5b9a\u6e2c\u8a66\u76ee\u6a19\uff0c\u8acb\u5148\u78ba\u8a8d\u518d\u57f7\u884c\u3002"
+        : "\u7121\u6cd5\u81ea\u52d5\u57f7\u884c\uff08\u9700\u4eba\u5de5\u64cd\u4f5c\u6216\u5371\u96aa\u64cd\u4f5c\uff09\uff0c\u53ea\u63d0\u4f9b\u53c3\u8003\u3002";
+    lines.push(`   ${note}`);
+
+    const cmdValid = can !== "NO" && cmdRaw
+      && !cmdRaw.startsWith("\u2014") && cmdRaw.indexOf("<CMD>") === -1 && cmdRaw.indexOf("sshpass") === -1;
+    if (cmdValid) {
+      lines.push(SEP);
+      lines.push(`   \u25b6 \u672c\u6b21\u8981\u8dd1\u7684\u6307\u4ee4\uff08AI \u5df2\u6574\u7406\uff0c\u53ef\u76f4\u63a5\u8cbc\u4e0a shell \u57f7\u884c\uff09\uff1a`);
+      lines.push(box(cmdRaw));
+    } else if (cmdRaw) {
+      lines.push(SEP);
+      lines.push(`   \u25b6 \u53c3\u8003\u6307\u4ee4\uff08\u7121\u6cd5\u76f4\u63a5\u57f7\u884c\uff0c\u4ec5\u4f9b\u53c3\u8003\uff09\uff1a`);
+      lines.push(box(cmdRaw));
     }
-    if (r.procedure) { const p = String(r.procedure).trim(); if (p) lines.push(`    [\u6d41\u7a0b]\uff1a\n${p}`); }
-    if (r.criteria) { const c = String(r.criteria).trim(); if (c) lines.push(`    [\u6a19\u6e96]\uff1a\n${c}`); }
+
+    const procRaw = collapseBlank(r.procedure).trim();
+    if (procRaw) {
+      const hasCmd = !!cmdValid;
+      lines.push(SEP);
+      lines.push(`   \ud83d\udd0e \u539f\u59cb\u624b\u4f5c\u696d\u55ae\uff08${hasCmd ? "\u7559\u4f5c\u53c3\u7167\uff0c\u975e\u672c\u6b21\u8981\u8dd1\u7684\u6307\u4ee4" : "\u9700\u4eba\u5de5\u64cd\u4f5c"}\uff09\uff1a`);
+      lines.push(indent(procRaw, 6));
+    }
+
+    const critRaw = collapseBlank(r.criteria).trim();
+    if (critRaw) {
+      lines.push(SEP);
+      lines.push(`   \u2705 \u5224\u5b9a\u6a19\u6e96\uff1a`);
+      lines.push(indent(critRaw, 6));
+    }
+
+    lines.push("");
   });
   const text = lines.join("\n");
   const summary = chosen.length + "\u500b\u6e2c\u9805" + " \u00b7 " + (mm.label || sname);
