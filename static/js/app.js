@@ -3139,33 +3139,26 @@ async function assignTaskCopy() {
     if (can === "YES") {
       lines.push(`${i + 1}. \ud83d\udfe2 ${tname} ${pkg}`);
       if (cmdRaw && !cmdRaw.startsWith("\u2014") && cmdRaw.indexOf("<CMD>") === -1 && cmdRaw.indexOf("sshpass") === -1) {
-        lines.push(`    \u547d\u4ee4\uff1a${cmdRaw.split("\\n").join(" ")}`);
+        lines.push(`    \u547d\u4ee4\uff1a${cmdRaw.split(/\s+/).join(" ")}`);
       }
     } else if (can === "PARTIAL") {
       lines.push(`${i + 1}. \ud83d\udfe0 ${tname} ${pkg}`);
-      lines.push(`    \u90e8\u5206\u53ef\u81ea\u52d5\uff0c\u4f46\u9700\u4eba\u5de5/\u786c\u9ad4\u74b0\u5883\uff08\u6eab\u5ea6\u3001\u96fb\u58d3\u3001AC cycle\u3001\u63d2\u62d4\u7b49\uff09\uff0c\u8acb\u5148\u78ba\u8a8d\u518d\u57f7\u884c\uff1a${(r.ai_commands||"").split("\\n").slice(0,2).join(" ")}`);
+      lines.push(`    \u90e8\u5206\u53ef\u81ea\u52d5\uff0c\u4f46\u9700\u4eba\u5de5/\u786c\u9ad4\u74b0\u5883\uff08\u6eab\u5ea6\u3001\u96fb\u58d3\u3001AC cycle\u3001\u63d2\u62d4\u7b49\uff09\uff0c\u8acb\u5148\u78ba\u8a8d\u518d\u57f7\u884c\uff1a${cmdRaw.split(/\s+/).join(" ")}`);
     } else {
       lines.push(`${i + 1}. \u26ab ${tname} ${pkg}`);
-      lines.push(`    \u7121\u6cd5\u81ea\u52d5\u57f7\u884c\uff08\u9700\u4eba\u5de5\u64cd\u4f5c\u6216\u5371\u96aa\u64cd\u4f5c\uff09\uff0c\u53ea\u63d0\u4f9b\u53c3\u8003\uff0c\u4e0d\u5f37\u884c\u57f7\u884c\uff1a${(r.ai_commands||"").split("\\n").slice(0,2).join(" ")}`);
+      lines.push(`    \u7121\u6cd5\u81ea\u52d5\u57f7\u884c\uff08\u9700\u4eba\u5de5\u64cd\u4f5c\u6216\u5371\u96aa\u64cd\u4f5c\uff09\uff0c\u53ea\u63d0\u4f9b\u53c3\u8003\uff0c\u4e0d\u5f37\u884c\u57f7\u884c\uff1a${cmdRaw.split(/\s+/).join(" ")}`);
     }
-    if (r.procedure) { const p = String(r.procedure).replace(/[\\n\\r]+/g, " ").trim(); if (p) lines.push(`    [\u6d41\u7a0b]\uff1a${p.slice(0,160)}`); }
-    if (r.criteria) { const c = String(r.criteria).replace(/[\\n\\r]+/g, " ").trim(); if (c) lines.push(`    [\u6a19\u6e96]\uff1a${c.slice(0,160)}`); }
+    if (r.procedure) { const p = String(r.procedure).split(/\s+/).filter(Boolean).join(" "); if (p) lines.push(`    [\u6d41\u7a0b]\uff1a${p}`); }
+    if (r.criteria) { const c = String(r.criteria).split(/\s+/).filter(Boolean).join(" "); if (c) lines.push(`    [\u6a19\u6e96]\uff1a${c}`); }
   });
   const text = lines.join("\n");
+  const summary = chosen.length + "\u500b\u6e2c\u9805" + " \u00b7 " + (mm.label || sname);
 
-  const ok = await assignTaskClip(text);
-  if (ok) {
-    alert("\u5df2\u8907\u88fd\u5230\u526a\u8cbc\u7c3f\u3002\u8acb\u5c07\u4ee5\u4e0a\u6587\u5b57\u8cbc\u4e0a\u56de\u5230 OpenHands \u804a\u5929\uff1a\n\n" + text);
-  } else {
-    // fallback: show a textarea for manual copy
-    const dlg = dialogBackdrop();
-    const modal = dlg.querySelector(".modal");
-    if (modal) modal.style.width = "940px";
-    showDialog("\u5f85\u8907\u88fd\u7684\u6307\u4ee4\u6587\u5b57", `<textarea id="assign-copy-text" readonly class="assign-raw" style="width:100%;height:46vh;font-family:monospace;font-size:12px">${esc(text)}</textarea>`, [
-      { txt: "\u95dc\u9589", cls: "btn", fn: () => { if (modal) modal.style.width = ""; closeDialog(); } },
-      { txt: "\ud83d\udccb \u8907\u88fd", cls: "btn-primary primary", fn: () => { const t = $("assign-copy-text"); t.select(); document.execCommand("copy"); alert("\u5df2\u8907\u88fd (fallback)"); } },
-    ]);
-  }
+  // 複製到剪貼簿（成功與否都開浮動視窗；失敗時視窗內仍可「複製全部」手動重試）
+  try { await assignTaskClip(text); } catch (e) { /* noop */ }
+
+  // 開仿 User Guide 的浮動小視窗，讓使用者在下方滾動看完整 TEST CASE
+  AssignResultWin.render("\u2705 \u6307\u6d3e\u53ef\u57f7\u884c\u6307\u4ee4 \u00b7 " + summary, text);
 }
 
 async function assignTaskClip(text) {
@@ -3182,6 +3175,124 @@ async function assignTaskClip(text) {
     return !!ok;
   } catch (e) { return false; }
 }
+
+// ============================================================
+// 指派任務結果浮動視窗（複製測項改為指令） — 仿 User Guide 小視窗
+// ============================================================
+const AssignResultWin = (() => {
+  let win = null, dragOff = null, resize = null, lastNormal = null;
+
+  function el(tag, cls, html) {
+    const n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (html != null) n.innerHTML = html;
+    return n;
+  }
+
+  function build() {
+    win = el("div", "ar-window");
+    const bar = el("div", "ar-bar");
+    bar.innerHTML =
+      '<span class="ar-title" id="ar-title"></span>' +
+      '<button class="ar-btn" data-act="max" title="最大化 / 縮小">□</button>' +
+      '<button class="ar-btn ar-close" data-act="close" title="關閉">✕</button>';
+    const content = el("div", "ar-content");
+    const body = el("div", "ar-body");
+    const pre = document.createElement("pre");
+    pre.className = "ar-pre"; pre.id = "ar-pre";
+    body.appendChild(pre);
+    const foot = el("div", "ar-foot");
+    foot.innerHTML =
+      '<span class="ar-hint" id="ar-hint"></span>' +
+      '<button class="btn small" id="ar-copy-all" title="複製全部指令文字">\ud83d\udccb 複製全部</button>';
+    content.appendChild(body);
+    content.appendChild(foot);
+    win.appendChild(bar);
+    win.appendChild(content);
+    const grip = el("div", "ar-grip"); grip.title = "拖動以縮放視窗";
+    win.appendChild(grip);
+    document.body.appendChild(win);
+    bind();
+  }
+
+  function bind() {
+    const bar = win.querySelector(".ar-bar");
+    bar.addEventListener("mousedown", startDrag);
+    bar.addEventListener("click", (e) => {
+      const bt = e.target.closest(".ar-btn"); if (!bt) return;
+      if (bt.dataset.act === "close") close();
+      else if (bt.dataset.act === "max") toggleMax();
+    });
+    win.querySelector("#ar-copy-all").addEventListener("click", async () => {
+      await assignTaskClip(win._text || "");
+      const hint = win.querySelector("#ar-hint");
+      const prev = hint.textContent;
+      hint.textContent = "\u2705 \u5df2\u8907\u88fd\u5230\u526a\u8cbc\u7c3f";
+      setTimeout(() => { hint.textContent = prev; }, 1600);
+    });
+    win.querySelector(".ar-grip").addEventListener("mousedown", (e) => {
+      e.preventDefault(); e.stopPropagation();
+      resize = { x: e.clientX, y: e.clientY, w: win.offsetWidth, h: win.offsetHeight };
+      document.addEventListener("mousemove", onResizeMove);
+      document.addEventListener("mouseup", onResizeEnd);
+    });
+  }
+
+  function startDrag(e) {
+    if (e.target.closest(".ar-btn") || win.classList.contains("ar-maxed")) return;
+    dragOff = { x: e.clientX - win.offsetLeft, y: e.clientY - win.offsetTop };
+    document.addEventListener("mousemove", onDragMove);
+    document.addEventListener("mouseup", onDragEnd);
+  }
+  function onDragMove(e) {
+    if (!dragOff) return;
+    let x = e.clientX - dragOff.x, y = e.clientY - dragOff.y;
+    x = Math.max(-win.offsetWidth + 80, Math.min(x, window.innerWidth - 80));
+    y = Math.max(0, Math.min(y, window.innerHeight - 40));
+    win.style.left = x + "px"; win.style.top = y + "px";
+  }
+  function onDragEnd() {
+    dragOff = null;
+    document.removeEventListener("mousemove", onDragMove);
+    document.removeEventListener("mouseup", onDragEnd);
+  }
+  function onResizeMove(e) {
+    if (!resize) return;
+    let w = Math.max(360, Math.min(window.innerWidth - 8, resize.w + (e.clientX - resize.x)));
+    let h = Math.max(240, Math.min(window.innerHeight - 8, resize.h + (e.clientY - resize.y)));
+    win.style.width = w + "px"; win.style.height = h + "px";
+  }
+  function onResizeEnd() {
+    resize = null;
+    document.removeEventListener("mousemove", onResizeMove);
+    document.removeEventListener("mouseup", onResizeEnd);
+  }
+  function toggleMax() {
+    if (!win.classList.contains("ar-maxed")) {
+      lastNormal = { l: win.style.left, t: win.style.top, w: win.style.width, h: win.style.height };
+      win.classList.add("ar-maxed");
+    } else {
+      win.classList.remove("ar-maxed");
+      if (lastNormal) Object.assign(win.style, { left: lastNormal.l, top: lastNormal.t, width: lastNormal.w, height: lastNormal.h });
+    }
+  }
+
+  function render(title, text) {
+    if (!win) build();
+    win._text = text;
+    win.querySelector("#ar-title").textContent = title;
+    win.querySelector("#ar-hint").textContent = "\u5df2\u8907\u88fd\u5230\u526a\u8cbc\u7c3f\u3002\u53ef\u5728\u4e0b\u65b9\u6efe\u52d5\u67e5\u770b\u5b8c\u6574 TEST CASE\uff0c\u518d\u8cbc\u56de OpenHands \u804a\u5929\u3002";
+    win.querySelector("#ar-pre").textContent = text;
+    win.style.display = "flex";
+    win.style.width = "720px"; win.style.height = "72vh";
+    win.style.left = "calc(50vw - 360px)"; win.style.top = "12vh";
+    win.classList.remove("ar-maxed");
+    win.querySelector(".ar-body").scrollTop = 0;
+  }
+  function close() { if (win) win.style.display = "none"; }
+  return { render, close };
+})();
+
 
 
 // [AI AGENT 已停用] /* ---- 機器 AI Agent（單機）----

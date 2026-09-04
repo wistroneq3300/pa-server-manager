@@ -10,7 +10,8 @@
 .stat,
 .proj-card,
 .rm-modal,
-.ug-window {
+.ug-window,
+.ar-window {
   background-image: linear-gradient(180deg, rgba(255,255,255,.5) 0%, rgba(255,255,255,0) 32%);
   box-shadow:
     0 1px 2px rgba(10,37,64,.05),
@@ -22,7 +23,8 @@
 :root[data-theme="dark"] .stat,
 :root[data-theme="dark"] .proj-card,
 :root[data-theme="dark"] .rm-modal,
-:root[data-theme="dark"] .ug-window {
+:root[data-theme="dark"] .ug-window,
+:root[data-theme="dark"] .ar-window {
   background-image: linear-gradient(180deg, rgba(255,255,255,.05) 0%, rgba(255,255,255,0) 32%);
   box-shadow:
     0 1px 2px rgba(0,0,0,.32),
@@ -63,7 +65,7 @@ table.t th {
 }
 
 /* 4) 整體圓角更一致、稍圓（只調整尚未明確設定的容器） */
-.modal, .rm-modal, .ug-window {
+.modal, .rm-modal, .ug-window, .ar-window {
   border-radius: 14px;
 }
 
