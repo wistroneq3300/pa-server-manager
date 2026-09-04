@@ -365,3 +365,20 @@ WebSocket:
 - The `index.html` modals/DOM and `style.css` styling are under version control.
 - **When editing strings that contain emoji, prefer doing the edit with a Python script**,
   to avoid an editor surrogate-pair issue that can wipe the whole file (historical lesson; see AGENTS.md for details).
+
+---
+
+## 11. Test Library: Build Inputs & How to Add a New Case
+
+The test library is a CSV overlay (keyed by `code`) merged at build time onto the source workbooks to produce `tests.json`, which the app reads (mtime-cached, no restart).
+
+**Files (prefer the repo copy in `data/`; the build falls back to `/root/test-library/` if absent):**
+- `data/REVISED_commands.csv` — the 2977 reviewed cases (per unique `code`): columns `code,ai_can_execute,ai_commands,ai_packages_needed,ai_logs_output,risk,remark`. The trailing `remark` column is metadata only and does NOT flow into `tests.json`.
+- `data/ADDITIONS.csv` — **add NEW test cases here** (one row per new case). Same 7-column schema (`remark` optional), plus optional `sub_function,test_set,items,procedure,criteria` columns. Rows here are appended to the "Functionality" sheet as brand-new cases.
+
+**How to add a new test case:** append a row to `data/ADDITIONS.csv` with a unique `code` and fill the `ai_*` fields (and `risk` if applicable). Do NOT touch the source workbooks (`RAW`/`REVIEW` in `/root/test-library/`). Then rebuild:
+```bash
+/tmp/tx/venv/bin/python scripts/build_testlib_json.py
+```
+**Do NOT** put new cases in `REVISED_commands.csv` (that file is the overlay for existing codes).
+Note: cloning this repo alone cannot rebuild `tests.json` because the source Excebooks live under `/root/test-library/`.

@@ -17,8 +17,19 @@ REVIEW  = "/root/test-library/AI_Simplified_Review_20260828/TestCaseLibrary_Wist
 OUT     = "/srv/pa-manager-prod/data/tests.json"
 
 # T4 re-review sidecar + user additions (keyed by code; do NOT touch the workbooks)
-REVISED = "/root/test-library/REVISED_commands.csv"
-ADDITIONS = "/root/test-library/ADDITIONS.csv"
+# Prefer the repo-copy (data/) so the build is reproducible from a clone; fall
+# back to /root/test-library/ for backward compatibility with this machine.
+_REPO = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
+_LEGACY = "/root/test-library"
+
+def _pick(*names):
+    repo_p = os.path.join(_REPO, names[0])
+    if os.path.exists(repo_p):
+        return repo_p
+    return os.path.join(_LEGACY, names[0])
+
+REVISED = _pick("REVISED_commands.csv")
+ADDITIONS = _pick("ADDITIONS.csv")
 
 # anti-template check
 STRICT_NO_TEMPLATE = True
