@@ -12,6 +12,39 @@ A centralized **web management console** for **AI GPU servers** (and racks). It 
 
 ---
 
+## 0. Fresh Conversation Quick-Start (for OpenHands / AI agents)
+
+When a NEW conversation picks up this repo, read these FIRST (in this order). They are
+the source-of-truth handoffs: framework + USER RULES (gold standard), the COMPLETE state,
+the assign-task spec, and the project blueprint.
+
+- `/root/test-library/SESSION_HANDOFF_T4_REVIEW_START.md`              (T4 framework + 5 locked samples + USER RULES -- gold standard)
+- `/root/test-library/SESSION_HANDOFF_T4_REVIEW_FINAL_WITH_REMARK.md`  (LATEST/FINAL state: 2977/2977 done; + remark col for 125 multi-row codes)
+- `/root/test-library/SESSION_HANDOFF_T4_STATE_AFTER_COMPLETE_2977.md` (prior COMPLETE handoff)
+- `/root/test-library/SESSION_HANDOFF_ASSIGN_TASK_20260903.md`         (Option C step 2 spec, strict per-case rules)
+- `/root/test-library/AI_TESTCASE_PROJECT_CONTEXT.md`                  (project plan / context)
+- `AGENTS.md`                                                          (project knowledge + CJK safety rule)
+
+Key facts for a fresh window:
+- **Service**: pa-manager. It reads ONLY `/srv/pa-manager-prod/data/tests.json` (mtime-cached; no restart needed).
+- **Build inputs (in repo now)**: `data/REVISED_commands.csv` + `data/ADDITIONS.csv`. Rebuild:
+  ```
+  /tmp/tx/venv/bin/python scripts/build_testlib_json.py
+  ```
+- **Test-library state**: 2977 unique codes = 100% of workbook; remaining 0 row-instances;
+  whole-CSV can_execute YES 1001 / PARTIAL 1311 / NO 665; byte-identical groups 119 (all pre-existing, 0 new);
+  locked 5 intact byte-for-byte vs bak17; build 3112 / 6 sheets / verify_build2 0 bad.
+- `REVISED_commands.csv` now has **7 columns** (trailing `remark` marks the 125 multi-row codes; metadata only, NOT in tests.json).
+  **CAUTION**: `genlib.append()` writes only its fixed 6 columns -> re-running a `gen_*.py` that carries a `remark` key raises
+  `ValueError`; fix genlib first. Backups: bak22 (pre-remark) / bak23 (with remark).
+- **Add NEW test cases** to `data/ADDITIONS.csv` (one row per case), never to `REVISED_commands.csv`.
+
+**CJK SAFETY (HARD RULE)**: never type raw CJK into code; use `\uXXXX` escapes or reuse bytes from
+`/root/sheng/manager/pa_manager/123.txt`. Verify 0 raw-CJK (0x4E00-0x9FFF) and 0 cyrillic (0xD0-0xD2)
+in added regions. Pre-existing CJK in the workbook `procedure`/`criteria` is fine (not our overlay).
+
+---
+
 ## 1. Feature Overview
 
 ### 1.1 Unified Overview Dashboard
