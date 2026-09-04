@@ -3139,17 +3139,17 @@ async function assignTaskCopy() {
     if (can === "YES") {
       lines.push(`${i + 1}. \ud83d\udfe2 ${tname} ${pkg}`);
       if (cmdRaw && !cmdRaw.startsWith("\u2014") && cmdRaw.indexOf("<CMD>") === -1 && cmdRaw.indexOf("sshpass") === -1) {
-        lines.push(`    \u547d\u4ee4\uff1a${cmdRaw.split(/\s+/).join(" ")}`);
+        lines.push(`    \u547d\u4ee4\uff1a\n${cmdRaw.trim()}`);
       }
     } else if (can === "PARTIAL") {
       lines.push(`${i + 1}. \ud83d\udfe0 ${tname} ${pkg}`);
-      lines.push(`    \u90e8\u5206\u53ef\u81ea\u52d5\uff0c\u4f46\u9700\u4eba\u5de5/\u786c\u9ad4\u74b0\u5883\uff08\u6eab\u5ea6\u3001\u96fb\u58d3\u3001AC cycle\u3001\u63d2\u62d4\u7b49\uff09\uff0c\u8acb\u5148\u78ba\u8a8d\u518d\u57f7\u884c\uff1a${cmdRaw.split(/\s+/).join(" ")}`);
+      lines.push(`    \u90e8\u5206\u53ef\u81ea\u52d5\uff0c\u4f46\u9700\u78ba\u8a8d\u786c\u9ad4\u74b0\u5883\/\u6307\u5b9a\u6e2c\u8a66\u76ee\u6a19\uff0c\u8acb\u5148\u78ba\u8a8d\u518d\u57f7\u884c\uff1a\n${cmdRaw.trim()}`);
     } else {
       lines.push(`${i + 1}. \u26ab ${tname} ${pkg}`);
-      lines.push(`    \u7121\u6cd5\u81ea\u52d5\u57f7\u884c\uff08\u9700\u4eba\u5de5\u64cd\u4f5c\u6216\u5371\u96aa\u64cd\u4f5c\uff09\uff0c\u53ea\u63d0\u4f9b\u53c3\u8003\uff0c\u4e0d\u5f37\u884c\u57f7\u884c\uff1a${cmdRaw.split(/\s+/).join(" ")}`);
+      lines.push(`    \u7121\u6cd5\u81ea\u52d5\u57f7\u884c\uff08\u9700\u4eba\u5de5\u64cd\u4f5c\u6216\u5371\u96aa\u64cd\u4f5c\uff09\uff0c\u53ea\u63d0\u4f9b\u53c3\u8003\uff0c\u4e0d\u5f37\u884c\u57f7\u884c\uff1a\n${cmdRaw.trim()}`);
     }
-    if (r.procedure) { const p = String(r.procedure).split(/\s+/).filter(Boolean).join(" "); if (p) lines.push(`    [\u6d41\u7a0b]\uff1a${p}`); }
-    if (r.criteria) { const c = String(r.criteria).split(/\s+/).filter(Boolean).join(" "); if (c) lines.push(`    [\u6a19\u6e96]\uff1a${c}`); }
+    if (r.procedure) { const p = String(r.procedure).trim(); if (p) lines.push(`    [\u6d41\u7a0b]\uff1a\n${p}`); }
+    if (r.criteria) { const c = String(r.criteria).trim(); if (c) lines.push(`    [\u6a19\u6e96]\uff1a\n${c}`); }
   });
   const text = lines.join("\n");
   const summary = chosen.length + "\u500b\u6e2c\u9805" + " \u00b7 " + (mm.label || sname);
