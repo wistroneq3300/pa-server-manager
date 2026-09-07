@@ -83,3 +83,14 @@ Scope: xlsx `data/REVISED_commands_merged_with_raw.xlsx`. tests.json / git / pro
 - 233 cells changed, ALL col15 (ai_commands): Functionality 198 (195 sdr-fallback + 2 <val> + 1 row-202
   Q-LIT) + Compatibility 35 (1 sdr-fallback + 34 placeholders). col13/14/16/17 = 0 diff.
 - Build re-verified: 3112 / 6 sheets unchanged.
+
+
+## 9. Run-2 cleanup (de-dup shared/mismatched ai_commands) — 43 cells, all col15
+
+- Scope: 43 sets / 113 rows share exact ai_commands across the 5 non-Functionality sheets. Fixed the WR
+  copy-errors + nested-ssh/Q-LIT defects; KEPT the legit shared families (60 rows) + TBD placeholders.
+- Fixed 43 cells, ALL col15: Functionality 3 (nested-ssh r192/r1390, missing-space r2273) / Reliability 4
+  (shared-WR r154/155 + nested-ssh r150/143) / Performance 5 (NCCL r61 + FIO r10-13) / Compatibility 31
+  (shared-set WR rewrites + DCGM family cmd + nested-ssh r42/124).
+- Cumulative vs bak_rev02_closing_pre = 276 cells (all col15): F201 / R4 / P5 / C66. Build 3112/6; mojibake 0.
+- tests.json 3-way md5 = 5cb015cea6f7ba7f062811e114965455 (repo == prod == /tmp).

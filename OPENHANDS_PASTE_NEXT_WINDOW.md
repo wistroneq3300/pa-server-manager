@@ -1,3 +1,11 @@
+*** RUN-2 (2026-09-18): cross-sheet shared/mismatched ai_commands cleanup DONE — READ THIS FIRST ***
+- Handoff: /root/sheng/manager/pa_manager/SESSION_HANDOFF_RUN2_SHARED_20260918.md
+- 43 cells fixed (all col15): F3 (nested-ssh r192/1390 + ssh" space r2273) / R4 (shared-WR r154/155 + nested-ssh r150/143) / P5 (NCCL r61 + FIO r10-13) / C31 (shared-set WR + DCGM family + r42/124 nested-ssh + r37 dmidecode).
+- Kept legit shared families (60 rows) + TBD placeholders (not defects).
+- Cumulative vs bak_rev02_closing_pre = 276 cells (all col15). Build 3112/6. mojibake 0.
+- tests.json 3-way md5 5cb015cea6f7ba7f062811e114965455 (repo==prod==/tmp). git committed + pushed.
+- OPEN (owner): 5 TBD criteria + HW-00455-V002 merge-key; prose <id>/<Disk>/<PXE> placeholders (doc).
+
 *** ROUND-2 CLOSING (2026-09-18, Functionality 100% + closing pass a-e DONE + tests.json synced + COMMIT/PUSH) — READ THIS FIRST ***
 - Handoff: /root/sheng/manager/pa_manager/SESSION_HANDOFF_ROUND2_CLOSING_20260918.md
 - Functionality sheet = 100% DONE; closing pass (a-e) EXECUTED this window:
