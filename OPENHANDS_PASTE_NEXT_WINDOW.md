@@ -1,3 +1,17 @@
+*** READ FIRST: SESSION_HANDOFF_LAST_REVIEW_SKILL_20260918.md (last review state + pa-library-review skill) ***
+
+*** ROUND-3 (2026-09-18): 全庫複核 LOCKED / 100% DONE — READ THIS FIRST ***
+- HANDOFF FINAL: /root/sheng/manager/pa_manager/SESSION_HANDOFF_ROUND3_BATCH3_COMPAT_LOCK_20260918.md
+  (Batch-1=ROUND3_BATCH1_RELIABILITY_20260918.md; Batch-2=ROUND3_BATCH2_PERFNMFSTAB_20260918.md)
+- All 6 sheets (3112) round-3 completed. 68 cells fixed during round-3 (Reliability 20, Perf/Stab/NMF 48, Compat 2). Build 3112/6, GATE PASS all batches.
+- Fresh final /tmp build md5 = 368e35998da601e34fad3d572ea8659d. repo/prod tests.json untouched (58332d99).
+- ONLY operator actions remain: sync tests.json + commit + push (say the words). MLPerf 35->YES revertable if unwanted.
+
+*** SKILL BUILT (2026-09-18): .agents/skills/pa-library-review/ ***
+- SKILL.md + references/(verdict_rules, review_workflow, sheets_layout) + scripts/verify_review.py
+- Read SKILL.md first for the 5-step review workflow; run verify_review.py <xlsx> <backup> as the gate.
+- Not committed (operator approval required).
+
 *** RUN-3 (2026-09-18): per-item desc differentiation DONE — READ THIS FIRST ***
 - Handoff: /root/sheng/manager/pa_manager/SESSION_HANDOFF_RUN3_DESC_20260918.md
 - 51 rows got per-item '-- <Item>:' desc (col15 only, command bodies unchanged). Fixed LED x13 + M.2 x2 literal-%s bug.
