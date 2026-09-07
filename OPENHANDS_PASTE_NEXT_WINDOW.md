@@ -1,3 +1,10 @@
+*** RUN-3 (2026-09-18): per-item desc differentiation DONE — READ THIS FIRST ***
+- Handoff: /root/sheng/manager/pa_manager/SESSION_HANDOFF_RUN3_DESC_20260918.md
+- 51 rows got per-item '-- <Item>:' desc (col15 only, command bodies unchanged). Fixed LED x13 + M.2 x2 literal-%s bug.
+- Cumul vs bak_rev02_closing_pre = 324 cells (col15): F201/R5/P5/C112/NMF1. Build 3112/6. mojibake 0.
+- Remaining shared = 17 rows / 7 sets, all intentional (NVTOP TBD x5, ErrInjection x2, UMC x2, FIO-mix pairs x8).
+- tests.json 3-way md5 58332d99576dae23e207fb7261da1b1f (repo==prod==/tmp). git committed + pushed.
+
 *** RUN-2 (2026-09-18): cross-sheet shared/mismatched ai_commands cleanup DONE — READ THIS FIRST ***
 - Handoff: /root/sheng/manager/pa_manager/SESSION_HANDOFF_RUN2_SHARED_20260918.md
 - 43 cells fixed (all col15): F3 (nested-ssh r192/1390 + ssh" space r2273) / R4 (shared-WR r154/155 + nested-ssh r150/143) / P5 (NCCL r61 + FIO r10-13) / C31 (shared-set WR + DCGM family + r42/124 nested-ssh + r37 dmidecode).

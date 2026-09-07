@@ -94,3 +94,17 @@ Scope: xlsx `data/REVISED_commands_merged_with_raw.xlsx`. tests.json / git / pro
   (shared-set WR rewrites + DCGM family cmd + nested-ssh r42/124).
 - Cumulative vs bak_rev02_closing_pre = 276 cells (all col15): F201 / R4 / P5 / C66. Build 3112/6; mojibake 0.
 - tests.json 3-way md5 = 5cb015cea6f7ba7f062811e114965455 (repo == prod == /tmp).
+
+
+## 10. Operator decisions (2026-09-18)
+- 5 TBD criteria (2203/2207/2290/2291/2292): operator 裁示「放著,test case 寫 TBD」,不補。
+- 2290/2291 merge-key mis-assignment (Wistron-HW-00455-V002 -> E1S/LED source): operator 裁示「放著」。
+- prose <id>/<Disk>/<PXE> placeholders: operator 裁示「當說明」,保留為文案。
+
+
+## 11. Run-3: per-item desc differentiation for legit shared families (2026-09-18)
+- operator GO 下一 run -> 60 個合法共享 row 補上各自 Items 的 '--' 開頭描述(僅 col15 文字,命令本文不動)。
+- 51 行補/改 desc;修掉寫入時未格式化之 LED x13 + M.2 x2(內文曾含字面 %s)改正。
+- diff vs run2_pre = 93 cells(col15):F3/R5/P5/C79/NMF1。殘餘 shared = 17 rows / 7 sets 全屬刻意相同(NVTOP TBD x5、ErrInjection x2、UMC x2、FIO-mix 同配對 x8)。
+- 累計 vs bak_rev02_closing_pre = 324 cells(col15):F201/R5/P5/C112/NMF1。build 3112/6;mojibake 0;'%s' remnants 0。
+- tests.json 3-way md5 58332d99576dae23e207fb7261da1b1f(repo==prod==/tmp)。
