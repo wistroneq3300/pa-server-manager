@@ -3023,7 +3023,8 @@ function assignTaskListHtml() {
   const filterMeta = filt.length !== _assignTask.items.length;
   const selCount = _assignTask.sel.size;
 
-  const rowsHtml = slice.map(r => assignTaskRow(r)).join("");
+  const dupCodes = dupCodeSet();
+  const rowsHtml = slice.map(r => assignTaskRow(r, dupCodes)).join("");
   const toolbar = `
     <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px">
       <input id="assign-q" class="assign-search" type="text" placeholder="\u641c\u5c0b code / items / test set"
@@ -3041,7 +3042,15 @@ function assignTaskListHtml() {
   return toolbar + `<div class="assign-rows">${rowsHtml || `<div class="empty">\u6c92\u6709\u76f8\u7b26\u6e2c\u9805</div>`}</div>`;
 }
 
-function assignTaskRow(r) {
+function dupCodeSet() {
+  const m = new Map();
+  (_assignTask.items||[]).forEach(r => m.set(r.code, (m.get(r.code)||0)+1));
+  const s = new Set();
+  m.forEach((n,c) => { if (n>1) s.add(c); });
+  return s;
+}
+
+function assignTaskRow(r, dup) {
   const checked = _assignTask.sel.has(r.code) ? "checked" : "";
   const can = String(r.ai_can_execute || "NO").toUpperCase();
   const badge = can === "YES" ? `<span class="badge green">YES</span>`
@@ -3053,7 +3062,7 @@ function assignTaskRow(r) {
       <input type="checkbox" ${checked} onchange="assignTaskToggle('${esc(r.code)}', this.checked)" />
       <div class="assign-row-body">
         <div class="assign-row-title">${badge} <span class="mono">${esc(r.code)}</span>
-          <span class="assign-items">${esc(r.items)}</span></div>
+          <span class="assign-items">${esc(r.items)}${dup && dup.has(r.code) ? ` [${esc(r.test_set||"")}]` : ""}</span></div>
         <div class="assign-row-sub">${esc(r.test_set || "")} ${pkg}</div>
         <div class="assign-row-cmd"><span class="hint">\u547d\u4ee4\uff1a</span>${esc((r.ai_commands||"").split("\\n").slice(0,3).join(" "))}</div>
       </div>
@@ -3125,6 +3134,7 @@ async function assignTaskCopy() {
   const pass = (m && m.os_pass && m.os_pass !== "****") ? m.os_pass : "<PASSWORD>";
   const sname = mm.sheet || "";
   const items = _assignTask.items;
+  const dupSet = dupCodeSet();
   const chosen = items.filter(r => sel.has(r.code));
   if (!chosen.length) { alert("\u6e2c\u9805\u6e05\u55ae\u5df2\u5207\u63db\uff0c\u8acb\u91cd\u65b0\u52fe\u9078"); return; }
 
@@ -3149,7 +3159,7 @@ async function assignTaskCopy() {
     };
     const indent = (s, n) => s.split('\n').map(l => " ".repeat(n) + (l || "")).join('\n');
 
-    lines.push(`${i + 1}. ${can === "YES" ? "\ud83d\udfe2" : can === "PARTIAL" ? "\ud83d\udfe0" : "\u26ab"} ${tname}`);
+    lines.push(`${i + 1}. ${can === "YES" ? "\ud83d\udfe2" : can === "PARTIAL" ? "\ud83d\udfe0" : "\u26ab"} \u6e2c\u8a66\u9805\u76ee\uff1a${tname}${dupSet.has(r.code) ? ` [${r.test_set||""}]` : ""}`);
     if (pkg) lines.push(`   ${pkg}`);
     const note = can === "YES"
       ? "\u53ef\u81ea\u52d5\u57f7\u884c\u3002"
@@ -3213,6 +3223,46 @@ async function assignTaskClip(text) {
 }
 
 // ============================================================
+
+// [AR-HL v1 \u2014 assign-window command syntax coloring (display only)]
+function arEscapeHl(s) {
+  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+function arHlLine(raw) {
+  var pm = raw.match(/^\s*(?:\u2502\s*)*/);
+  if (pm && pm.length < raw.length) {
+    // Fix: handle unicode char │ which may include extra invisible spacing
+    var matchStart = pm[0].length;
+    var commentStart = matchStart;
+    for (var i = matchStart; i < raw.length; i++) {
+      if (raw.charAt(i) !== ' ') { commentStart = i; break; }
+    }
+    if (commentStart < raw.length && raw.charAt(commentStart) === "#") {
+      return arEscapeHl(raw.slice(0, commentStart)) +
+             '<span class="ar-cmt">' + arEscapeHl(raw.slice(commentStart)) + "</span>";
+    }
+  }
+  var TOK = /(\$[A-Za-z_][A-Za-z0-9_]*|\$\{[^\{\}]*\})|(\[[A-Za-z][A-Za-z0-9_.+~-]*\])|(\b(?:sshpass|ssh|sudo|ipmitool|curl|wget|fio|cat|echo|printf|grep|egrep|awk|sed|head|tail|tee|ls|cp|mv|apt-get|apt|dmesg|lscpu|lspci|dmidecode|ethtool|snmpget|jq|bash|sh|python3|python|timeout|nohup|mst|devlink|nvsm|rvs|rsmi|nvidia-smi|dcgmi|storcli|sas3ircu|ssacli|iperf3|iperf|systemctl|nvme|hdparm|smartctl|redis-cli|stress-ng|lshw|ping|ifconfig|reboot)\b)/g;
+  var out = "", last = 0, m;
+  TOK.lastIndex = 0;
+  while ((m = TOK.exec(raw)) !== null) {
+    if (m.index > last) out += arEscapeHl(raw.slice(last, m.index));
+    if (m[1] != null) out += '<span class="ar-var">' + arEscapeHl(m[1]) + "</span>";
+    else if (m[2] != null) out += '<span class="ar-sec">' + arEscapeHl(m[2]) + "</span>";
+    else if (m[3] != null) out += '<span class="ar-cmd">' + arEscapeHl(m[3]) + "</span>";
+    last = m.index + m[0].length;
+    if (m.index === TOK.lastIndex) TOK.lastIndex++;
+  }
+  out += arEscapeHl(raw.slice(last));
+  return out;
+}
+function arHlAssignText(text) {
+  var L = String(text).split("\n");
+  for (var i = 0; i < L.length; i++) L[i] = arHlLine(L[i]);
+  return L.join("\n");
+}
+// [AR-HL v1 END]
+
 // 指派任務結果浮動視窗（複製測項改為指令） — 仿 User Guide 小視窗
 // ============================================================
 const AssignResultWin = (() => {
@@ -3318,7 +3368,7 @@ const AssignResultWin = (() => {
     win._text = text;
     win.querySelector("#ar-title").textContent = title;
     win.querySelector("#ar-hint").textContent = "\u5df2\u8907\u88fd\u5230\u526a\u8cbc\u7c3f\u3002\u53ef\u5728\u4e0b\u65b9\u6efe\u52d5\u67e5\u770b\u5b8c\u6574 TEST CASE\uff0c\u518d\u8cbc\u56de OpenHands \u804a\u5929\u3002";
-    win.querySelector("#ar-pre").textContent = text;
+    win.querySelector("#ar-pre").innerHTML = arHlAssignText(text);
     win.style.display = "flex";
     win.style.width = "720px"; win.style.height = "72vh";
     win.style.left = "calc(50vw - 360px)"; win.style.top = "12vh";

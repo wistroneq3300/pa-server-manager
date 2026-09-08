@@ -52866,7 +52866,7 @@
      "test_set": "AMD GPU - Performance",
      "items": "Detection and installation",
      "procedure": "【Before Test】\n1. Check that the SUT configuration (e.g., hardware, firmware, drivers, etc.) matches the specifications/recipe definition. \n2. Clear logs (e.g., dmesg, syslog, SEL, etc.). \n\n【During Test】\n1. GPU should be detected for 8 GPUs and pcie speed worked as expected. \n$lspci | grep -i AMD GPU\n$lspci -s BDF -vvv\n2.Check the rocm-smi can be worked as expected.\n$rocm-smi \nCateria: \n1. The system should detect full GPU and without any hardware error in dmesg.\n2. Should not lost GPU in OS.\n3. Should not occur unexpected shutdown in system.\n\n【After Test】\n1. Collect test results and photos, and save them to specific folders.\n2. Check if there are unexpected logs (e.g., dmesg, syslog, SEL, etc.) generate after test.",
-     "criteria": "1. GPU should be detected for 8 GPUs and pcie speed worked as expected. \n$lspci | grep -i AMD GPU\n$lspci -s BDF -vvv\n2.Check the rocm-smi can be worked as expected.\n$rocm-smi \nCateria: \n1. The system should detect full GPU and without any hardware error in dmesg.\n2. Should not lost GPU in OS.\n3. Should not occur unexpected shutdown in system.",
+     "criteria": "1. The system should detect full GPU and without any hardware error in dmesg.\n2. Should not lost GPU in OS.\n3. Should not occur unexpected shutdown in system.",
      "ai_can_execute": "YES",
      "ai_packages_needed": "rocm-smi (ROCm installed)",
      "ai_commands": "sshpass -p \"$DUT_PASS\" ssh -o StrictHostKeyChecking=no $DUT_USER@$DUT_IP \"rocm-smi --showproductname; rocm-smi --showdriverversion; for n in 0 1 2 3 4 5 6 7; do echo -n \\\"GPU$n \\\"; cat /sys/class/drm/card$n/device/max_link_speed 2>/dev/null; done\"",
