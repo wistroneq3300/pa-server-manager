@@ -1125,6 +1125,11 @@ tr.mach-over td{box-shadow:inset 0 2px 0 0 #4aa8ff}
 .ar-pre{white-space:pre-wrap;word-break:break-word;font-family:ui-monospace,Menlo,Consolas,monospace;
   font-size:12px;line-height:1.6;color:var(--text);margin:0}
 .ar-pre .ar-num{color:var(--text-faint)}
+.ar-pre .ar-cmt{color:#3f9e63}
+.ar-pre .ar-var{color:#e8933a}
+.ar-pre .ar-sec{color:#4aa3e0}
+.ar-pre .ar-cmd{color:#3d6fd9;font-weight:600}
+
 .ar-foot{flex:0 0 auto;padding:10px 14px;border-top:1px solid var(--border);display:flex;align-items:center;gap:8px}
 .ar-hint{font-size:11.5px;color:var(--text-faint);margin-right:auto}
 .ar-grip{position:absolute;right:0;bottom:0;width:16px;height:16px;cursor:nwse-resize;

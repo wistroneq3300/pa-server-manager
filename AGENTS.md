@@ -470,3 +470,16 @@ original workbook untouched.
   show the user the new per-case command for approval BEFORE grinding through all 3112.
   (The user explicitly wants format approval first; do NOT batch the whole library blind.)
 
+
+## TELEMETRY (dev vs prod paths - do not confuse them)
+- The prod systemd unit `pa-manager.service` sets `PA_DATA_DIR=/srv/pa-manager-prod/data`.
+  telemetry_core reads/writes `$PA_DATA_DIR/data.json` + `$PA_DATA_DIR/telemetry.db`.
+  The repo's `./telemetry.db` and `./data.json` are DEV only and usually stale.
+  ALWAYS inspect `/srv/pa-manager-prod/data/telemetry.db` when diagnosing telemetry.
+- Telemetry worker: `@app.on_event("startup") _start_telemetry()` -> telemetry_core.start_worker()
+  -> worker_loop every TELEMETRY_INTERVAL (default 15s), ThreadPoolExecutor(16), only machines
+  with os_ip (or MONITOR_MACHINES env). Collection path verified OK.
+- EQ3300-AIAgent (10.35.229.64) = the OpenHands + vLLM AI box (project Naboo). 7x NVIDIA B200
+  (179GB each). vLLM spawns VLLM::Worker_TP0..3 on GPU0-3 + VLLM::EngineCore on GPU4-6; all 7
+  hold ~160-166GB VRAM. GPU util is 0% when idle and jumps to ~98-100% ONLY during inference
+  (continuous batching) - this is normal, NOT a telemetry bug. GPU4-6 (EngineCore) often stay 0%.

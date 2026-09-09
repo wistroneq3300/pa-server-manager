@@ -232,13 +232,13 @@ function pageDashboard() {
       <div class="rack-cop-panel">
         <div class="rack-cop-head">
           <span class="cop-avatar ai">🤖</span>
-          <div class="cop-title">AI Copilot <span class="hint" id="cop-model">Ollama · qwen3.8</span></div>
+          <div class="cop-title">AI Copilot</div>
           <button class="btn small rack-cop-clear" id="cop-clear" title="清除對話紀錄">🗑</button>
         </div>
         <div class="rack-cop-body" id="cop-box">
           <div class="cop-msg ai">
             <span class="cop-avatar ai">🤖</span>
-            <div class="cop-bubble ai">👋 我是 AI Copilot（串到你本機 Ollama qwen3.8:27b）。目前已監控 <b>${total}</b> 台系統、<b>${online}</b> 線上、<b>${offline}</b> 離線。問我任何問題～（例如「哪台有問題？」「proj_k 專案狀態？」）</div>
+            <div class="cop-bubble ai">👋 我是 AI Copilot。目前已監控 <b>${total}</b> 台系統、<b>${online}</b> 線上、<b>${offline}</b> 離線。問我任何問題～（例如「哪台有問題？」「proj_k 專案狀態？」）</div>
           </div>
         </div>
         <div class="rack-cop-input">
@@ -322,13 +322,13 @@ function rackCopilotHtml() {
     <div class="rack-cop-panel">
       <div class="rack-cop-head">
         <span class="cop-avatar ai">🤖</span>
-        <div class="cop-title">AI Copilot <span class="hint">Ollama · qwen3.8 · ${esc(proj) || "未選專案"}</span></div>
+        <div class="cop-title">AI Copilot <span class="hint">${esc(proj) || "未選專案"}</span></div>
         <button class="btn small rack-cop-clear" id="rackcop-clear" title="清除對話紀錄">🗑</button>
       </div>
       <div class="rack-cop-body" id="rackcop-box">
         <div class="cop-msg ai">
           <span class="cop-avatar ai">🤖</span>
-          <div class="cop-bubble ai">🖧 這裡的 Copilot 只會回答目前選中的機櫃專案：<b>${esc(proj) || "（尚未選擇）"}</b>。<br>可問「這櫃有幾台？哪些離線？溫度異常？」等（需要本機 Ollama qwen3.8 在運作）。</div>
+          <div class="cop-bubble ai">🖧 這裡的 Copilot 只會回答目前選中的機櫃專案：<b>${esc(proj) || "（尚未選擇）"}</b>。<br>可問「這櫃有幾台？哪些離線？溫度異常？」等。</div>
         </div>
       </div>
       <div class="rack-cop-input">
@@ -371,7 +371,7 @@ async function rackCopSend() {
   if (inp) inp.value = autoGrow(inp);
   if (send) { send.disabled = true; send.textContent = "…"; }
 
-  // 後端 copilot 是同步叫 Ollama，遇 Ollama 忙碌可能達 60s 以上。
+  // 後端 copilot 是同步叫本機 AI（vLLM），忙碌時可能達 60s 以上。
   // 用 AbortController 設上限，避免按鈕永久卡在 disabled。
   const COPTIMEOUT = 90000;
   async function ask() {
@@ -394,8 +394,8 @@ async function rackCopSend() {
     let j;
     try { j = await ask(); }
     catch (e) {
-      // 逾時/繁忙：重試一次（Ollama 常因並發長請求暫時無回應）
-      if (e && e.name === "AbortError") { rackCopAppend("ai", "⏳ Ollama 較慢，再試一次…"); try { j = await ask(); } catch (e2) { throw e2; } }
+      // 逾時/繁忙：重試一次（AI 常因並發長請求暫時無回應）
+      if (e && e.name === "AbortError") { rackCopAppend("ai", "⏳ AI 較慢，再試一次…"); try { j = await ask(); } catch (e2) { throw e2; } }
       else throw e;
     }
     rackCopTyping(false);
@@ -403,7 +403,7 @@ async function rackCopSend() {
     else rackCopAppend("ai", `⨠ ${j.error || "呼叫失敗"}`);
   } catch (e) {
     rackCopTyping(false);
-    const msg = (e && e.name === "AbortError") ? "Ollama 逾時（90 秒）。目前可能有其他分析任務佔用，請稍後再試。" : `無法連線到後端： ${e && e.message ? e.message : e}`;
+    const msg = (e && e.name === "AbortError") ? "AI 逾時（90 秒）。目前可能有其他分析任務佔用，請稍後再試。" : `無法連線到後端： ${e && e.message ? e.message : e}`;
     rackCopAppend("ai", `⨠ ${msg}`);
   } finally {
     _rackCopBusy = false;
@@ -1425,8 +1425,8 @@ function rackTelSet(id, labels, series, defs) {
   });
   ch.update();
 }
-// 整櫃 telemetry 簡短 AI 分析：叫 /api/rack/{project}/telemetry/analyze → Ollama（跟單機同一 style）
-// 用 cache 避免每次 range 切換都打 Ollama（較慢）
+// 整櫃 telemetry 簡短 AI 分析：叫 /api/rack/{project}/telemetry/analyze → 本機 AI（vLLM）
+// 用 cache 避免每次 range 切換都打 AI（較慢）
 const rackAiTelCache = {};
 async function rackTelAnalyze(proj, minutes) {
   const box = $("racktel-ai");
@@ -2272,8 +2272,8 @@ function telSet(ch, labels, series, defs) {
   });
   ch.update();
 }
-// Telemetry 簡短 AI 分析：抓單機該範圍趨勢 → Ollama 回一小段文字 → 填入 #tel-ai
-// 同一機台+範圍重複載入直接用快取，避免每次重整都打 Ollama（較慢）。
+// Telemetry 簡短 AI 分析：抓單機該範圍趨勢 → AI 回一小段文字 → 填入 #tel-ai
+// 同一機台+範圍重複載入直接用快取，避免每次重整都打 AI（較慢）。
 const aiTelCache = {};
 async function telAnalyze(name, minutes) {
   const box = $("tel-ai");
@@ -2412,6 +2412,8 @@ async function machineRefresh() {
   const name = _activeMachine;
   if (!name) return;
   delete machineDetailCache[name];     // 強制重抓詳情 + OS/HW（refresh=1）
+  sensorAiDone.delete(name);           // 重新整理 → 讓 Sensor AI 用最新資料重跑一次
+  delete sensorAiResult[name];
   await machineLoadDetail(name, true);
   // 感測器不強制重抓：TTL 內直接用快取，避免按重新整理後陷入長時間『背景抓取中』
   if (_activeMachine === name) await machineLoadSensors(name, false);
@@ -2485,24 +2487,52 @@ function machineSensorsHtml(d, base, name) {
     ${sdrBox}`;
 }
 // Sensor AI 診斷（比照 Telemetry AI）：感測器就緒後自動分析一次，結果快取，重繪可還原。
+// 資料未就緒時會定時重試（最多約 90 秒），避免卡在「尚無資料」也立即顯示 AI 狀態。
 const sensorAiDone = new Set();
 const sensorAiResult = {};
-async function sensorAnalyze(name) {
-  if (!name) return;
-  const show = (html) => { const el = $("#sensor-ai"); if (el) el.innerHTML = html; };
-  if (sensorAiDone.has(name)) { if (sensorAiResult[name] != null) show(sensorAiResult[name]); return; }
-  show("🤖 正在分析感測器狀況…");
-  let d;
-  try {
-    d = await api(`/api/machine/${encodeURIComponent(name)}/sensors/analyze`);
-  } catch (e) {
-    sensorAiResult[name] = "⚙️   Sensor AI 無法連線"; show(sensorAiResult[name]); return;
+const sensorAiBusy = new Set();
+function sensorAiHtml(text, counts) {
+  let html = `🤖 ${esc(text || "")}`;
+  if (counts) {
+    let c = `<span class="hint">共 ${counts.total} 筆感測器 · OK ${counts.ok} · No Reading ${counts.ns}`;
+    if (counts.critical) c += ` · 🔴 Crit ${counts.critical}`;
+    if (counts.warning) c += ` · 🟠 Warn ${counts.warning}`;
+    c += `</span>`;
+    html += `<br>${c}`;
   }
-  if (!d || d.error) { sensorAiResult[name] = "⚙️   Sensor AI 尚無資料"; show(sensorAiResult[name]); return; }
-  if (d.ok !== undefined && !d.ok) { sensorAiResult[name] = `⚙️   ${esc(d.error || "感測器未就緒")}`; show(sensorAiResult[name]); return; }
-  sensorAiDone.add(name);
-  sensorAiResult[name] = `🤖 ${esc(d.analysis || d.summary || "")}`;
-  show(sensorAiResult[name]);
+  return html;
+}
+async function sensorAnalyze(name) {
+  if (!name || sensorAiBusy.has(name)) return;
+  const show = (html) => { const el = $("#sensor-ai"); if (el) el.innerHTML = html; };
+  if (sensorAiDone.has(name) && sensorAiResult[name] != null) { show(sensorAiResult[name]); return; }
+  sensorAiBusy.add(name);
+  show("🤖 正在分析感測器狀況…");
+  try {
+    for (let attempt = 0; attempt < 30; attempt++) {
+      if (_activeMachine !== name || state.view !== "machine") return;
+      let d;
+      try {
+        d = await api(`/api/machine/${encodeURIComponent(name)}/sensors/analyze`);
+      } catch (e) {
+        d = { error: "連線失敗" };
+      }
+      if (!d || d.error) {
+        show(`🤖 感測器資料抓取中，AI 待命…（已等待 ${attempt + 1} 輪）`);
+        await new Promise(r => setTimeout(r, 3000));
+        continue;
+      }
+      sensorAiDone.add(name);
+      const html = sensorAiHtml(d.analysis, d.counts);
+      sensorAiResult[name] = html;
+      show(html);
+      return;
+    }
+    sensorAiResult[name] = "⚙️    Sensor AI 暫無資料（多次重試後仍未就緒）";
+    show(sensorAiResult[name]);
+  } finally {
+    sensorAiBusy.delete(name);
+  }
 }
 
 const machineDetailCache = {};
@@ -2758,7 +2788,7 @@ function pageMachine() {
     </div>` : `
     <div class="card"><div class="empty">BMC (${esc(base.bmc_ip||"—")}) 目前不可連，無法抓取感測器與 FW 資訊。</div></div>`}
     ${m.passive ? "" : `<div class="card diag-card" style="margin-top:18px">
-      <div class="card-title">🩺 系統診斷（Ollama 分析）</div>
+      <div class="card-title">🩺 系統診斷（AI 分析）</div>
       <div class="diag-body" id="diag-body"></div>
       ${diagBodyFill(name)}
     </div>`}
@@ -2832,8 +2862,8 @@ const diagStore = {};   // { name: {state:'loading'|'done'|'error', html:'...'} 
 
 function diagBodyFill(name) {
   const s = diagStore[name];
-  if (!s) return `<div class="empty">點上方「🩺 系統診斷」按鈕，收集 dmesg / journalctl / GPU / BMC event log，並由 Ollama 分析問題與建議處理。</div>`;
-  if (s.state === "loading") return `<div class="empty">⏳ 正在收集資料並呼叫 Ollama 分析（約 30~60 秒）…</div>`;
+  if (!s) return `<div class="empty">點上方「🩺 系統診斷」按鈕，收集 dmesg / journalctl / GPU / BMC event log，並由 AI 分析問題與建議處理。</div>`;
+  if (s.state === "loading") return `<div class="empty">⏳ 正在收集資料並呼叫 AI 分析（約 30~60 秒）…</div>`;
   return s.html || `<div class="empty">(無結果)</div>`;
 }
 function runDiagnose(name) {
@@ -3449,7 +3479,7 @@ const AssignResultWin = (() => {
 // [AI AGENT 已停用]     agentTyping(false);
 // [AI AGENT 已停用]     agentAppend("ai", `⨠ ${esc("無法連線到後端：" + e.message)}`);
 // [AI AGENT 已停用]     if (/無法連線|Failed|fetch/i.test(e.message)) {
-// [AI AGENT 已停用]       // 可能是 Ollama 忙碌或連線中斷，提示可重試
+// [AI AGENT 已停用]       // 可能是 AI 忙碌或連線中斷，提示可重試
 // [AI AGENT 已停用]     }
 // [AI AGENT 已停用]   } finally {
 // [AI AGENT 已停用]     _agentSession.busy = false;
@@ -4132,7 +4162,7 @@ function openBroadcast(names) {
     pane.innerHTML = `<div class="bc-pane-label"><span>${esc(nm)}</span><span class="mono" style="color:var(--text-dim);font-size:10px">${esc((machines.find(m=>m.name===nm)||{}).os_ip||"")}</span></div><div class="bc-box" id="bc-box-${nm}"></div>`;
     panesEl.appendChild(pane);
     // xterm
-    const t = new Terminal({ ...XTERM_COMMON, fontSize: 12.5 });
+    const t = new Terminal({ ...XTERM_COMMON });
     const fit = new FitAddon.FitAddon();
     t.loadAddon(fit);
     t.open($("bc-box-" + nm));
@@ -4282,11 +4312,12 @@ function resetBcGeometry() {
 const XTERM_COMMON = {
   cursorBlink: true,
   cursorStyle: "block",
+  fontSize: 13,
   fontFamily: '"Cascadia Mono","Consolas","Noto Sans Mono CJK TC","Noto Sans Mono",monospace',
   fontWeight: "400",
   fontWeightBold: "700",
-  lineHeight: 1.2,
-  letterSpacing: 0,
+  lineHeight: 1.25,
+  letterSpacing: 0.6,
   scrollback: 2000,
   theme: {
     background: "#0c0c0c",
@@ -4309,7 +4340,7 @@ class Term {
   }
   connect() {
     if (!window.Terminal) { this.setStatus("終端未載入", "err"); return; }
-    this.term = new Terminal({ ...XTERM_COMMON, fontSize: 13 });
+    this.term = new Terminal({ ...XTERM_COMMON });
     this.fitAddon = new FitAddon.FitAddon();
     this.term.loadAddon(this.fitAddon);
     this.term.open(this.container);

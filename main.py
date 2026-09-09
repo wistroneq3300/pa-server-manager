@@ -340,7 +340,7 @@ def ipmi_sensor_summary(m):
         parts = l.split()
         return parts[-1].lower() if parts else ""
     ok_n = crit = warn = ns = 0
-    crit_entries, warn_entries, entries = [], [], []
+    crit_entries, warn_entries, ns_entries, entries = [], [], [], []
     for l in lines:
         st = status_token(l)
         if st in ("cr", "critical"):
@@ -353,11 +353,13 @@ def ipmi_sensor_summary(m):
             ok_n += 1
         elif st in ("ns", "nr", "na", "no", "reading", "not_readable"):
             ns += 1
+            ns_entries.append(l)
         entries.append(l)
     if not lines:
         return {"error": "sdr 讀取失敗: " + (err.strip() or "無輸出")[:200]}
     return {"total": len(lines), "ok": ok_n, "critical": crit, "warning": warn, "ns": ns,
             "critical_entries": crit_entries[:20], "warning_entries": warn_entries[:20],
+            "ns_entries": ns_entries[:20],
             "entries": entries[:400]}
 
 
@@ -1450,46 +1452,47 @@ def machine_sensors(name: str, refresh: int = 0):
 
 @app.get("/api/machine/{name}/sensors/analyze")
 def machine_sensors_analyze(name: str):
-    """針對單機 BMC 感測器摘要（sdr）叫 Ollama 做『簡短』AI 診斷。
-    讀取已抓取到的感測器快取，把 critical/warning/ok 數量與異常條目給 LLM，回一段話。"""
+    """針對單機 BMC 感測器摘要（sdr）叫本機 AI 做『簡短』診斷。
+    讀取已抓取到的感測器快取，把 ok/ns/critical/warning 數量與條目給 LLM，回一段話。
+    即使只有 OK / No Reading 也會呼叫 AI 分析（點出 ns 數量與感測器類別，供維運判斷）。"""
     if name not in machines:
         raise HTTPException(404, f"機台不存在: {name}")
     with _sensors_lock:
         cached = _sensors_cache.get(name)
     if not cached or cached.get("error"):
         return {"ok": False, "error": "感測器尚未抓取完成，稍後再試"}
-    if not cached.get("critical") and not cached.get("warning"):
-        if cached.get("ns"):
-            return {"ok": True,
-                    "analysis": f"✅ 主要感測器皆正常（無 Critical / Warning），但 {cached['ns']} 筆感測器 No Reading（ns）未回傳數值，建議留意是否有感測器/線路異常。",
-                    "summary": _sensor_summary(cached)}
-        return {"ok": True, "analysis": "✅ 所有感測器皆正常（無 Critical / Warning / No Reading）。", "summary": _sensor_summary(cached)}
 
     summary = _sensor_summary(cached)
     crit_lines = "；".join(cached.get("critical_entries") or [])[-600:]
     warn_lines = "；".join(cached.get("warning_entries") or [])[-600:]
+    ns_lines = "；".join(cached.get("ns_entries") or [])[-600:]
+    detail = []
+    if crit_lines:
+        detail.append(f"Critical：{crit_lines}")
+    if warn_lines:
+        detail.append(f"Warning：{warn_lines}")
+    if ns_lines:
+        detail.append(f"No Reading：{ns_lines}")
+    if not detail:
+        detail.append("無異常條目（所有感測器皆正常回讀數值）")
     sys_prompt = (
         "你是伺服器 BMC/IPMI 感測器的資深維運工程師。使用者會給你單台的感測器摘要。\n"
         "請用繁體中文，回覆**非常簡短**的一段話（2~3 句內，勿超過 3 句），語氣平實：\n"
-        "1) 先一句：整體感測器狀態『正常』還是『有異常警訊』。\n"
-        "2) 若有異常，簡短點出最需注意的感測器（可提名字與數值）與可能方向（散熱/電源/溫度等）；若正常則不需列。\n"
+        "1) 先一句：整體感測器狀態『正常』還是『需留意』。\n"
+        "2) 若有 No Reading（ns）或其他異常，簡短點出數量與最需注意的感測器名稱（例如電源／風扇／溫度感測器沒回讀數值可能代表感測器異常或線路問題）；若全部正常則不需列。\n"
         "3) 不要列點、不要給指令、不要重複列出所有數值。"
     )
-    user_prompt = f"以下為該機台 BMC 感測器摘要：\n{summary}\n異常關鍵行：{crit_lines}{('；'+warn_lines) if warn_lines else ''}\n請給簡短診斷："
-    payload = {
-        "model": OLLAMA_MODEL, "prompt": sys_prompt + "\n\n" + user_prompt + "\nAssistant:",
-        "stream": False, "think": False,
-        "options": {"temperature": 0.3, "num_predict": 320},
-    }
+    user_prompt = f"以下為該機台 BMC 感測器摘要：\n{summary}\n條目：\n{('；'.join(detail) if detail else '')}\n請給簡短診斷："
     try:
-        import requests
-        r = requests.post(OLLAMA_URL + "/api/generate", json=payload, timeout=45)
-        txt = (r.json().get("response") or "").strip()
+        txt = _llm_chat(sys_prompt, user_prompt, temperature=0.3, max_tokens=320, timeout=45)
         if not txt:
-            return {"ok": False, "error": "Ollama 未產生內容"}
+            return {"ok": False, "error": "AI 未產生內容"}
     except Exception as e:
         return {"ok": False, "error": f"AI 診斷失敗: {e}"}
-    return {"ok": True, "summary": summary, "analysis": txt}
+    return {"ok": True, "summary": summary, "analysis": txt,
+            "counts": {"total": cached.get("total", 0), "ok": cached.get("ok", 0),
+                       "critical": cached.get("critical", 0), "warning": cached.get("warning", 0),
+                       "ns": cached.get("ns", 0)}}
 
 
 def _sensor_summary(s):
@@ -1790,9 +1793,28 @@ async def rack_broadcast(websocket: WebSocket):
     await _proxy_ws(websocket, "/ws/broadcast")
 
 
-# ---- AI Copilot（串本機 Ollama）----
-OLLAMA_URL = "http://127.0.0.1:11434"
-OLLAMA_MODEL = "qwen3.8:27b"
+# ---- AI（串本機 vLLM / OpenAI-compatible）----
+VLLM_URL = "http://127.0.0.1:18002"
+VLLM_MODEL = "qwen3-coder"
+
+
+def _llm_chat(system: str, user: str, temperature: float = 0.3,
+              max_tokens: int = 320, timeout: int = 120) -> str:
+    """呼叫本機 vLLM 的 OpenAI-compatible /v1/chat/completions，回傳 assistant 文字。失敗時拋例外。"""
+    import requests
+    payload = {
+        "model": VLLM_MODEL,
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ],
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+    }
+    r = requests.post(VLLM_URL + "/v1/chat/completions", json=payload, timeout=timeout)
+    r.raise_for_status()
+    data = r.json()
+    return (data["choices"][0]["message"]["content"] or "").strip()
 
 
 class CopilotReq(BaseModel):
@@ -1833,26 +1855,17 @@ def copilot_chat(body: CopilotReq):
         f"{scope_note}\n\n"
         "CURRENT FLEET:\n" + _copilot_context(scope)
     )
-    payload = {
-        "model": OLLAMA_MODEL,
-        "prompt": sys + "\n\nUser: " + body.message + "\nAssistant:",
-        "stream": False,
-        "options": {"temperature": 0.4, "num_predict": 600},
-    }
     try:
-        import requests
-        r = requests.post(OLLAMA_URL + "/api/generate", json=payload, timeout=120)
-        r.raise_for_status()
-        text = (r.json().get("response") or "").strip()
+        text = _llm_chat(sys, body.message, temperature=0.4, max_tokens=600)
         if not text:
-            return {"ok": False, "error": "ollama 回傳空白"}
+            return {"ok": False, "error": "AI 回傳空白"}
         return {"ok": True, "reply": text}
     except Exception as e:
-        return {"ok": False, "error": f"ollama 呼叫失敗: {e}"}
+        return {"ok": False, "error": f"AI 呼叫失敗: {e}"}
 
 
 # # ---- 機器 Agent（單機）：LLM 只做「提案」，控制動作一律由前端人工確認後才執行 ----
-# # 關鍵設計：Ollama 的 tool 白名單內「會變更狀態的動作」只有 propose_action，
+# # 關鍵設計：LLM 的 tool 白名單內「會變更狀態的動作」只有 propose_action，
 # # 它不會真的執行，只會回傳一份提案物件；前端顯示確認 UI，使用者按下執行才呼叫
 # # /api/machine/{name}/agent-execute 去跑真正的 reboot / power / aux。
 # # 唯二的唯讀工具 get_status / diagnose 才能由 agent 自行呼叫。
@@ -1956,7 +1969,7 @@ def copilot_chat(body: CopilotReq):
 #
 #
 # def _agent_parse_tool_call(tc: dict):
-#     """把 Ollama tool_call 轉成 (name, args)。回傳 None 表示格式無法解析。"""
+#     """把 LLM tool_call 轉成 (name, args)。回傳 None 表示格式無法解析。"""
 #     fn = tc.get("function") or {}
 #     name = fn.get("name")
 #     if not name:
@@ -2085,7 +2098,7 @@ def copilot_chat(body: CopilotReq):
 #     raise HTTPException(400, f"不支援的動作: {action}")
 #
 #
-# ---- 系統診斷（收集 OS/BMC 問題 → 串 Ollama qwen 自動分析）----
+# ---- 系統診斷（收集 OS/BMC 問題 → 串本機 AI 自動分析）----
 class DiagReq(BaseModel):
     include_bmc: bool = True
 
@@ -2120,8 +2133,8 @@ def _collect_diag(m):
 
 @app.post("/api/machine/{name}/diagnose")
 def machine_diagnose(name: str, body: DiagReq = None):
-    """收集單機診斷資料並串 Ollama 分析，回傳問題摘要與處理建議。
-    流程：收集 dmesg/journalctl/GPU/BMC event log → 呼叫 qwen3.8 分析。"""
+    """收集單機診斷資料並串本機 AI 分析，回傳問題摘要與處理建議。
+    流程：收集 dmesg/journalctl/GPU/BMC event log → 呼叫本機 AI 分析。"""
     if name not in machines:
         raise HTTPException(404, f"機台不存在: {name}")
     m = machines[name]
@@ -2144,28 +2157,20 @@ def machine_diagnose(name: str, body: DiagReq = None):
     )
     user_prompt = "OS/BMC 診斷輸出如下：\n===== OS =====\n" + os_snip + \
                   ("\n===== BMC SEL =====\n" + bmc_snip if bmc_snip else "")
-    payload = {
-        "model": OLLAMA_MODEL,
-        "prompt": sys_prompt + "\n\n" + user_prompt + "\nAssistant:",
-        "stream": False,
-        "think": False,          # qwen3 是 thinking 模型；關閉思考以免 num_predict 全被推理吃光
-        "options": {"temperature": 0.3, "num_predict": 4096},
-    }
     report = None
-    raw_debug = ""
     try:
-        import requests
         for attempt in range(2):
-            r = requests.post(OLLAMA_URL + "/api/generate", json=payload, timeout=300)
-            raw = r.json()
-            raw_debug = raw.get("done_reason") or ""
-            report = (raw.get("response") or "").strip()
+            try:
+                report = _llm_chat(sys_prompt, user_prompt, temperature=0.3,
+                                   max_tokens=4096, timeout=300)
+            except Exception:
+                report = None
             if report:
                 break
             time.sleep(2)
         if not report:
             return {"ok": False,
-                    "error": f"Ollama 未產生分析結果（done_reason={raw_debug or 'unknown'}）。請確認模型 qwen3.8:27b 可用。",
+                    "error": "AI 未產生分析結果。請確認本機 vLLM（qwen3-coder）可用。",
                     "collect": collect}
     except Exception as e:
         return {"ok": False, "error": f"AI 分析失敗: {e}", "collect": collect}
@@ -2248,7 +2253,7 @@ def rack_telemetry(project: str, minutes: int = 60):
 
 @app.get("/api/rack/{project}/telemetry/analyze")
 def rack_telemetry_analyze(project: str, minutes: int = 60):
-    """整櫃（Rack Level）Telemetry AI：依各類型的最新指標摘要叫 Ollama 做簡短分析，
+    """整櫃（Rack Level）Telemetry AI：依各類型的最新指標摘要叫本機 AI 做簡短分析，
     回傳一段繁體中文說明（2~3 句），供 front-end 頂部的 🤖 Telemetry AI 列顯示。
     """
     telemetry_core.init_db()
@@ -2299,17 +2304,10 @@ def rack_telemetry_analyze(project: str, minutes: int = 60):
         "3) 不要列點、不要給指令、不要重複列出所有數值。"
     )
     user_prompt = "以下為整櫃各類型元件的監控摘要：\n" + summary + "\n請給簡短分析："
-    payload = {
-        "model": OLLAMA_MODEL, "prompt": sys_prompt + "\n\n" + user_prompt + "\nAssistant:",
-        "stream": False, "think": False,
-        "options": {"temperature": 0.3, "num_predict": 300},
-    }
     try:
-        import requests
-        r = requests.post(OLLAMA_URL + "/api/generate", json=payload, timeout=120)
-        txt = (r.json().get("response") or "").strip()
+        txt = _llm_chat(sys_prompt, user_prompt, temperature=0.3, max_tokens=300)
         if not txt:
-            return {"ok": False, "error": "Ollama 未產生內容"}
+            return {"ok": False, "error": "AI 未產生內容"}
     except Exception as e:
         return {"ok": False, "error": f"AI 分析失敗: {e}"}
     return {"ok": True, "summary": summary, "analysis": txt, "minutes": int(minutes), "project": proj}
@@ -2337,7 +2335,7 @@ def _tel_latest(r):
 
 @app.get("/api/machine/{name}/telemetry/analyze")
 def machine_telemetry_analyze(name: str, minutes: int = 60):
-    """針對單機 Telemetry 數據，叫 Ollama 做『簡短』AI 分析（幾句話說明是否正常）。
+    """針對單機 Telemetry 數據，叫本機 AI 做『簡短』分析（幾句話說明是否正常）。
     避免大量文字：指令要求精簡，適合放在 telemetry 頁頂部的提示列。"""
     if name not in machines:
         raise HTTPException(404, f"機台不存在: {name}")
@@ -2389,17 +2387,10 @@ def machine_telemetry_analyze(name: str, minutes: int = 60):
         "3) 不要列點、不要給指令、不要重複列出所有數值。"
     )
     user_prompt = "以下為該機台最近數分鐘的監控摘要：\n" + summary + "\n請給簡短分析："
-    payload = {
-        "model": OLLAMA_MODEL, "prompt": sys_prompt + "\n\n" + user_prompt + "\nAssistant:",
-        "stream": False, "think": False,
-        "options": {"temperature": 0.3, "num_predict": 300},
-    }
     try:
-        import requests
-        r = requests.post(OLLAMA_URL + "/api/generate", json=payload, timeout=120)
-        txt = (r.json().get("response") or "").strip()
+        txt = _llm_chat(sys_prompt, user_prompt, temperature=0.3, max_tokens=300)
         if not txt:
-            return {"ok": False, "error": "Ollama 未產生內容"}
+            return {"ok": False, "error": "AI 未產生內容"}
     except Exception as e:
         return {"ok": False, "error": f"AI 分析失敗: {e}"}
     return {"ok": True, "summary": summary, "analysis": txt, "minutes": int(minutes)}

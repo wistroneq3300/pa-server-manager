@@ -13,6 +13,7 @@ regression** against the rest of the library.
 
 | item | path |
 |---|---|
+| GitHub repo | `https://github.com/wistroneq3300/pa-server-manager` (git remote `origin`; commit/push only on operator say) |
 | Working xlsx (EDIT THIS) | `data/REVISED_commands_merged_with_raw.xlsx` (repo root) |
 | Build: xlsx -> tests.json | `python3 scripts/build_testlib_json_xlsx.py data/REVISED_commands_merged_with_raw.xlsx /tmp/tests_new.json` |
 | Prod tests.json | `/srv/pa-manager-prod/data/tests.json` |
