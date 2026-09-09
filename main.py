@@ -923,6 +923,111 @@ def api_testlibrary_export(sheet: str = ""):
                              headers={"Content-Disposition": "attachment; filename=%s" % fname})
 
 
+class TestlibSearchReq(BaseModel):
+    query: str = Field(..., description="以自然語描述要驗的項目，例如：驗 B200 的 NVLink / GPU 溫度 / 硬碟 SMART")
+
+
+@app.post("/api/ai/testlib-search")
+def ai_testlib_search(req: TestlibSearchReq):
+    """測試庫 AI 導航：用人話搜 3112 條測項。
+    先用 LLM 抽關鍵字，再對 test_set/items/sub_function/criteria 做分數比對，回傳最佳測項。"""
+    data = _load_testlib()
+    if data is None:
+        return {"ok": False, "error": "測試庫尚未產生（缺少 tests.json）"}
+    q = (req.query or "").strip()
+    if not q:
+        return {"ok": False, "error": "請輸入想驗證的項目"}
+    kw = q
+    try:
+        txt = _llm_chat(
+            "你是測試工程師。使用者用一句自然語言描述『想驗哪些測試』。請只回 JSON 陣列，例如 [\"NVLink\",\"B200\"]，最多 5 個關鍵字，不要任何其它文字。",
+            q, temperature=0.0, max_tokens=120)
+        m = re.search(r"\[.*?\]", txt, re.S)
+        if m:
+            arr = json.loads(m.group(0))
+            if isinstance(arr, list):
+                kw = " ".join(str(x) for x in arr if str(x).strip())
+    except Exception:
+        pass
+    words = [w.strip().lower() for w in re.split(r"[\s,，、/]+", kw) if len(w.strip()) >= 2]
+    if not words:
+        words = [w.lower() for w in re.split(r"[\s,，、/]+", q) if len(w.strip()) >= 2]
+
+    def score(it, words):
+        hay = " ".join([
+            str(it.get("test_set", "")), str(it.get("items", "")),
+            str(it.get("sub_function", "")), str(it.get("criteria", "")),
+            str(it.get("code", ""))]).lower()
+        s = 0
+        for w in words:
+            if w in hay:
+                item_str = str(it.get("items", "")).lower() + " " + str(it.get("test_set", "")).lower()
+                s += 2 if w in item_str else 1
+        return s
+    hits = []
+    for label, s in data.get("sheets", {}).items():
+        for it in s.get("items", []):
+            sc = score(it, words)
+            if sc:
+                hits.append((sc, label, it.get("code", ""), it.get("test_set", ""),
+                             it.get("items", ""), (it.get("ai_can_execute") or "").upper(),
+                             it.get("risk", "")))
+    hits.sort(key=lambda x: (-x[0], x[2]))
+    top = hits[:8]
+    if not top:
+        return {"ok": False, "query": q, "keywords": words, "error": "找不到相符的測試項目，請換個關鍵字"}
+    return {"ok": True, "query": q, "keywords": words,
+            "hits": [{"score": sc, "sheet": label, "code": code, "test_set": ts,
+                      "items": it_, "auto": auto, "risk": risk} for sc, label, code, ts, it_, auto, risk in top]}
+
+
+class TestlibAdviceReq(BaseModel):
+    code: str = Field(..., description="測試代碼，例如 Wistron-HW-00001-V006")
+    log: str = Field(..., description="失敗 / 異常 log 內容")
+    machine: str = Field("", description="機台名稱（可選）")
+
+
+@app.post("/api/ai/testlib-advice")
+def ai_testlib_advice(req: TestlibAdviceReq):
+    """測試庫 AI 會診：給出測項失敗 log，AI 傍著 procedure/criteria/ai_commands
+    給『可能原因 + 下一步指令 + 一句結論』。"""
+    data = _load_testlib()
+    if data is None:
+        return {"ok": False, "error": "測試庫尚未產生（缺少 tests.json）"}
+    target = None
+    for label, s in data.get("sheets", {}).items():
+        for it in s.get("items", []):
+            if it.get("code") == req.code.strip():
+                target = {**it, "sheet": label}
+                break
+        if target:
+            break
+    if not target:
+        return {"ok": False, "error": f"找不到測試代碼: {req.code}"}
+    proc = str(target.get("procedure", "") or "")[:3000]
+    cri = str(target.get("criteria", "") or "")[:1500]
+    cmds = "\n".join((target.get("ai_commands") or []) if isinstance(target.get("ai_commands"), list)
+                     else [str(target.get("ai_commands") or "")])[:1500]
+    log = (req.log or "").strip()[:4000]
+    sysp = ("你是伺服器硬體測試工程師。使用者給你『測試項目 + 失敗 log』。\n"
+            "請用繁體中文、簡潔條列：\n"
+            "1) 可能原因（2~3 個，依可能性排序）\n"
+            "2) 下一步驗證指令（最多 3 條，直接給 shell 指令）\n"
+            "3) 一句話結論。不要 Markdown 表格。")
+    usr = (f"測試項目：{target.get('code')} / {target.get('test_set')} / {target.get('items')}\n"
+           f"判準(criteria)：{cri}\n"
+           f"程序(procedure 摘要)：{proc[:1200]}\n"
+           f"內建命令：{cmds}\n"
+           f"機台：{req.machine or '未知'}\n"
+           f"---- 失敗 log ----\n{log}\n請分析：")
+    try:
+        txt = _llm_chat(sysp, usr, temperature=0.2, max_tokens=700)
+    except Exception as e:
+        return {"ok": False, "error": f"AI 分析失敗: {e}"}
+    return {"ok": True, "code": req.code.strip(), "sheet": target["sheet"],
+            "analysis": txt, "criteria": cri[:500]}
+
+
 # ---- 單機 / 整櫃 控制與詳細資訊 ----
 # OS 系統資訊「最後一次成功抓取」的快取（關機時回給前端當歷史值）
 _os_info_cache = {}
@@ -1817,6 +1922,70 @@ def _llm_chat(system: str, user: str, temperature: float = 0.3,
     return (data["choices"][0]["message"]["content"] or "").strip()
 
 
+# ---- 視覺 AI（B4）：本機 qwen3-vl-32b @18004 ----
+VISION_URL = os.environ.get("VISION_URL", "http://127.0.0.1:18004")
+VISION_MODEL = os.environ.get("VISION_MODEL", "qwen3-vl-32b")
+
+
+def _vision_ask(question: str, image_b64: str, mime: str = "image/png",
+                temperature: float = 0.2, max_tokens: int = 600) -> str:
+    """把單張 base64 圖片送給本機視覺模型，回覆 assistant 文字。失敗拋例外。"""
+    import requests
+    payload = {
+        "model": VISION_MODEL,
+        "messages": [{"role": "user", "content": [
+            {"type": "text", "text": question},
+            {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{image_b64}"}},
+        ]}],
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+    }
+    r = requests.post(VISION_URL + "/v1/chat/completions", json=payload, timeout=120)
+    r.raise_for_status()
+    data = r.json()
+    return (data["choices"][0]["message"]["content"] or "").strip()
+
+
+class VisionReq(BaseModel):
+    image_b64: str = Field(..., description="圖片 base64（不含 data: 前綴）")
+    mime: str = Field("image/png", description="圖片 MIME，例如 image/png / image/jpeg")
+    question: str = Field("", description="使用者對這張圖的疑問（可留空，AI 自動描述）")
+    machine: str = Field("", description="機台名稱（可選，用於帶 context）")
+
+
+@app.post("/api/ai/vision")
+def ai_vision(req: VisionReq):
+    """視覺 AI 會診：給一張 BMC KVM / noVNC 畫面截圖或機櫃照片，
+    回『畫面描述 / 異常偵測 / 建議下一步』三區。"""
+    img = (req.image_b64 or "").strip()
+    if not img:
+        return {"ok": False, "error": "缺少圖片（image_b64 為空）"}
+    machine = req.machine.strip()
+    ctx = ""
+    if machine and machine in machines:
+        m = machines[machine]
+        h = _health_cache.get(machine, ("unknown", 0))[0]
+        ctx = (f"（機台 {machine}：{m.get('level','system')}，health={h}，"
+               f"OS={'正常' if _status_cache.get(('os',machine)) == 'ok' else '異常'}）")
+    q = (req.question or "").strip()
+    prompt = (
+        "你是伺服器機房工程師。給你一張畫面截圖或照片，請用繁體中文回覆，格式：\n"
+        "1) 畫面描述：簡短講出你看到的內容（開機畫面 / BIOS / OS 桌面 / 錯誤視窗 / 無畫面 / 照片場景）。\n"
+        "2) 異常偵測：若看到 panic、錯誤訊息、警告、黑屏、卡住、硬體異常則點出；一切正常就寫『正常』。\n"
+        "3) 建議下一步：1~2 句具體動作。\n"
+        "不要臆測無法從畫面確認的硬體狀態。"
+    )
+    if q:
+        prompt += f"\n使用者特別想問：{q}"
+    if ctx:
+        prompt += f"\n{ctx}"
+    try:
+        txt = _vision_ask(prompt, img, req.mime or "image/png")
+    except Exception as e:
+        return {"ok": False, "error": f"視覺 AI 分析失敗: {e}"}
+    return {"ok": True, "analysis": txt, "machine": machine, "question": q}
+
+
 class CopilotReq(BaseModel):
     message: str = Field(..., description="使用者輸入")
     project: str = Field("", description="限定回答某個專案（機櫃）的 context；留空表示整個機隊")
@@ -1838,6 +2007,133 @@ def _copilot_context(project: str = ""):
     return "\n".join(lines)
 
 
+# ==================== B5 診斷會動手（唯讀 tool 迴圈） ====================
+# 設計：LLM 只能呼叫唯讀工具（查 fleet / 查 telemetry / 跑白名單內的唯讀診斷指令）。
+# 沒有任何會變更狀態的動作——狀態變更維持「前端人工確認」原則。
+
+# 唯讀診斷指令白名單（用前綴比對，防止注入複雜 shell）
+_DIAG_WHITELIST = (
+    "nvidia-smi", "uptime", "free -h", "df -h", "dmesg -T | tail -", "dmesg | tail -",
+    "ipmitool -I open sel list", "ipmitool -I open sensor",
+    "ps aux --sort=-%cpu | head", "top -bn1 | head", "lscpu", "lsblk",
+    "systemctl status --failed", "systemctl --failed --no-pager",
+    "cat /sys/class/thermal/", "cat /proc/meminfo", "cat /proc/loadavg",
+    "uname -a", "cat /etc/os-release", "lspci | grep -i nvidia",
+)
+_MAX_DIAG_STEPS = 4
+
+
+def _diag_allowed(cmd: str) -> bool:
+    """白名單嚴格比對：只允許『精確等於白名單項』或『白名單項 | tail -N』。
+    避免 nvidia-smi; reboot 這類注入（前綴比對會被騙過去）。"""
+    c = (cmd or "").strip()
+    for p in _DIAG_WHITELIST:
+        if c == p:
+            return True
+        base = p.split(" | tail -")[0]
+        if c.startswith(base + " | tail -") and c[len(base) + len(" | tail -"):].isdigit():
+            return True
+    return False
+
+
+def _run_diag_safe(machine: str, command: str) -> str:
+    """在指定機台 OS 執行白名單內的唯讀指令，回文字結果（限制長度）。"""
+    if machine not in machines:
+        return f"未知機台: {machine}"
+    m = machines[machine]
+    if not (m.get("os_ip") and m.get("os_user") and m.get("os_pass")):
+        return f"{machine} 沒有可用的 OS SSH 連線資訊"
+    if not _diag_allowed(command):
+        return f"指令不在唯讀白名單中，已拒絕: {command}"
+    out, rc, err = ssh_run(m["os_ip"], m.get("os_user", ""), m.get("os_pass", ""),
+                           m.get("os_port") or 22, command, timeout=15)
+    if out is None:
+        return f"(執行逾時/失敗) {err[:200]}"
+    return out[:2500] + (f"\n[rc={rc}]" if rc else "")
+
+
+def _diag_summary(machine: str, minutes: int = 15) -> str:
+    """輕量回傳單機最新 OS/GPU 摘要（給 tool 用），避免直接吃整段 analyse prompt。"""
+    try:
+        telemetry_core.init_db()
+        osd = telemetry_core.get_os_series(machine, minutes)
+        gpu = telemetry_core.get_gpu_series(machine, minutes)
+        os_arr = (osd.get("os") or [])
+        line = []
+        if os_arr:
+            last = os_arr[-1]
+            line.append(f"cpu={last.get('cpu_used')}% load1={last.get('load1')} "
+                        f"mem={last.get('mem_used_pct')}%")
+        gser = gpu.get("series") or []
+        if gser:
+            u = [x for s in gser for x in s.get("util", []) if x is not None]
+            t = [x for s in gser for x in s.get("temp", []) if x is not None]
+            if u: line.append(f"gpu_util_peak={max(u)}%")
+            if t: line.append(f"gpu_temp_peak={max(t)}C")
+        return f"{machine}: " + ("；".join(line) if line else "無 telemetry 資料")
+    except Exception as e:
+        return f"{machine}: 讀取失敗 ({e})"
+
+
+def _llm_chat_tools(system: str, user: str, max_steps: int = _MAX_DIAG_STEPS,
+                    timeout: int = 240) -> str:
+    """帶唯讀工具的多輪迴圈。LLM 要求 tool_call 就執行並回填，直到直接回覆或達上限。"""
+    import requests
+    tools = [
+        {"type": "function", "function": {
+            "name": "fleet_status",
+            "description": "取得目前所有機台的狀態總覽（唯讀）。",
+            "parameters": {"type": "object", "properties": {}, "required": []}}},
+        {"type": "function", "function": {
+            "name": "get_telemetry",
+            "description": "取得單一機台最近 N 分鐘的 OS/GPU 指標摘要（唯讀）。",
+            "parameters": {"type": "object", "properties": {
+                "machine": {"type": "string", "description": "機台名稱"},
+                "minutes": {"type": "integer", "description": "回看分鐘數，預設 15"}},
+                "required": ["machine"]}}},
+        {"type": "function", "function": {
+            "name": "run_diag",
+            "description": "在指定機台 OS 執行『白名單內』的唯讀診斷指令，例如 nvidia-smi、uptime、df -h、ipmitool -I open sel list、dmesg -T | tail -30。",
+            "parameters": {"type": "object", "properties": {
+                "machine": {"type": "string"},
+                "command": {"type": "string", "description": "白名單可允許的唯讀指令"}},
+                "required": ["machine", "command"]}}},
+    ]
+    messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
+    for _ in range(max_steps):
+        r = requests.post(VLLM_URL + "/v1/chat/completions", json={
+            "model": VLLM_MODEL, "messages": messages, "tools": tools,
+            "temperature": 0.3, "max_tokens": 700}, timeout=timeout)
+        r.raise_for_status()
+        msg = r.json()["choices"][0]["message"]
+        tcs = msg.get("tool_calls") or []
+        if not tcs:
+            return (msg.get("content") or "").strip()
+        messages.append(msg)
+        for tc in tcs:
+            fn = tc["function"]
+            name, args = fn["name"], {}
+            try:
+                args = json.loads(fn.get("arguments") or "{}")
+            except Exception:
+                args = {}
+            if name == "fleet_status":
+                result = _copilot_context("")
+            elif name == "get_telemetry":
+                result = _diag_summary(str(args.get("machine", "")), int(args.get("minutes") or 15))
+            elif name == "run_diag":
+                result = _run_diag_safe(str(args.get("machine", "")), str(args.get("command", "")))
+            else:
+                result = f"未知工具: {name}"
+            messages.append({"role": "tool", "tool_call_id": tc.get("id", ""), "content": result[:3000]})
+    # 步數用盡：請 LLM 收尾
+    messages.append({"role": "user", "content": "請根據以上工具結果，直接給最終簡短結論（繁體中文）。"})
+    r = requests.post(VLLM_URL + "/v1/chat/completions", json={
+        "model": VLLM_MODEL, "messages": messages, "temperature": 0.3, "max_tokens": 700}, timeout=timeout)
+    r.raise_for_status()
+    return (r.json()["choices"][0]["message"].get("content") or "").strip()
+
+
 @app.post("/api/copilot")
 def copilot_chat(body: CopilotReq):
     _refresh_status()   # 確保 context 用的是最新掃描/健康資料
@@ -1848,20 +2144,126 @@ def copilot_chat(body: CopilotReq):
         "You are the AI assistant (Copilot) for a Wistron GPU server management system. "
         "Answer the user in Traditional Chinese (zh-TW), concise and practical. "
         "health values: green=OK, amber=warning, red=critical, unknown=offline/unreachable.\n"
-        "CRITICAL RULE: you MUST answer ONLY from the CURRENT FLEET below. "
+        "CRITICAL RULE: you MUST answer ONLY from the CURRENT FLEET context. "
         "Never invent or assume machine names, projects, temperatures, or issues that are "
-        "not listed. If a machine has health=unknown, say it is unreachable/offline. "
-        "If only one machine is green, say exactly that one.\n"
-        f"{scope_note}\n\n"
+        "not listed. If a machine has health=unknown, say it is unreachable/offline.\n"
+        f"{scope_note}\n"
+        "工具規則：當使用者要『診斷 / 檢查某台機』時，可用唯讀工具 get_telemetry 與 run_diag "
+        "實際取得資料再回答；不要憑空猜測。工具只能執行白名單內的唯讀指令，禁止任何會變更狀態的動作。\n\n"
         "CURRENT FLEET:\n" + _copilot_context(scope)
     )
+
+    # 需要診斷工具的情形：使用者要深入檢查單機（診斷/檢查/為什麼/狀態/溫度/磁碟/log）。
+    want_tools = bool(re.search(r"診斷|檢查|為什麼|狀態|溫度|磁碟|log|gpu|硬碟|健康|詳細看|跑一下|看看", body.message))
     try:
-        text = _llm_chat(sys, body.message, temperature=0.4, max_tokens=600)
+        if want_tools:
+            text = _llm_chat_tools(sys, body.message)
+        else:
+            text = _llm_chat(sys, body.message, temperature=0.4, max_tokens=600)
         if not text:
             return {"ok": False, "error": "AI 回傳空白"}
         return {"ok": True, "reply": text}
     except Exception as e:
         return {"ok": False, "error": f"AI 呼叫失敗: {e}"}
+
+
+# ==================== B6 跨機器日誌搜尋（deepseek 262k） ====================
+DEEPSEEK_URL = os.environ.get("DEEPSEEK_URL", "http://127.0.0.1:18011")
+DEEPSEEK_MODEL = os.environ.get("DEEPSEEK_MODEL", "deepseek-v4-flash")
+
+
+class LogSearchReq(BaseModel):
+    query: str = Field(..., description="想找的異常/關鍵字，例如 Xid 13、OOM、SEL、temperature、PCIe error")
+    machines: list = Field([], description="指定機台（空 list = 所有有 OS 的機台）")
+    tail: int = Field(300, description="每台 dmesg 抓幾行（上限 800）")
+
+
+def _gather_machine_logs(name: str, keywords, tail: int) -> str:
+    """對一台機台抓 dmesg tail + SEL，只留含關鍵字的行。回『機台名 + 命中的行』。"""
+    m = machines.get(name)
+    if not m:
+        return f"[{name}] 不存在\n"
+    if not (m.get("os_ip") and m.get("os_user") and m.get("os_pass")):
+        return f"[{name}] 無 OS SSH，跳過\n"
+    kw = "|".join(re.escape(k) for k in (keywords or ["error", "fail"]) if k)
+    pat = re.compile(kw, re.I)
+    keep = []
+    # dmesg
+    out, rc, err = ssh_run(m["os_ip"], m.get("os_user", ""), m.get("os_pass", ""),
+                           m.get("os_port") or 22, f"dmesg -T | tail -{min(tail,800)}", timeout=20)
+    if out:
+        for ln in out.splitlines():
+            if not ln.strip():
+                continue
+            keep.append(ln) if (not pat or pat.search(ln)) else None
+    # SEL（本機 ipmitool，OS 內）
+    sel = _ipmi_local(m, ["sel", "list", "last", "40"], timeout=20)
+    if sel:
+        for ln in sel.splitlines():
+            if not ln.strip():
+                continue
+            keep.append(f"[SEL] {ln}") if (not pat or pat.search(ln)) else None
+    head = f"===== {name} ====="
+    if not keep:
+        return head + "\n(無符合的行)\n"
+    # 去重並限長
+    seen, outl = set(), []
+    for ln in keep:
+        if ln in seen:
+            continue
+        seen.add(ln)
+        outl.append(ln)
+        if len(outl) >= 200:
+            outl.append("...(超過 200 行已截斷)")
+            break
+    return head + "\n" + "\n".join(outl) + "\n"
+
+
+@app.post("/api/ai/logsearch")
+def ai_logsearch(req: LogSearchReq):
+    """跨機器日誌搜尋：先用關鍵字在各機台 dmesg/SEL 撈相關行，再交給
+    deepseek（262k 長上下文）壓成『哪些機台異常 → 常見模式 → 建議』。"""
+    q = (req.query or "").strip()
+    if not q:
+        return {"ok": False, "error": "請輸入要找的關鍵字/異常"}
+    kw = [w for w in re.split(r"[\s,，、/;；]+", q) if len(w) >= 2]
+    if not kw:
+        kw = [q]
+    names = [str(x) for x in (req.machines or [])] or \
+            [k for k in machines if machines[k].get("os_ip")]
+    if not names:
+        return {"ok": False, "error": "沒有可查詢的機台"}
+
+    # 1) 收集（每台併發 8 秒內；串行即可，機台少）
+    blocks = []
+    for n in sorted(names):
+        blocks.append(_gather_machine_logs(n, kw, max(50, min(int(req.tail or 300), 800))))
+    blob = "\n".join(blocks)
+    if len(blob) > 220000:
+        blob = blob[:220000] + "\n...(擷取上限)"
+
+    # 2) deepseek 長上下文分析
+    sysp = ("你是伺服器機房維運分析師。給你跨機台的 dmesg/SEL 日誌（已按關鍵字過濾）。\n"
+            "請用繁體中文簡潔回覆：\n"
+            "1) 結論：整體是否有持續異常（先回答）\n"
+            "2) 各機台重點：只列真正命中異常的機台與模式\n"
+            "3) 最可能的根因與下一步（1~2 行）\n"
+            "沒有證據的不要臆測。")
+    usr = f"關鍵字：{q}\n\n{blob}\n請分析："
+    try:
+        import requests as _req
+        r = _req.post(DEEPSEEK_URL + "/v1/chat/completions", json={
+            "model": DEEPSEEK_MODEL, "messages": [
+                {"role": "system", "content": sysp},
+                {"role": "user", "content": usr}],
+            "temperature": 0.2, "max_tokens": 900}, timeout=180)
+        r.raise_for_status()
+        txt = (r.json()["choices"][0]["message"].get("content") or "").strip()
+    except Exception as e:
+        return {"ok": False, "error": f"分析失敗: {e}"}
+    return {"ok": True, "query": q, "machines": sorted(names),
+            "matched_lines": sum(b.count("\n") for b in blocks),
+            "analysis": txt, "sample": blob[:1500]}
 
 
 # # ---- 機器 Agent（單機）：LLM 只做「提案」，控制動作一律由前端人工確認後才執行 ----
@@ -2205,6 +2607,12 @@ def machine_telemetry(name: str, minutes: int = 60, kind: str = "all"):
         result["gpu"] = telemetry_core.get_gpu_series(name, int(minutes))
     return result
 
+@app.get("/api/ai/gpu-alerts")
+def ai_gpu_alerts():
+    """GPU 熱度快訊：回傳目前 active 的 GPU 高載／高溫 AI 造句告警。"""
+    return {"alerts": telemetry_core.get_active_gpu_alerts()}
+
+
 @app.get("/api/rack/{project}/telemetry")
 def rack_telemetry(project: str, minutes: int = 60):
     """整櫃（Rack Level）Telemetry：依「元件類型」彙總指定專案的機台。
@@ -2346,16 +2754,41 @@ def machine_telemetry_analyze(name: str, minutes: int = 60):
     if not os_arr:
         return {"ok": False, "error": "此範圍尚無 telemetry 資料，無法分析"}
 
-    # ---- 組成簡短指標摘要 ----
+    # ---- 組成簡短指標摘要（含趨勢會診） ----
     def last_key(k):
         vals = [r[k] for r in os_arr if r.get(k) is not None]
         return vals[-1] if vals else None
     def trend_key(k):
         vals = [r[k] for r in os_arr if r.get(k) is not None]
         return _tel_latest(vals)
+    def trend_desc(vals):
+        """把時間序列壓成趨勢描述：第一半平均 vs 後半平均 → 上升/持平/下降。"""
+        if not vals:
+            return ""
+        half = max(1, len(vals) // 2)
+        a = sum(vals[:half]) / half
+        b = sum(vals[half:]) / (len(vals) - half)
+        d = b - a
+        if d > max(5, abs(a) * 0.3):
+            return "上升"
+        if d < -max(5, abs(a) * 0.3):
+            return "下降"
+        return "持平"
 
-    cpu = trend_key("cpu_used"); load1 = trend_key("load1"); load5 = trend_key("load5")
+    cpu_vals = [r.get("cpu_used") for r in os_arr if r.get("cpu_used") is not None]
+    load1_vals = [r.get("load1") for r in os_arr if r.get("load1") is not None]
+    memp_vals = [r.get("mem_used_pct") for r in os_arr if r.get("mem_used_pct") is not None]
+    cpu = _tel_latest(cpu_vals); load1 = _tel_latest(load1_vals)
+    load5 = _tel_latest([r.get("load5") for r in os_arr if r.get("load5") is not None])
     memp = last_key("mem_used_pct"); memu = last_key("mem_used_gb"); memt = last_key("mem_total_gb")
+
+    trend_parts = [
+        f"CPU使用率{trend_desc(cpu_vals)}",
+        f"Load{trend_desc(load1_vals)}",
+    ]
+    if memp_vals:
+        trend_parts.append(f"記憶體{trend_desc(memp_vals)}")
+
     disk = ""
     disks = osd.get("disk") or []
     if disks:
@@ -2364,31 +2797,51 @@ def machine_telemetry_analyze(name: str, minutes: int = 60):
         if pcts:
             mnt = (dm.get("mount") or "").strip() or "儲存空間"
             disk = f"磁碟 {mnt} {pcts[-1]:.0f}%"
-    gpu_line = ""
+
+    # GPU：取所有牌卡的最高 util/溫度與尖峰次數（不只 GPU0）
     gser = gpu.get("series") or []
+    gpu_line = ""
+    gpu_trend_note = ""
     if gser:
-        g0 = gser[0]
-        ut = [u for u in g0.get("util", []) if u is not None]
-        tp = [t for t in g0.get("temp", []) if t is not None]
-        pw = [p for p in g0.get("power", []) if p is not None]
-        gpu_line = (f"GPU[0] util {ut[-1]:.0f}%" if ut else "") + \
-                   (f", temp {tp[-1]:.0f}°C" if tp else "") + \
-                   (f", power {pw[-1]:.0f}W" if pw else "")
+        all_util = [u for s in gser for u in s.get("util", []) if u is not None]
+        all_temp = [t for s in gser for t in s.get("temp", []) if t is not None]
+        all_pow = [p for s in gser for p in s.get("power", []) if p is not None]
+        if all_util:
+            peak = max(all_util)
+            spikes = sum(1 for u in all_util if u >= 80)
+            gpu_line = f"GPU 峰值util {peak:.0f}%（≥80% 出現 {spikes} 次）"
+        if all_temp:
+            gpu_line += (f"，峰值temp {max(all_temp):.0f}°C" if gpu_line else f"GPU 峰值temp {max(all_temp):.0f}°C")
+        if all_pow:
+            gpu_line += (f"，峰值power {max(all_pow):.0f}W" if gpu_line else f"GPU 峰值power {max(all_pow):.0f}W")
+        # GPU 使用率趨勢：每張取半窗比較，多數上升才標
+        up = 0; tot = 0
+        for s in gser:
+            u = [x for x in s.get("util", []) if x is not None]
+            if len(u) >= 4:
+                tot += 1
+                if trend_desc(u) == "上升":
+                    up += 1
+        if tot and up / tot >= 0.6:
+            gpu_trend_note = "，GPU 多數正在上升"
 
     mem_txt = f"{memp:.1f}%" if isinstance(memp, (int, float)) else "未知"
+    memu_txt = f"{memu:.1f}" if isinstance(memu, (int, float)) else "未知"
+    memt_txt = f"{memt:.1f}" if isinstance(memt, (int, float)) else "?"
     summary = (f"CPU使用率最新 {cpu}%，Load 1m={load1} / 5m={load5}；"
-               f"記憶體使用率 {mem_txt}（已用 {memu}/{memt}GB）；{disk or '無磁碟資料'}；{gpu_line or '無GPU資料'}。")
+               f"記憶體使用率 {mem_txt}（已用 {memu_txt}/{memt_txt}GB）；{disk or '無磁碟資料'}；{gpu_line or '無GPU資料'}。"
+               f"趨勢：{'、'.join(trend_parts)}{gpu_trend_note}。")
 
     sys_prompt = (
         "你是伺服器 AI/GPU 機房的資深工程師。使用者會給你一台伺服器『監控指標摘要』。\n"
         "請用繁體中文，回覆**非常簡短**的一段話（2~3 句內，勿超過 3 句），語氣平實：\n"
         "1) 先一句：整體『正常』還是『有異常警訊』。\n"
-        "2) 若有異常，簡短點出最需注意的 1 個指標與可能方向；若正常則不需列。\n"
+        "2) 若有異常或趨勢在上升，簡短點出最需『會診』的 1 個指標、之後 30~60 分鐘該留意什麼；若一切持平正常則不需列。\n"
         "3) 不要列點、不要給指令、不要重複列出所有數值。"
     )
-    user_prompt = "以下為該機台最近數分鐘的監控摘要：\n" + summary + "\n請給簡短分析："
+    user_prompt = "以下為該機台最近數分鐘的監控摘要（含趨勢）：\n" + summary + "\n請給簡短分析："
     try:
-        txt = _llm_chat(sys_prompt, user_prompt, temperature=0.3, max_tokens=300)
+        txt = _llm_chat(sys_prompt, user_prompt, temperature=0.3, max_tokens=320)
         if not txt:
             return {"ok": False, "error": "AI 未產生內容"}
     except Exception as e:

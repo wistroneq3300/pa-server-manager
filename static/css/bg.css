@@ -10,26 +10,22 @@
 :root:not([data-theme="dark"]) body {
   background-color: #eef1f4;
   background-image:
-    radial-gradient(1200px 620px at 88% -12%, var(--accent-blue-bg) 0%, transparent 58%),
-    radial-gradient(1000px 520px at -8% 0%, var(--green-bg) 0%, transparent 52%),
     linear-gradient(180deg, rgba(247,249,251,.62) 0%, rgba(247,249,251,.66) 100%),
     url("/static/img/ui-bg.jpg");
-  background-size: auto, auto, auto, cover;
-  background-position: 0 0, 0 0, 0 0, center;
-  background-repeat: no-repeat, no-repeat, no-repeat, no-repeat;
-  background-attachment: fixed, fixed, fixed, fixed;
+  background-size: auto, cover;
+  background-position: 0 0, center;
+  background-repeat: no-repeat, no-repeat;
+  background-attachment: fixed, fixed;
 }
 
 /* 黑主題 */
 :root[data-theme="dark"] body {
   background-color: #0b1119;
   background-image:
-    radial-gradient(1200px 620px at 88% -12%, var(--accent-blue-bg) 0%, transparent 58%),
-    radial-gradient(1000px 520px at -8% 0%, var(--green-bg) 0%, transparent 52%),
     linear-gradient(180deg, rgba(11,17,25,.72) 0%, rgba(11,17,25,.78) 100%),
     url("/static/img/ui-bg.jpg");
-  background-size: auto, auto, auto, cover;
-  background-position: 0 0, 0 0, 0 0, center;
-  background-repeat: no-repeat, no-repeat, no-repeat, no-repeat;
-  background-attachment: fixed, fixed, fixed, fixed;
+  background-size: auto, cover;
+  background-position: 0 0, center;
+  background-repeat: no-repeat, no-repeat;
+  background-attachment: fixed, fixed;
 }

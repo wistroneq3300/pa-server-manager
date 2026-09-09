@@ -37,6 +37,13 @@ async function api(path, options) {
   if (!r.ok) { const e = new Error(data.detail || "請求失敗"); e.data = data; throw e; }
   return data;
 }
+// 帶 timeout 的 api：AI 分析類請求避免因後端 LLM 忙碌而無限期卡住 spinner
+async function apiWithTimeout(path, timeoutMs) {
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(), timeoutMs);
+  try { return await api(path, { signal: ctl.signal }); }
+  finally { clearTimeout(t); }
+}
 async function loadMachines(assignMissingU) {
   const data = await api("/api/machines");
   machines = data.machines || [];
@@ -156,7 +163,6 @@ function pageDashboard() {
           <span class="dash-proj-count">${n} 台</span>
         </div>
         ${p.desc ? `<div class="dash-proj-desc">${esc(p.desc)}</div>` : ""}
-        <div class="dash-proj-bar"><div class="dash-proj-bar-in" style="width:${members.length? o/members.length*100:0}%"></div></div>
         <div class="dash-proj-stats">
           <span class="mini">🖥 L10 ${members.filter(m=>m.level!=="rack").length}</span>
           <span class="mini">🗄 L11 ${members.filter(m=>m.level==="rack").length}</span>
@@ -2286,11 +2292,11 @@ async function telAnalyze(name, minutes) {
   box.dataset.k = key;
   let d;
   try {
-    d = await api(`/api/machine/${encodeURIComponent(name)}/telemetry/analyze?minutes=${minutes}`);
+    d = await apiWithTimeout(`/api/machine/${encodeURIComponent(name)}/telemetry/analyze?minutes=${minutes}`, 12000);
   } catch (e) {
-    box.innerHTML = ""; return;
+    box.innerHTML = `<span class="hint">🤖 趨勢分析稍後再試（AI 忙碌）</span>`; return;
   }
-  if (d.error) { box.innerHTML = ""; return; }
+  if (d.error) { box.innerHTML = `<span class="hint">🤖 ${esc(d.error)}</span>`; return; }
   const html = `${esc(d.analysis || d.summary || "")}`;
   aiTelCache[key] = html;
   if (box) box.innerHTML = html;
@@ -2482,7 +2488,7 @@ function machineSensorsHtml(d, base, name) {
     <ul class="alerts" style="margin-top:10px">
       ${critRow || warnRow || nsRow || `<li class="no-alert">✔ 無異常感測器（無 Critical / Warning / No Reading）</li>`}
     </ul>
-    <div class="tel-ai sensor-ai" id="sensor-ai">${sensorAiResult[name] != null ? sensorAiResult[name] : "🤖 正在分析感測器狀況…"}</div>
+    <div class="tel-ai sensor-ai" id="sensor-ai">${sensorAiResult[name] ?? (sensorAiDone.has(name) ? "🤖 Sensor AI 已就緒（暫無分析）" : "🤖 正在分析感測器狀況…")}</div>
     ${d.refreshing ? `<span class="hint">（快取已過期，背景重新抓取中…）</span>` : ""}
     ${sdrBox}`;
 }
@@ -2510,12 +2516,15 @@ async function sensorAnalyze(name) {
   show("🤖 正在分析感測器狀況…");
   try {
     for (let attempt = 0; attempt < 30; attempt++) {
-      if (_activeMachine !== name || state.view !== "machine") return;
+      if (_activeMachine !== name || state.view !== "machine") {
+        if (sensorAiResult[name] == null) sensorAiResult[name] = "🤖 Sensor AI 已就緒";
+        return;
+      }
       let d;
       try {
-        d = await api(`/api/machine/${encodeURIComponent(name)}/sensors/analyze`);
+        d = await apiWithTimeout(`/api/machine/${encodeURIComponent(name)}/sensors/analyze`, 12000);
       } catch (e) {
-        d = { error: "連線失敗" };
+        d = { error: e.name === "AbortError" ? "逾時" : "連線失敗" };
       }
       if (!d || d.error) {
         show(`🤖 感測器資料抓取中，AI 待命…（已等待 ${attempt + 1} 輪）`);
@@ -4440,6 +4449,41 @@ function initBcDrag() {
     requestAnimationFrame(() => bcFitAll());
   }
 }
+/* ---------- GPU 熱度快訊（AI 主動告警） ---------- */
+let _gpuAlerts = [];
+async function gpuAlertPoll() {
+  try {
+    const r = await fetch("/api/ai/gpu-alerts");
+    const d = await r.json();
+    _gpuAlerts = Array.isArray(d.alerts) ? d.alerts : [];
+  } catch (e) {
+    _gpuAlerts = [];
+  }
+  paintGpuAlerts();
+}
+function paintGpuAlerts() {
+  const ticker = $("gpu-alert-ticker");
+  if (ticker) {
+    ticker.innerHTML = _gpuAlerts.slice(0, 6).map(a =>
+      `<span class="gpu-alert-badge" title="${esc(a.text || "")}">🔥 ${esc(a.machine)} GPU${a.gpu} ${a.kind === "high_temp" ? "高溫" : "高載"}</span>`
+    ).join("");
+  }
+  const active = new Set(_gpuAlerts.map(a => a.machine));
+  document.querySelectorAll("tr").forEach(tr => {
+    const link = tr.querySelector("a.mach-link, a.mach-linkbox");
+    if (!link) return;
+    const name = (link.textContent || "").replace(/\s+/g, "");
+    tr.classList.toggle("has-gpu-alert", active.has(name));
+    const chip = tr.querySelector(".gpu-alert-chip");
+    const hasChip = !!chip;
+    if (active.has(name) && !hasChip) {
+      link.insertAdjacentHTML("afterend", `<span class="gpu-alert-chip" title="GPU 高載/高溫快訊">🔥</span>`);
+    } else if (!active.has(name) && hasChip) {
+      chip.remove();
+    }
+  });
+}
+
 /* ---------- 啟動 ---------- */
 function buildNav() {
   const nav = $("nav");
@@ -4466,4 +4510,6 @@ document.addEventListener("DOMContentLoaded", async () => {
   } catch (e) {
     $("content").innerHTML = `<div class="empty">後端無法連線（${esc(e.message)}）<br>請確認有啟動 python 後端程式。</div>`;
   }
+  gpuAlertPoll();
+  setInterval(gpuAlertPoll, 20000);
 });

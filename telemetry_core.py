@@ -58,6 +58,10 @@ def init_db():
             CREATE INDEX IF NOT EXISTS idx_os ON os_metrics(machine, ts);
             CREATE INDEX IF NOT EXISTS idx_net ON net_metrics(machine, iface, ts);
             CREATE INDEX IF NOT EXISTS idx_disk ON disk_metrics(machine, mount, ts);
+            CREATE TABLE IF NOT EXISTS gpu_alerts(
+                id INTEGER PRIMARY KEY AUTOINCREMENT, ts REAL, machine TEXT, gpu INTEGER,
+                kind TEXT, status TEXT, value REAL, threshold REAL, text TEXT);
+            CREATE INDEX IF NOT EXISTS idx_gpu_alerts ON gpu_alerts(machine, status);
         """)
         # Migration：舊庫無 mem_used_pct 欄位時補上
         cols = [r[1] for r in c.execute("PRAGMA table_info(os_metrics)").fetchall()]
@@ -318,6 +322,99 @@ def store_gpu(ts, name, rows):
                       [(ts, name, r["gpu"], r.get("name"), r.get("util"), r.get("mem_total"),
                         r.get("mem_used"), r.get("temp"), r.get("power"), r.get("power_limit")) for r in rows])
     return len(rows)
+
+
+# ==================== GPU 熱度快訊（AI 主動告警） ====================
+_ALERT_LLM_URL = os.environ.get("ALERT_LLM_URL", "http://127.0.0.1:18002")
+_ALERT_LLM_MODEL = os.environ.get("ALERT_LLM_MODEL", "qwen3-coder")
+GPU_UTIL_ALERT = int(os.environ.get("GPU_UTIL_ALERT", "50"))   # 全機 GPU 平均 util(%) 高載門檻
+GPU_TEMP_ALERT = int(os.environ.get("GPU_TEMP_ALERT", "88"))   # temp °C 警報門檻
+GPU_ALERT_WINDOW = int(os.environ.get("GPU_ALERT_WINDOW", "2"))  # 判斷用的分鐘窗（取窗內最新 ~N 筆）
+
+
+def _alert_llm(machine, gpu, kind, value, threshold):
+    sysp = "你是機房維運助理。只回傳一句繁體中文維運建議，40 字以內，不要任何前言、編號或 Markdown。"
+    glabel = "全機 GPU" if gpu == "all" else f"GPU{gpu}"
+    klabel = {"high_util": "高載", "high_temp": "溫度過高"}.get(kind, kind)
+    usr = (f"{machine} 的 {glabel} 觸發 {klabel}（現值 {value:.0f}、門檻 {threshold}）。"
+           f"直接回一句建議。")
+    try:
+        import requests
+        r = requests.post(_ALERT_LLM_URL + "/v1/chat/completions", json={
+            "model": _ALERT_LLM_MODEL,
+            "messages": [{"role": "system", "content": sysp}, {"role": "user", "content": usr}],
+            "temperature": 0.2, "max_tokens": 80,
+        }, timeout=30)
+        r.raise_for_status()
+        t = (r.json()["choices"][0]["message"]["content"] or "").strip()
+        if t:
+            return t[:120]
+    except Exception as e:
+        print("GPU alert LLM 失敗", e)
+    return f"GPU{gpu} {kind} 偏高（{value:.0f} over {threshold}），請觀察是否有密集推理或散熱異常。"
+
+
+def evaluate_gpu_alerts(machine):
+    """掃描最近 GPU 資料，偵測全機高載 / 單顆高溫，並維持 gpu_alerts 的 active/clear 狀態。
+    高載以「全機所有 GPU 的平均 util 達到門檻」判斷（vLLM 連續批處理下單顆 util 是 0↔100
+    間歇性，逐顆平均易誤判）；高溫則逐顆以最新溫度判斷。狀態轉換才呼叫 AI（避免每輪重複）。"""
+    try:
+        with _conn() as c:
+            since = time.time() - GPU_ALERT_WINDOW * 60
+            rows = c.execute(
+                "SELECT gpu, util, temp FROM gpu_metrics WHERE machine=? AND ts>=? "
+                "AND util IS NOT NULL ORDER BY ts", (machine, since)).fetchall()
+            recent = {}
+            for r in rows:
+                recent.setdefault(r["gpu"], []).append(r)
+            # 高載：全機平均 util（窗內全部樣本）
+            all_util = [r["util"] or 0 for r in rows]
+            agg_util = (sum(all_util) / len(all_util)) if all_util else 0.0
+            kinds_all = []
+            # 高溫：逐顆最新值
+            for gpu, rs in recent.items():
+                temp_now = max((x["temp"] or 0) for x in rs[-4:])
+                if temp_now >= GPU_TEMP_ALERT:
+                    kinds_all.append(("high_temp", gpu, temp_now, GPU_TEMP_ALERT))
+            if agg_util >= GPU_UTIL_ALERT:
+                kinds_all.insert(0, ("high_util", None, agg_util, GPU_UTIL_ALERT))
+            active = {(r["gpu"] if r["kind"] == "high_temp" else -1, r["kind"]): r for r in c.execute(
+                "SELECT * FROM gpu_alerts WHERE machine=? AND status='active'", (machine,)).fetchall()}
+            active_keys = set(active)
+            ats = time.time()
+            now_keys = set()
+            for kind, gpu, val, thr in kinds_all:
+                key = (gpu if kind == "high_temp" else -1, kind)
+                now_keys.add(key)
+                if key in active_keys:
+                    continue
+                gname = gpu if gpu is not None else "all"
+                text = _alert_llm(machine, gname, kind, val, thr)
+                c.execute(
+                    "INSERT INTO gpu_alerts(ts,machine,gpu,kind,status,value,threshold,text) "
+                    "VALUES(?,?,?,?,?,?,?,?)",
+                    (ats, machine, -1 if gpu is None else gpu, kind, "active", val, thr, text))
+            for key, row in active.items():
+                if key not in now_keys:
+                    c.execute("UPDATE gpu_alerts SET status='clear', ts=? WHERE id=?",
+                              (ats, row["id"]))
+            stale = time.time() - GPU_ALERT_WINDOW * 4 * 60
+            c.execute("UPDATE gpu_alerts SET status='clear', ts=? WHERE machine=? AND status='active' AND ts<?",
+                      (ats, machine, stale))
+    except Exception as e:
+        print("GPU alert 評估錯誤", machine, e)
+
+
+def get_active_gpu_alerts():
+    try:
+        with _conn() as c:
+            rows = c.execute(
+                "SELECT ts,machine,gpu,kind,status,value,threshold,text FROM gpu_alerts "
+                "WHERE status='active' ORDER BY ts DESC").fetchall()
+        return [dict(r) for r in rows]
+    except Exception as e:
+        print("GPU alert 讀取錯誤", e)
+        return []
 
 
 # ---- OS 收集（CPU/DIMM/SSD/NIC）----
@@ -584,6 +681,8 @@ def _job(item):
         try:
             ts, rows = collect_gpu(m)
             store_gpu(ts, name, rows)
+            if rows:
+                evaluate_gpu_alerts(name)
         except Exception as e:
             print("telemetry GPU 錯誤", name, e)
         try:

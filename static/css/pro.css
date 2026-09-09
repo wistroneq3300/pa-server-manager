@@ -45,47 +45,12 @@
   box-shadow: inset 2px 0 0 var(--w-green);
 }
 
-/* ---------- 5) KPI / stat 卡：顶部「流动扫描光束」（3.2s 循环，像 radar 扫过） ---------- */
-@keyframes statBeam {
-  from { background-position: 200% 0; }
-  to   { background-position: -200% 0; }
-}
 @keyframes statSideBeam {
   from { background-position: 0 220%, 0 0; }
   to   { background-position: 0 -220%, 0 0; }
 }
-.stat::before {
-  content: "";
-  position: absolute;
-  top: 0; left: 0; right: 0;
-  height: 2px;
-  background: linear-gradient(90deg, transparent 0%,
-             var(--w-green-bright) 25%,
-             var(--accent-blue) 50%,
-             var(--w-green-bright) 75%, transparent 100%);
-  background-size: 220% 100%;
-  background-repeat: no-repeat;
-  animation: statBeam 3.4s linear infinite;
-  opacity: .75;
-  pointer-events: none;
-}
-/* 卡片之间错开相位，形成「一排卡依次流光」的视觉 */
-.dash-kpis .stat:nth-child(1){ animation-delay: 0s }
-.dash-kpis .stat:nth-child(1)::before{ animation-delay: 0s }
-.dash-kpis .stat:nth-child(2)::before{ animation-delay: -.45s }
-.dash-kpis .stat:nth-child(3)::before{ animation-delay: -.90s }
-.dash-kpis .stat:nth-child(4)::before{ animation-delay: -1.35s }
-.dash-kpis .stat:nth-child(5)::before{ animation-delay: -1.80s }
-.dash-kpis .stat:nth-child(6)::before{ animation-delay: -2.25s }
-.dash-kpis .stat:nth-child(7)::before{ animation-delay: -2.70s }
-.dash-kpis .stat:nth-child(8)::before{ animation-delay: -3.15s }
-/* 卡片悬停：光带更亮更快（0.9s 循环） */
-.stat:hover::before {
-  animation-duration: 1.1s !important;
-  opacity: 1;
-}
-/* 左边竖条：光束沿条「上下扫描」，底漆保留 logo 绿 */
 .stat::after {
+
   background-image:
     linear-gradient(180deg, transparent 0%, var(--w-green-bright) 30%, var(--accent-blue) 50%, var(--w-green-bright) 70%, transparent 100%),
     var(--logo-grad);
@@ -99,9 +64,6 @@
 .dash-kpis .stat:nth-child(5)::after { animation-delay: -1.80s }
 .dash-kpis .stat:nth-child(6)::after { animation-delay: -2.25s }
 .stat:hover::after { animation-duration: 1.1s !important; }
-:root[data-theme="dark"] .stat::before {
-  opacity: 1;
-}
 
 /* 项目卡逐张浮入（首页 dash-proj-grid） */
 @keyframes projCardIn {
@@ -138,7 +100,7 @@
 /* 减少动画干扰：系统偏好「减少动态效果」时自动关掉 */
 @media (prefers-reduced-motion: reduce) {
   .dot-g, .badge.green .dot, .lamp.on, .dot-sm.ok { animation: none; }
-  #content, .modal-backdrop, .stat::before, .stat::after, .dash-proj-grid > .dash-proj { animation: none; }
+  #content, .modal-backdrop, .stat::after, .dash-proj-grid > .dash-proj { animation: none; }
 }
 
 /* ---------- 7) 细滚条 · 6px · 跟随主题 ---------- */
@@ -228,21 +190,6 @@
 /* ---------- 8.5) 玻璃面板（SUT Health / Projects 等）：顶部 + 左侧扫描光，与 KPI 卡同节奏 ---------- */
 .glass-panel {
   position: relative;
-}
-.glass-panel::before {
-  content: "";
-  position: absolute;
-  top: 0; left: 0; right: 0;
-  height: 2px;
-  background: linear-gradient(90deg, transparent 0%,
-             var(--w-green-bright) 25%,
-             var(--accent-blue) 50%,
-             var(--w-green-bright) 75%, transparent 100%);
-  background-size: 220% 100%;
-  background-repeat: no-repeat;
-  animation: statBeam 3.4s linear infinite;
-  opacity: .85;
-  pointer-events: none;
 }
 .glass-panel::after {
   content: "";
