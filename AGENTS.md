@@ -483,3 +483,11 @@ original workbook untouched.
   (179GB each). vLLM spawns VLLM::Worker_TP0..3 on GPU0-3 + VLLM::EngineCore on GPU4-6; all 7
   hold ~160-166GB VRAM. GPU util is 0% when idle and jumps to ~98-100% ONLY during inference
   (continuous batching) - this is normal, NOT a telemetry bug. GPU4-6 (EngineCore) often stay 0%.
+
+
+## sutctl - SUT 控制工具（agent 用）
+- 位置：/root/sheng/sutctl/sutctl（wrapper）／sutctl.py
+- 用法：sutctl list（全部機器＋通連表格）、sutctl status <name|ip>、sutctl run <name|ip> "<cmd>"（OS SSH）、sutctl bmc <name|ip> "<cmd>"（BMC SSH）
+- 資料來源：/srv/pa-manager-prod/data/data.json（同 pa-manager 的 machines 清單）。
+- 密碼執行時從 data.json 讀入，不印明文。
+- 使用者 workflow：問「有幾台可以控制？」→ sutctl list 回表格；說「控 OOO 跑 XXX」→ 用 sutctl run/sutctl bmc 執行。
